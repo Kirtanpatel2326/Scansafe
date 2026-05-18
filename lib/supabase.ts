@@ -1,7 +1,11 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 
-// Client-side Supabase (for components)
-export const supabase = createClientComponentClient()
+import { createBrowserClient } from '@supabase/ssr'
+
+// Create Supabase client
+export const supabase = createBrowserClient(
+process.env.NEXT_PUBLIC_SUPABASE_URL!,
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 // Sign in with Google
 export async function signInWithGoogle() {
@@ -9,9 +13,13 @@ const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
     redirectTo: `${window.location.origin}/auth/callback`
+
     }
 })
-if (error) console.error('Login error:', error)
+
+if (error) {
+    console.error('Login error:', error)
+}
 }
 
 // Sign out
@@ -22,6 +30,10 @@ window.location.href = '/'
 
 // Get current user
 export async function getUser() {
-const { data: { user } } = await supabase.auth.getUser()
+const {
+    data: { user }
+} = await supabase.auth.getUser()
+
 return user
 }
+```
