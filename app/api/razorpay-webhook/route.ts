@@ -37,21 +37,39 @@ export async function POST(request: Request) {
       const notes = entity?.notes
       const userId = notes?.userId
       const paymentId = entity?.id || 'manual_payment'
+      const planType = notes?.planType || 'lifetime'
 
       if (!userId) {
         console.error('No userId found in Razorpay payment notes')
         return NextResponse.json({ error: 'No userId in notes' }, { status: 400 })
       }
 
-      console.log(`Upgrading user ${userId} to Pro plan (Payment: ${paymentId})...`)
+      // Calculate expiration date
+      let expiresAt: string | null = null
+      const now = new Date()
+      if (planType === 'day') {
+        expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      } else if (planType === 'week') {
+        expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      } else if (planType === 'month') {
+        expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      } else if (planType === 'year') {
+        expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString()
+      } else if (planType === 'lifetime') {
+        expiresAt = null
+      }
+
+      console.log(`Upgrading user ${userId} to Pro plan: type=${planType}, expires=${expiresAt} (Payment: ${paymentId})...`)
 
       const supabaseAdmin = createAdminClient()
 
-      // Upgrade profile to Pro
+      // Upgrade profile to Pro with subscription fields
       const { data, error } = await supabaseAdmin
         .from('profiles')
         .update({
           plan: 'pro',
+          plan_type: planType,
+          plan_expires_at: expiresAt,
           razorpay_subscription_id: paymentId
         })
         .eq('id', userId)

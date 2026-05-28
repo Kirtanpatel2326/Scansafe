@@ -84,6 +84,31 @@ export async function POST(request: Request) {
       profile = newProfile
     }
 
+    // Check plan expiration on-the-fly and sync to DB
+    const now = new Date()
+    const hasExpired = profile.plan === 'pro' && profile.plan_expires_at && new Date(profile.plan_expires_at) <= now
+
+    if (hasExpired) {
+      console.log(`User ${user.id} subscription expired on ${profile.plan_expires_at}. Reverting to free plan.`)
+      
+      const { error: revertError } = await supabase
+        .from('profiles')
+        .update({
+          plan: 'free',
+          plan_type: 'free',
+          plan_expires_at: null
+        })
+        .eq('id', user.id)
+
+      if (revertError) {
+        console.error('Failed to auto-revert expired profile plan to free:', revertError)
+      } else {
+        profile.plan = 'free'
+        profile.plan_type = 'free'
+        profile.plan_expires_at = null
+      }
+    }
+
     // Check scan limits for free users
     const todayStr = new Date().toISOString().split('T')[0]
     if (profile.plan !== 'pro') {
