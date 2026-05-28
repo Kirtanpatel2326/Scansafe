@@ -962,11 +962,6 @@ Do NOT wrap the response in markdown code blocks. Return ONLY raw JSON.
     return JSON.parse(cleanedText.trim()) as IngredientAnalysis
   } catch (error: any) {
     console.error('Error analyzing image with Claude:', error.response?.data || error.message)
-    const errMessage = JSON.stringify(error.response?.data || error.message || '').toLowerCase()
-    if (errMessage.includes('credit') || errMessage.includes('quota') || errMessage.includes('balance')) {
-      throw new Error('PRODUCT_SELECTION_REQUIRED')
-    }
-    
     const mock = getDeterministicMockProduct(base64Image, searchName)
     return applyPreferences(mock, userPreferences)
   }
