@@ -568,14 +568,122 @@ function getDeterministicMockProduct(base64Image: string, searchName: string = '
     if (match) return match
   }
 
-  // Fallback hash selection
-  let hash = 0
-  for (let i = 0; i < Math.min(base64Image.length, 2000); i++) {
-    hash = (hash << 5) - hash + base64Image.charCodeAt(i)
-    hash |= 0
+  // Fallback dynamic generation based on filename / searchName
+  return generateDynamicMockProduct(searchName)
+}
+
+function generateDynamicMockProduct(searchName: string): IngredientAnalysis {
+  let cleanName = searchName || 'Food Product';
+  // Strip extension
+  cleanName = cleanName.replace(/\.[^/.]+$/, "");
+  // Replace underscores/dashes with spaces
+  cleanName = cleanName.replace(/[_-]/g, " ");
+  // Capitalize words
+  cleanName = cleanName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  // Guess category and ingredients
+  const lower = cleanName.toLowerCase();
+  let ingredients = [
+    { name: 'Water', status: 'safe', reason: 'Essential hydration.' },
+    { name: 'Natural Flavoring', status: 'safe', reason: 'Plant-derived organic flavor extract.' }
+  ];
+  let healthScore = 80;
+  let safetyLevel: 'safe' | 'moderate' | 'danger' = 'safe';
+  let upfScore = 1;
+  let description = `A standard formulation of ${cleanName}. Composed of clean ingredients with minimal processed additives.`;
+  let additives: any[] = [];
+  let allergens: string[] = [];
+
+  if (lower.includes('juice') || lower.includes('drink') || lower.includes('beverage') || lower.includes('water')) {
+    ingredients = [
+      { name: 'Water', status: 'safe', reason: 'Essential hydration.' },
+      { name: 'Fruit Juice Concentrate', status: 'safe', reason: 'Natural sweetness and vitamins.' },
+      { name: 'Citric Acid', status: 'safe', reason: 'Natural acidifier and preservative.' },
+      { name: 'Vitamin C (Ascorbic Acid)', status: 'safe', reason: 'Essential nutrient and antioxidant.' }
+    ];
+    healthScore = 85;
+    upfScore = 2;
+  } else if (lower.includes('biscuit') || lower.includes('cookie') || lower.includes('cake') || lower.includes('bread') || lower.includes('flour')) {
+    ingredients = [
+      { name: 'Whole Wheat Flour', status: 'safe', reason: 'Complex carbohydrates and dietary fiber.' },
+      { name: 'Water', status: 'safe', reason: 'Pure hydration.' },
+      { name: 'Cane Sugar', status: 'caution', reason: 'Added sweetener. Consume in moderation.' },
+      { name: 'Vegetable Oil', status: 'caution', reason: 'Saturated fat source.' },
+      { name: 'Yeast', status: 'safe', reason: 'Natural raising agent.' }
+    ];
+    healthScore = 65;
+    safetyLevel = 'moderate';
+    upfScore = 3;
+    allergens = ['Gluten'];
+  } else if (lower.includes('noodle') || lower.includes('pasta') || lower.includes('ramen')) {
+    ingredients = [
+      { name: 'Wheat Flour', status: 'safe', reason: 'Energy source.' },
+      { name: 'Water', status: 'safe', reason: 'Pure hydration.' },
+      { name: 'Salt', status: 'caution', reason: 'Sodium content. Limit daily intake.' },
+      { name: 'Spices & Condiments', status: 'safe', reason: 'Natural seasonings.' }
+    ];
+    healthScore = 70;
+    safetyLevel = 'moderate';
+    upfScore = 3;
+    allergens = ['Gluten'];
+  } else if (lower.includes('milk') || lower.includes('cheese') || lower.includes('yogurt') || lower.includes('butter') || lower.includes('dairy')) {
+    ingredients = [
+      { name: 'Fresh Milk', status: 'safe', reason: 'Rich in calcium and natural proteins.' },
+      { name: 'Active Bacterial Cultures', status: 'safe', reason: 'Supports gut microbiome.' }
+    ];
+    healthScore = 90;
+    upfScore = 1;
+    allergens = ['Dairy'];
   }
-  const index = Math.abs(hash) % MOCK_PRODUCTS.length
-  return MOCK_PRODUCTS[index]
+
+  return {
+    product_name: cleanName,
+    brand: 'ScanSafe Choice',
+    health_score: healthScore,
+    safety_level: safetyLevel,
+    description: description,
+    ingredients: ingredients as any,
+    additives: additives,
+    allergens: allergens,
+    nutrition_facts: {
+      serving_size: '100g',
+      calories: healthScore > 75 ? 120 : 350,
+      calories_100g: healthScore > 75 ? 120 : 350,
+      fat: '2g',
+      fat_100g: '2g',
+      saturated_fat: '0.5g',
+      saturated_fat_100g: '0.5g',
+      trans_fat: '0g',
+      trans_fat_100g: '0g',
+      cholesterol: '0mg',
+      cholesterol_100g: '0mg',
+      sodium: '150mg',
+      sodium_100g: '150mg',
+      carbs: '22g',
+      carbs_100g: '22g',
+      fiber: '3g',
+      fiber_100g: '3g',
+      sugar: '5g',
+      sugar_100g: '5g',
+      protein: '4g',
+      protein_100g: '4g'
+    },
+    recommendations: [],
+    alternatives_detailed: [],
+    upf_score: upfScore as any,
+    microplastics_risk: 'low',
+    microplastics_reason: 'Simple packaging yields low microplastics exposure.',
+    sustainability_grade: 'A',
+    sustainability_reason: 'Produced using locally sourced ingredients, minimizing carbon mileage.',
+    glycemic_index_estimate: healthScore > 75 ? 'low' : 'medium',
+    glycemic_reason: 'Balanced macromolecule breakdown prevents insulin spikes.',
+    health_risk_breakdown: {
+      heart: 'low',
+      diabetes: 'low',
+      inflammation: 'low',
+      gut_health: 'low'
+    }
+  };
 }
 
 export function applyPreferences(product: IngredientAnalysis, userPreferences: string[]): IngredientAnalysis {
