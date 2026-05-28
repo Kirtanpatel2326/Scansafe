@@ -1,16 +1,10 @@
 
 import { createBrowserClient } from '@supabase/ssr'
 
-let supabaseClient;
-try {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  supabaseClient = createBrowserClient(url || '', key || '');
-} catch (e) {
-  console.error('Failed to create Supabase client:', e);
-}
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-export const supabase = supabaseClient;
+export const supabase = createBrowserClient(url, key)
 
 // Sign in with Google
 export async function signInWithGoogle() {
