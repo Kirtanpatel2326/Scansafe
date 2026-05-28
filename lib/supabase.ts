@@ -10,10 +10,16 @@ process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 // Sign in with Google
 export async function signInWithGoogle() {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://scansafe-o31d.vercel.app'
+  const redirectTo = `${origin}/auth/callback`
+  
+  if (typeof window !== 'undefined') {
+    alert(`Debug Info:\nOrigin: ${origin}\nRedirect Target: ${redirectTo}`);
+  }
+
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${origin}/auth/callback`
+      redirectTo: redirectTo
     }
   })
 
