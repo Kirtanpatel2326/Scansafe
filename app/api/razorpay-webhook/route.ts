@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       const notes = entity?.notes
       const userId = notes?.userId
       const paymentId = entity?.id || 'manual_payment'
-      const planType = notes?.planType || 'lifetime'
+      const planType = notes?.planType || 'year'
 
       if (!userId) {
         console.error('No userId found in Razorpay payment notes')
@@ -55,8 +55,6 @@ export async function POST(request: Request) {
         expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
       } else if (planType === 'year') {
         expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString()
-      } else if (planType === 'lifetime') {
-        expiresAt = null
       }
 
       console.log(`Upgrading user ${userId} to Pro plan: type=${planType}, expires=${expiresAt} (Payment: ${paymentId})...`)

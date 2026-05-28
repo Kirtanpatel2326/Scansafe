@@ -13,18 +13,18 @@ export async function POST(request: Request) {
     }
 
     // Parse plan type from request body
-    let planType = 'lifetime'
+    let planType = 'year'
     try {
       const body = await request.json()
       if (body && body.planType) {
         planType = body.planType
       }
     } catch (e) {
-      // Body might be empty, default to lifetime
+      // Body might be empty, default to year
     }
 
     // Map planType to price in paise (1 INR = 100 paise)
-    let amount = 49900 // Default: ₹499 (lifetime)
+    let amount = 99900 // Default: ₹999 (year)
     if (planType === 'day') {
       amount = 1000 // ₹10
     } else if (planType === 'week') {
@@ -33,8 +33,6 @@ export async function POST(request: Request) {
       amount = 29900 // ₹299
     } else if (planType === 'year') {
       amount = 99900 // ₹999
-    } else if (planType === 'lifetime') {
-      amount = 49900 // ₹499
     }
 
     const currency = 'INR'
