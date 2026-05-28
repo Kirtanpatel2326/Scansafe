@@ -26,7 +26,7 @@ export default function PricingPage() {
   const [planType, setPlanType] = useState<string>('free')
   const [upgrading, setUpgrading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
-  const [selectedPeriod, setSelectedPeriod] = useState<'day' | 'week' | 'month' | 'year' | 'lifetime'>('lifetime')
+  const [selectedPeriod, setSelectedPeriod] = useState<'day' | 'week' | 'month' | 'year'>('year')
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -67,7 +67,7 @@ export default function PricingPage() {
     }
   }
 
-  const handleUpgrade = async (planTypeParam: 'day' | 'week' | 'month' | 'year' | 'lifetime') => {
+  const handleUpgrade = async (planTypeParam: 'day' | 'week' | 'month' | 'year') => {
     if (!user) {
       router.push('/auth')
       return
@@ -99,8 +99,7 @@ export default function PricingPage() {
         day: '1-Day Pass',
         week: 'Weekly Pass',
         month: 'Monthly Pro',
-        year: 'Yearly Pro',
-        lifetime: 'Lifetime Ultra'
+        year: 'Yearly Pro'
       }
 
       // Open Razorpay Options
@@ -238,11 +237,10 @@ export default function PricingPage() {
                   { id: 'day', name: 'Daily Pass', price: 10, period: '/ day', desc: '1 Day of unlimited scans', savings: 'Quick Trial' },
                   { id: 'week', name: 'Weekly Pass', price: 99, period: '/ week', desc: '7 Days of unlimited scans', savings: 'Save 70%' },
                   { id: 'month', name: 'Monthly Pro', price: 299, period: '/ month', desc: '30 Days of unlimited scans', savings: 'Save 90%' },
-                  { id: 'year', name: 'Yearly Pro', price: 999, period: '/ year', desc: '365 Days of unlimited scans', savings: 'Save 97%' },
-                  { id: 'lifetime', name: 'Lifetime Deal', price: 499, period: 'one-time', desc: 'Own forever, pay once', savings: 'Best Value ⭐' },
+                  { id: 'year', name: 'Yearly Pro', price: 999, period: '/ year', desc: '365 Days of unlimited scans', savings: 'Best Value ⭐' },
                 ] as const
 
-                const activePeriod = periods.find(p => p.id === selectedPeriod) || periods[4]
+                const activePeriod = periods.find(p => p.id === selectedPeriod) || periods[3]
 
                 return (
                   <div className="relative rounded-2xl border-2 border-emerald-500 bg-zinc-900/20 p-8 flex flex-col justify-between shadow-lg shadow-emerald-500/5 overflow-hidden">
@@ -265,7 +263,7 @@ export default function PricingPage() {
                       <div className="my-6">
                         <span className="text-4xl font-black text-white">₹{activePeriod.price}</span>
                         <span className="text-zinc-500 text-xs ml-1">
-                          {selectedPeriod === 'lifetime' ? 'one-time payment' : `${activePeriod.period}`}
+                          {activePeriod.period}
                         </span>
                       </div>
 
