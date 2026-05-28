@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     email TEXT UNIQUE,
     full_name TEXT,
     plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'pro')),
+    plan_type TEXT DEFAULT 'free',
+    plan_expires_at TIMESTAMP WITH TIME ZONE,
     scans_today INTEGER DEFAULT 0,
     scans_reset_at DATE DEFAULT CURRENT_DATE,
     dietary_profile JSONB DEFAULT '{"age": null, "weight": null, "allergies": [], "conditions": [], "goals": []}'::jsonb,

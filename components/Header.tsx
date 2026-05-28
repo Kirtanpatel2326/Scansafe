@@ -11,6 +11,7 @@ export default function Header() {
   const pathname = usePathname()
   const [user, setUser] = useState<User | null>(null)
   const [plan, setPlan] = useState<string>('free')
+  const [planType, setPlanType] = useState<string>('free')
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
 
   useEffect(() => {
@@ -30,6 +31,7 @@ export default function Header() {
         fetchUserProfile(currentUser.id)
       } else {
         setPlan('free')
+        setPlanType('free')
       }
     })
 
@@ -42,12 +44,20 @@ export default function Header() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('plan')
+        .select('plan, plan_type, plan_expires_at')
         .eq('id', userId)
         .single()
       
       if (!error && data) {
+        const now = new Date()
+        const expired = data.plan === 'pro' && data.plan_expires_at && new Date(data.plan_expires_at) <= now
+        if (expired) {
+          data.plan = 'free'
+          data.plan_type = 'free'
+          data.plan_expires_at = null
+        }
         setPlan(data.plan || 'free')
+        setPlanType(data.plan_type || 'free')
       }
     } catch (e) {
       console.error('Error fetching profile plan:', e)
@@ -169,11 +179,11 @@ export default function Header() {
                     {/* Plan Badge */}
                     <div className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
                       {plan === 'pro' ? (
-                        <span className="bg-gradient-to-r from-amber-400 to-amber-600 text-black px-2 py-0.5 rounded-full flex items-center gap-0.5 shadow-sm">
-                          <Sparkles className="w-3 h-3 fill-black" /> PRO
+                        <span className="bg-gradient-to-r from-amber-400 to-amber-600 text-black px-2.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-sm font-black">
+                          <Sparkles className="w-3 h-3 fill-black" /> PRO ({planType})
                         </span>
                       ) : (
-                        <span className="bg-zinc-850 border border-zinc-700 text-zinc-400 px-2 py-0.5 rounded-full">
+                        <span className="bg-zinc-850 border border-zinc-700 text-zinc-400 px-2 py-0.5 rounded-full font-bold">
                           FREE
                         </span>
                       )}

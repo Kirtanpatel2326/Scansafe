@@ -21,7 +21,8 @@ import {
   Trash2, 
   Plus, 
   Check, 
-  FileText 
+  FileText,
+  X
 } from 'lucide-react'
 
 export default function ScanPage() {
@@ -33,6 +34,8 @@ export default function ScanPage() {
   const [loadingSession, setLoadingSession] = useState(true)
   const [profile, setProfile] = useState<{ 
     plan: string 
+    plan_type?: string
+    plan_expires_at?: string | null
     scans_today: number
     dietary_profile?: {
       age?: number
@@ -92,11 +95,18 @@ export default function ScanPage() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('plan, scans_today, dietary_profile')
+        .select('plan, plan_type, plan_expires_at, scans_today, dietary_profile')
         .eq('id', userId)
         .single()
       
       if (!error && data) {
+        const now = new Date()
+        const expired = data.plan === 'pro' && data.plan_expires_at && new Date(data.plan_expires_at) <= now
+        if (expired) {
+          data.plan = 'free'
+          data.plan_type = 'free'
+          data.plan_expires_at = null
+        }
         setProfile(data)
         const dp = data.dietary_profile || {}
         setUserAge(dp.age || '')
@@ -379,10 +389,12 @@ export default function ScanPage() {
           
           {profile && (
             <div className="flex items-center gap-3 bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-350 self-start md:self-auto">
-              <span>Plan: <strong className="text-white uppercase">{profile.plan}</strong></span>
+              <span>Plan: <strong className="text-white uppercase">{profile.plan === 'pro' ? `PRO (${profile.plan_type || 'lifetime'})` : 'free'}</strong></span>
               <div className="w-[1px] h-3.5 bg-zinc-850" />
               {profile.plan === 'pro' ? (
-                <span className="text-emerald-400 font-bold">Unlimited scans</span>
+                <span className="text-emerald-400 font-bold">
+                  Unlimited scans {profile.plan_expires_at && `(expires ${new Date(profile.plan_expires_at).toLocaleDateString()})`}
+                </span>
               ) : (
                 <span>Daily Scans Used: <strong className="text-white">{profile.scans_today} / 5</strong></span>
               )}
@@ -963,11 +975,3 @@ export default function ScanPage() {
   )
 }
 
-// Simple local helper
-function X({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  )
-}

@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase-server'
 import { razorpay } from '@/lib/razorpay'
 import { NextResponse } from 'next/server'
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = await createClient()
     
@@ -12,8 +12,31 @@ export async function POST() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Create an order in Razorpay
-    const amount = 100 // ₹1.00 in paise (trial testing)
+    // Parse plan type from request body
+    let planType = 'lifetime'
+    try {
+      const body = await request.json()
+      if (body && body.planType) {
+        planType = body.planType
+      }
+    } catch (e) {
+      // Body might be empty, default to lifetime
+    }
+
+    // Map planType to price in paise (1 INR = 100 paise)
+    let amount = 49900 // Default: ₹499 (lifetime)
+    if (planType === 'day') {
+      amount = 1000 // ₹10
+    } else if (planType === 'week') {
+      amount = 9900 // ₹99
+    } else if (planType === 'month') {
+      amount = 29900 // ₹299
+    } else if (planType === 'year') {
+      amount = 99900 // ₹999
+    } else if (planType === 'lifetime') {
+      amount = 49900 // ₹499
+    }
+
     const currency = 'INR'
     const options = {
       amount,
@@ -22,6 +45,7 @@ export async function POST() {
       notes: {
         userId: user.id,
         email: user.email || '',
+        planType,
       },
     }
 
