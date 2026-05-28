@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
-import { Sparkles, Check, CreditCard, RefreshCw, Star, Zap, ShieldCheck } from 'lucide-react'
+import { Sparkles, Check, CreditCard, RefreshCw, Star, Zap, ShieldCheck, Shield, Smartphone } from 'lucide-react'
 
 // Load script helper
 function loadScript(src: string): Promise<boolean> {
@@ -353,6 +353,21 @@ export default function PricingPage() {
                         </>
                       )}
                     </button>
+
+                    {/* Trust Badges */}
+                    <div className="mt-6 pt-5 border-t border-zinc-800/50 flex flex-col items-center gap-3">
+                      <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                        Powered by <span className="text-white font-bold tracking-tight text-xs flex items-center gap-1"><Shield className="w-3.5 h-3.5 text-blue-500 fill-blue-500/20" /> Razorpay</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                         <div className="text-xs font-medium text-zinc-500 flex items-center gap-1">
+                           <Smartphone className="w-4 h-4" /> UPI Apps
+                         </div>
+                         <div className="text-xs font-medium text-zinc-500 flex items-center gap-1">
+                           <CreditCard className="w-4 h-4" /> Cards & NetBanking
+                         </div>
+                      </div>
+                    </div>
                   </div>
                 )
               })()}
