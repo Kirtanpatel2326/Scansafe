@@ -15,6 +15,41 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- Create Policies
+CREATE POLICY "Allow users to read their own profile" 
+    ON public.profiles FOR SELECT 
+    USING (auth.uid() = id);
+
+CREATE POLICY "Allow users to update their own profile" 
+    ON public.profiles FOR UPDATE 
+    USING (auth.uid() = id);
+
+CREATE POLICY "Allow service role or auth trigger to insert profiles" 
+    ON public.profiles FOR INSERT 
+    WITH CHECK (true);
+
+
+-- 1.5 PENDING PAYMENTS (For manual UPI verification)
+CREATE TABLE IF NOT EXISTS public.pending_payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    utr TEXT NOT NULL,
+    plan_type TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.pending_payments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can insert their own pending payments"
+    ON public.pending_payments FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own pending payments"
+    ON public.pending_payments FOR SELECT
+    USING (auth.uid() = user_id);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 

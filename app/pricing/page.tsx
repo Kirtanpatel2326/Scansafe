@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
-import { Sparkles, Check, CreditCard, RefreshCw, Star, Zap, ShieldCheck, Shield, Smartphone } from 'lucide-react'
+import { Sparkles, Check, CreditCard, RefreshCw, Star, Zap, ShieldCheck, Shield, Smartphone, QrCode, X } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 
 // Load script helper
 function loadScript(src: string): Promise<boolean> {
@@ -27,6 +28,9 @@ export default function PricingPage() {
   const [upgrading, setUpgrading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
   const [selectedPeriod, setSelectedPeriod] = useState<'day' | 'week' | 'month' | 'year'>('year')
+  const [showManualModal, setShowManualModal] = useState(false)
+  const [utr, setUtr] = useState('')
+  const [submittingUtr, setSubmittingUtr] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -64,6 +68,57 @@ export default function PricingPage() {
       console.error('Error loading user profile:', e)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleManualUpgrade = async () => {
+    if (!user) {
+      router.push('/auth')
+      return
+    }
+    if (utr.trim().length < 12) {
+      alert('Please enter a valid 12-digit UTR number.')
+      return
+    }
+
+    setSubmittingUtr(true)
+    try {
+      const planNameMap = {
+        day: 10,
+        week: 99,
+        month: 299,
+        year: 999
+      }
+      const amount = planNameMap[selectedPeriod]
+
+      const res = await fetch('/api/manual-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          planType: selectedPeriod,
+          amount,
+          utr: utr.trim()
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit payment verification.')
+      }
+
+      setShowManualModal(false)
+      setIsSuccess(true)
+      setPlan('pro')
+      setPlanType(selectedPeriod)
+      setTimeout(() => {
+        router.push('/scan')
+      }, 3000)
+    } catch (err: any) {
+      console.error('Manual checkout error:', err)
+      alert(err.message || 'An error occurred submitting your UTR.')
+    } finally {
+      setSubmittingUtr(false)
     }
   }
 
@@ -352,6 +407,14 @@ export default function PricingPage() {
                       )}
                     </button>
 
+                    <button
+                      disabled={(plan === 'pro' && planType === selectedPeriod) || upgrading}
+                      onClick={() => setShowManualModal(true)}
+                      className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-transparent border border-emerald-500/50 text-emerald-400 py-3.5 text-sm font-bold hover:bg-emerald-500/10 transition disabled:border-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed"
+                    >
+                      <QrCode className="w-4 h-4" /> Pay directly via UPI QR
+                    </button>
+
                     {/* Trust Badges */}
                     <div className="mt-6 pt-5 border-t border-zinc-800/50 flex flex-col items-center gap-3">
                       <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -373,6 +436,65 @@ export default function PricingPage() {
           </div>
         )}
       </main>
+
+      {/* Manual UPI QR Modal */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl relative flex flex-col items-center">
+            <button
+              onClick={() => setShowManualModal(false)}
+              className="absolute right-4 top-4 text-zinc-500 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400 mb-4">
+              <QrCode className="w-6 h-6" />
+            </div>
+            
+            <h3 className="text-xl font-bold text-white mb-1">Direct UPI Payment</h3>
+            <p className="text-sm text-zinc-400 mb-6 text-center">
+              Scan with any UPI app to upgrade instantly.
+            </p>
+
+            <div className="bg-white p-4 rounded-xl mb-6">
+              {(() => {
+                const planNameMap = { day: 10, week: 99, month: 299, year: 999 }
+                const amount = planNameMap[selectedPeriod].toFixed(2)
+                const upiUrl = `upi://pay?pa=kirtanpatel2326@okicici&pn=Kirtan%20Patel&am=${amount}&cu=INR`
+                return <QRCodeSVG value={upiUrl} size={180} level="H" />
+              })()}
+            </div>
+
+            <div className="w-full space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
+                  Enter 12-Digit UTR Number
+                </label>
+                <input
+                  type="text"
+                  value={utr}
+                  onChange={(e) => setUtr(e.target.value.replace(/[^0-9]/g, '').slice(0, 12))}
+                  placeholder="e.g., 312345678901"
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
+              <button
+                onClick={handleManualUpgrade}
+                disabled={submittingUtr || utr.length < 12}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 text-black py-3 text-sm font-bold hover:bg-emerald-400 transition disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
+              >
+                {submittingUtr ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Verifying...</>
+                ) : (
+                  'Confirm Payment'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
