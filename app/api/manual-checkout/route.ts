@@ -36,24 +36,28 @@ export async function POST(request: Request) {
     }
 
     // 2. Optimistic upgrade (Grant access immediately for prototype purposes)
-    let expiresAt: string | null = null
-    const now = new Date()
-    if (planType === 'day') {
-      expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
-    } else if (planType === 'week') {
-      expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-    } else if (planType === 'month') {
-      expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
-    } else if (planType === 'year') {
-      expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString()
-    }
+    let creditsToAdd = 0
+    if (planType === 'day') creditsToAdd = 10
+    else if (planType === 'week') creditsToAdd = 100
+    else if (planType === 'month') creditsToAdd = 320
+    else if (planType === 'year') creditsToAdd = 1200
+
+    // Fetch current credits
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('scan_credits')
+      .eq('id', userId)
+      .single()
+
+    const currentCredits = profile?.scan_credits || 0
+    const newCredits = currentCredits + creditsToAdd
 
     const { error: updateError } = await supabase
       .from('profiles')
       .update({
         plan: 'pro',
         plan_type: planType,
-        plan_expires_at: expiresAt
+        scan_credits: newCredits
       })
       .eq('id', userId)
 
@@ -62,7 +66,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to upgrade profile' }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, expiresAt })
+    return NextResponse.json({ success: true, newCredits })
 
   } catch (err: any) {
     console.error('Manual checkout error:', err)

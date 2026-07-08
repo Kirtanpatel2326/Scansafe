@@ -4,6 +4,7 @@ export interface IngredientAnalysis {
   product_name: string
   brand: string
   health_score: number // 0 to 100
+  health_score_reason: string
   safety_level: 'safe' | 'moderate' | 'danger'
   description: string
   ingredients: Array<{
@@ -71,6 +72,7 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
     product_name: "Lotte Choco Pie",
     brand: "Lotte",
     health_score: 22,
+    health_score_reason: "Severely penalized due to high concentration of trans fats, refined sugars, and synthetic additives.",
     safety_level: "danger",
     description: "Lotte Choco Pie is a highly processed sweet snack consisting of cake, marshmallow filling, and a chocolate coating. It contains high amounts of refined sugar, hydrogenated vegetable fats, and synthetic additives.",
     ingredients: [
@@ -153,6 +155,7 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
     product_name: "Oreo Original Sandwich Cookies",
     brand: "Nabisco",
     health_score: 28,
+    health_score_reason: "Penalized for high levels of High Fructose Corn Syrup and saturated palm oils.",
     safety_level: "danger",
     description: "Oreo cookies are a highly processed sweet snack high in refined sugars, saturated fats, and processed wheat flour. Frequent consumption is linked to metabolic issues.",
     ingredients: [
@@ -224,6 +227,7 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
     product_name: "Coca-Cola Classic",
     brand: "The Coca-Cola Company",
     health_score: 12,
+    health_score_reason: "Dangerously low score due to extreme liquid sugar concentration and bone-thinning phosphoric acid.",
     safety_level: "danger",
     description: "Classic Coca-Cola is a carbonated beverage containing exceptionally high levels of High Fructose Corn Syrup and Phosphoric Acid. It has zero nutritional value and promotes dental decay and insulin resistance.",
     ingredients: [
@@ -295,6 +299,7 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
     product_name: "Lay's Classic Potato Chips",
     brand: "Frito-Lay",
     health_score: 45,
+    health_score_reason: "High calorie density and sodium, though lacks complex synthetic additives.",
     safety_level: "moderate",
     description: "Lay's Classic Potato Chips are made from potatoes fried in vegetable oils and salted. They are calorie-dense, high in refined sodium, and contain acrylamides from high-heat frying.",
     ingredients: [
@@ -358,8 +363,9 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
   },
   {
     product_name: "Heinz Tomato Ketchup",
-    brand: "Kraft Heinz",
-    health_score: 52,
+    brand: "Heinz",
+    health_score: 40,
+    health_score_reason: "Contains significant amounts of high fructose corn syrup and sodium.",
     safety_level: "moderate",
     description: "Heinz Tomato Ketchup is a popular condiment primarily consisting of tomato concentrate, vinegars, and sweeteners. It contains significant sugars per serving.",
     ingredients: [
@@ -428,8 +434,9 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
   },
   {
     product_name: "Quaker Old Fashioned Oats",
-    brand: "Quaker Oats",
+    brand: "Quaker",
     health_score: 95,
+    health_score_reason: "Single ingredient whole grain with excellent fiber profile.",
     safety_level: "safe",
     description: "Quaker Old Fashioned Oats are 100% whole grain rolled oats with no added sugar, artificial preservatives, or additives. Excellent source of beta-glucan soluble fiber, promoting heart and digestive health.",
     ingredients: [
@@ -483,7 +490,8 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
   {
     product_name: "Chobani Plain Greek Yogurt",
     brand: "Chobani",
-    health_score: 88,
+    health_score: 92,
+    health_score_reason: "High protein, minimal processing, and live active cultures.",
     safety_level: "safe",
     description: "Chobani Plain Greek Yogurt is a strained, protein-rich dairy product made from milk and live cultures. It contains no added sugars or thickeners, providing calcium and gut-friendly probiotics.",
     ingredients: [
@@ -640,6 +648,7 @@ function generateDynamicMockProduct(searchName: string): IngredientAnalysis {
     product_name: cleanName,
     brand: 'ScanSafe Choice',
     health_score: healthScore,
+    health_score_reason: 'Generic score based on product category detection.',
     safety_level: safetyLevel,
     description: description,
     ingredients: ingredients as any,
@@ -806,15 +815,20 @@ async function analyzeLabelWithGemini(
     }
   }
 
+  const prefsPrompt = userPreferences.length > 0 
+    ? `\nCRITICAL USER PROFILE: The user has the following dietary & health preferences: [${userPreferences.join(', ')}]. You MUST specifically analyze the product against these profiles. In the "description" field, you MUST explicitly mention their profile (e.g. "For a Vegan/Diabetic profile...") and explain in 2-3 sentences exactly why this product is suitable or dangerous for them specifically. If an ingredient violates their profile, mark its status as 'avoid' and clearly explain why in the reason field. Adjust the health_score and safety_level down if it severely violates their profile.`
+    : ''
+
   const promptText = `
 You are ScanSafe ULTRA, an advanced product intelligence scanner, food scientist, and toxicology expert.
-Analyze the provided image of a food product. Reconstruct and estimate the ingredients list, nutrition facts, additives, allergens, and overall health index. 
+Analyze the provided image of a food product. Reconstruct and estimate the ingredients list, nutrition facts, additives, allergens, and overall health index. ${prefsPrompt}
 
 You must return a single JSON object. Ensure it matches the JSON specification below:
 {
   "product_name": "Name of product (estimate if not clear)",
   "brand": "Brand name (estimate if not clear)",
   "health_score": 0 to 100 integer (100 = whole foods, 0 = ultra-processed or dangerous),
+  "health_score_reason": "Punchy 1-2 sentence explanation explicitly justifying the numeric health score and what caused it",
   "safety_level": "safe" | "moderate" | "danger",
   "description": "2-3 sentences overview of the product's health and toxicological impact",
   "ingredients": [
@@ -886,36 +900,58 @@ You must return a single JSON object. Ensure it matches the JSON specification b
 Do NOT wrap the response in markdown formatting (like \`\`\`json). Return only the raw JSON string.
 `
 
-  const response = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
-    {
-      contents: [
+  let response
+  let retryCount = 0
+  const maxRetries = 3
+  
+  while (retryCount <= maxRetries) {
+    try {
+      response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
         {
-          parts: [
-            { inlineData: { mimeType: mediaType, data: base64Data } },
-            { text: promptText }
-          ]
-        }
-      ],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
-    },
-    { headers: { 'content-type': 'application/json' } }
-  )
+          contents: [
+            {
+              parts: [
+                { inlineData: { mimeType: mediaType, data: base64Data } },
+                { text: promptText }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        },
+        { headers: { 'content-type': 'application/json' } }
+      )
+      break
+    } catch (err: any) {
+      retryCount++
+      if (retryCount > maxRetries) throw err
+      console.warn(`Gemini API failed in analyzeLabelWithGemini (attempt ${retryCount}). Retrying in 3s... Error: ${err.message}`)
+      await new Promise(resolve => setTimeout(resolve, 3000))
+    }
+  }
 
-  const candidate = response.data?.candidates?.[0]
+  const candidate = response?.data?.candidates?.[0]
   const responseText = candidate?.content?.parts?.[0]?.text?.trim()
   if (!responseText) {
     throw new Error('Empty response from Gemini API')
   }
 
   let cleanedText = responseText
-  if (cleanedText.startsWith('```')) {
-    cleanedText = cleanedText.replace(/^```json\s*/i, '').replace(/```$/, '')
+  
+  // Extract JSON block if it's wrapped in markdown backticks
+  const jsonBlockMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  if (jsonBlockMatch) {
+    cleanedText = jsonBlockMatch[1]
   }
 
-  return JSON.parse(cleanedText.trim()) as IngredientAnalysis
+  try {
+    return JSON.parse(cleanedText.trim()) as IngredientAnalysis
+  } catch (e) {
+    console.error('Failed to parse Gemini response as JSON. Response was:', responseText)
+    throw new Error('Invalid JSON format returned by AI')
+  }
 }
 
 export async function analyzeLabel(
@@ -935,16 +971,16 @@ export async function analyzeLabel(
       return applyPreferences(analysis, userPreferences)
     } catch (error: any) {
       console.error('Error analyzing image with Gemini API:', error.response?.data || error.message)
-      // Fallback
+      console.log('Falling back to Claude API...')
+      // We do not throw here, allowing it to fall back to Claude below
     }
   }
 
   // 2. Fallback to Claude
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    console.warn('No API keys. Using Mock fallback.')
-    const mock = getDeterministicMockProduct(base64Image, searchName)
-    return applyPreferences(mock, userPreferences)
+    console.warn('No API keys. Throwing error.')
+    throw new Error('No AI API keys configured for ScanSafe.')
   }
 
   let mediaType = 'image/jpeg'
@@ -965,6 +1001,7 @@ Analyze the provided food image. Return a single JSON object matching the specif
   "product_name": "Name",
   "brand": "Brand",
   "health_score": 0 to 100 integer,
+  "health_score_reason": "Punchy 1-2 sentence explanation explicitly justifying the numeric health score and what caused it",
   "safety_level": "safe" | "moderate" | "danger",
   "description": "overview",
   "ingredients": [
@@ -1070,8 +1107,7 @@ Do NOT wrap the response in markdown code blocks. Return ONLY raw JSON.
     return JSON.parse(cleanedText.trim()) as IngredientAnalysis
   } catch (error: any) {
     console.error('Error analyzing image with Claude:', error.response?.data || error.message)
-    const mock = getDeterministicMockProduct(base64Image, searchName)
-    return applyPreferences(mock, userPreferences)
+    throw error
   }
 }
 
@@ -1087,9 +1123,13 @@ export async function enrichIngredientsText(
     throw new Error('GEMINI_API_KEY is not defined in environment variables.')
   }
 
+  const prefsPrompt = userPreferences.length > 0 
+    ? `\nCRITICAL USER PROFILE: The user has the following dietary & health preferences: [${userPreferences.join(', ')}]. You MUST specifically analyze the product against these profiles. In the "description" field, you MUST explicitly mention their profile (e.g. "For a Vegan/Diabetic profile...") and explain in 2-3 sentences exactly why this product is suitable or dangerous for them specifically. If an ingredient violates their profile, mark its status as 'avoid' and clearly explain why in the reason field. Adjust the health_score and safety_level down if it severely violates their profile.`
+    : ''
+
   const promptText = `
 You are ScanSafe ULTRA, an advanced product intelligence scanner, food scientist, and toxicology expert.
-Given the raw product details below, parse and analyze the ingredients, additives, nutrition facts, allergens, and overall health indexes.
+Given the raw product details below, parse and analyze the ingredients, additives, nutrition facts, allergens, and overall health indexes. ${prefsPrompt}
 
 Product Name: ${productName}
 Brand: ${brand}
@@ -1101,6 +1141,7 @@ You must return a single JSON object. Ensure it matches the JSON specification b
   "product_name": "${productName}",
   "brand": "${brand}",
   "health_score": 0 to 100 integer (100 = whole foods, 0 = ultra-processed or dangerous),
+  "health_score_reason": "Punchy 1-2 sentence explanation explicitly justifying the numeric health score and what caused it",
   "safety_level": "safe" | "moderate" | "danger",
   "description": "2-3 sentences overview of the product's health and toxicological impact",
   "ingredients": [
@@ -1172,24 +1213,38 @@ You must return a single JSON object. Ensure it matches the JSON specification b
 Do NOT wrap the response in markdown formatting (like \`\`\`json). Return only the raw JSON string.
 `
 
-  const response = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`,
-    {
-      contents: [
+  let response
+  let retryCount = 0
+  const maxRetries = 2
+  
+  while (retryCount <= maxRetries) {
+    try {
+      response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
         {
-          parts: [
-            { text: promptText }
-          ]
-        }
-      ],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
-    },
-    { headers: { 'content-type': 'application/json' } }
-  )
+          contents: [
+            {
+              parts: [
+                { text: promptText }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        },
+        { headers: { 'content-type': 'application/json' } }
+      )
+      break
+    } catch (err: any) {
+      retryCount++
+      if (retryCount > maxRetries) throw err
+      console.warn(`Gemini API failed in enrichIngredientsText (attempt ${retryCount}). Retrying in 1.5s...`)
+      await new Promise(resolve => setTimeout(resolve, 1500))
+    }
+  }
 
-  const candidate = response.data?.candidates?.[0]
+  const candidate = response?.data?.candidates?.[0]
   const responseText = candidate?.content?.parts?.[0]?.text?.trim()
   if (!responseText) {
     throw new Error('Empty response from Gemini API')

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/Header'
 import ResultCard from '@/components/ResultCard'
 import NutritionTable from '@/components/NutritionTable'
+import OnboardingChecklist from '@/components/OnboardingChecklist'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
 import { History, Search, ArrowLeft, ShieldCheck, ShieldAlert, Shield, Calendar, RefreshCw, ChevronRight } from 'lucide-react'
@@ -31,9 +32,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
-        router.push('/auth')
-      } else {
+      if (user) {
         setUser(user)
         // Ensure profile exists
         await fetch('/api/profile/ensure', { method: 'POST' })

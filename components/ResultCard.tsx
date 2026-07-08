@@ -1,6 +1,8 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
+import { toPng } from 'html-to-image'
+import { ExposePoster } from './ExposePoster'
 import { 
   Sparkles, 
   ShieldCheck, 
@@ -12,11 +14,15 @@ import {
   Check, 
   FileText, 
   HelpCircle, 
-  Activity, 
-  ShoppingCart, 
-  Trees, 
+  Activity,
+  ShoppingCart,
+  Trees,
   Heart,
-  Droplet
+  Droplet,
+  Volume2,
+  Square,
+  Camera,
+  ArrowLeft
 } from 'lucide-react'
 
 export interface IngredientAnalysisResult {
@@ -24,6 +30,7 @@ export interface IngredientAnalysisResult {
   product_name: string
   brand: string
   health_score: number
+  health_score_reason?: string
   safety_level: 'safe' | 'moderate' | 'danger'
   description: string
   ingredients: Array<{
@@ -78,15 +85,22 @@ export interface IngredientAnalysisResult {
 interface ResultCardProps {
   result: IngredientAnalysisResult
   scanId?: string
+  imageUrl?: string | null
+  onScanAnother?: () => void
 }
 
-export default function ResultCard({ result, scanId }: ResultCardProps) {
+export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: ResultCardProps) {
   const [activeTab, setActiveTab] = useState<'ingredients' | 'additives' | 'toxicity' | 'alternatives'>('ingredients')
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [isGeneratingPoster, setIsGeneratingPoster] = useState(false)
+  const [pregeneratedFile, setPregeneratedFile] = useState<File | null>(null)
+  const posterRef = useRef<HTMLDivElement>(null)
 
   const {
     product_name,
     brand,
     health_score,
+    health_score_reason,
     safety_level,
     description,
     ingredients = [],
@@ -166,75 +180,251 @@ export default function ResultCard({ result, scanId }: ResultCardProps) {
   const circumference = 2 * Math.PI * radius
   const strokeDashoffset = circumference - (health_score / 100) * circumference
 
+  useEffect(() => {
+    // Wait 2.5 seconds for UI to settle and fonts to load before generating
+    const timer = setTimeout(async () => {
+      if (!posterRef.current) return
+      try {
+        setIsGeneratingPoster(true)
+        const dataUrl = await toPng(posterRef.current, {
+          cacheBust: true,
+          pixelRatio: 2,
+          quality: 1.0,
+        })
+        const res = await fetch(dataUrl)
+        const blob = await res.blob()
+        const safeName = product_name || 'Product'
+        const file = new File([blob], `${safeName.replace(/\s+/g, '_')}_Exposed.png`, { type: 'image/png' })
+        setPregeneratedFile(file)
+      } catch (err) {
+        console.error('Failed to pregenerate poster:', err)
+      } finally {
+        setIsGeneratingPoster(false)
+      }
+    }, 2500)
+    
+    return () => clearTimeout(timer)
+  }, [product_name])
+
+  const handleListen = () => {
+    if ('speechSynthesis' in window) {
+      if (isSpeaking) {
+        window.speechSynthesis.cancel()
+        setIsSpeaking(false)
+        return
+      }
+
+      window.speechSynthesis.cancel()
+      
+      const warnings = ingredients
+        .filter(i => i.status !== 'safe')
+        .map(i => `${i.name}: ${i.reason}`)
+        .join('. ')
+        
+      let textToRead = `Analysis for ${product_name} by ${brand}. The health score is ${health_score} out of 100. ${description}`
+      if (health_score_reason) {
+        textToRead += ` ${health_score_reason}`
+      }
+      if (warnings) {
+        textToRead += ` Key ingredients to note: ${warnings}`
+      }
+      if (allergens.length > 0) {
+        textToRead += `. Allergens detected: ${allergens.join(', ')}.`
+      }
+      
+      const utterance = new SpeechSynthesisUtterance(textToRead)
+      utterance.rate = 0.95
+      utterance.onend = () => setIsSpeaking(false)
+      utterance.onerror = () => setIsSpeaking(false)
+      
+      setIsSpeaking(true)
+      window.speechSynthesis.speak(utterance)
+    } else {
+      alert('Text-to-speech is not supported in this browser.')
+    }
+  }
+
+  const handleShare = async () => {
+    if (!pregeneratedFile) {
+      if (isGeneratingPoster) {
+        alert('Poster is still generating. Please wait a few seconds and try again.')
+      } else {
+        alert('Poster could not be generated. Please try again later.')
+      }
+      return
+    }
+    
+    try {
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [pregeneratedFile] })) {
+        try {
+          await navigator.share({
+            title: `ScanSafe Warning: ${product_name || 'Product'}`,
+            text: `I just scanned ${product_name || 'Product'} with ScanSafe. Look at what's hidden inside it!`,
+            files: [pregeneratedFile]
+          })
+        } catch (shareErr) {
+          console.error('Share failed, falling back to download:', shareErr)
+          // Fallback if user cancels or Safari blocks share due to async delay
+          const link = document.createElement('a')
+          link.download = pregeneratedFile.name
+          link.href = URL.createObjectURL(pregeneratedFile)
+          link.click()
+        }
+      } else {
+        // Fallback for desktop: force download
+        const link = document.createElement('a')
+        link.download = pregeneratedFile.name
+        link.href = URL.createObjectURL(pregeneratedFile)
+        link.click()
+        alert('Sharing is not supported on this device. The image has been downloaded instead.')
+      }
+    } catch (err) {
+      console.error('Error sharing image:', err)
+      alert('Could not share the expose poster. Please try again.')
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 relative">
+      <ExposePoster ref={posterRef} result={result} />
+      
       {/* Product Summary Header Card */}
-      <div className={`rounded-2xl border p-6 ${getScoreBg(health_score)} transition duration-300`}>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-1 gap-4 items-center">
-            {/* SVG Circular Gauge */}
-            <div className="relative flex h-24 w-24 shrink-0 items-center justify-center">
-              <svg className="h-full w-full -rotate-90">
-                <circle
-                  cx="48"
-                  cy="48"
-                  r={radius}
-                  className="stroke-zinc-800"
-                  strokeWidth="8"
-                  fill="transparent"
-                />
-                <circle
-                  cx="48"
-                  cy="48"
-                  r={radius}
-                  className={`transition-all duration-1000 ease-out ${getScoreColor(health_score).split(' ')[1]}`}
-                  strokeWidth="8"
-                  fill="transparent"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={strokeDashoffset}
-                  strokeLinecap="round"
-                />
-              </svg>
-              <div className="absolute flex flex-col items-center justify-center">
-                <span className="text-2xl font-black text-white">{health_score}</span>
-                <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest leading-none">Score</span>
+      <div className={`rounded-2xl border p-6 md:p-8 ${getScoreBg(health_score)} transition duration-300`}>
+        <div className="flex flex-col md:flex-row gap-8 justify-between">
+          
+          <div className="flex-1 flex flex-col lg:flex-row gap-8 lg:items-center">
+            <div className="flex flex-1 gap-5 items-center">
+              {/* SVG Circular Gauge */}
+              <div className="relative flex h-24 w-24 shrink-0 items-center justify-center">
+                <svg className="h-full w-full -rotate-90">
+                  <circle
+                    cx="48"
+                    cy="48"
+                    r={radius}
+                    className="stroke-zinc-800"
+                    strokeWidth="8"
+                    fill="transparent"
+                  />
+                  <circle
+                    cx="48"
+                    cy="48"
+                    r={radius}
+                    className={`transition-all duration-1000 ease-out ${getScoreColor(health_score).split(' ')[1]}`}
+                    strokeWidth="8"
+                    fill="transparent"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={strokeDashoffset}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="absolute flex flex-col items-center justify-center">
+                  <span className="text-2xl font-black text-white">{health_score}</span>
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest leading-none">Score</span>
+                </div>
+              </div>
+
+              {/* Title / Brand */}
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                  {brand || 'Unbranded'}
+                </span>
+                <h2 className="text-xl md:text-2xl font-bold text-white truncate mt-0.5">
+                  {product_name || 'Processed Product'}
+                </h2>
+                {/* Safety Badge */}
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${currentSafety.colorClass}`}>
+                    {currentSafety.icon}
+                    {currentSafety.text}
+                  </div>
+                  {reportId && (
+                    <a
+                      href={`/api/export-pdf?scanId=${reportId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-bold text-zinc-350 hover:bg-zinc-905 hover:text-white transition"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-emerald-400" /> Export PDF
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Title / Brand */}
-            <div className="min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                {brand || 'Unbranded'}
-              </span>
-              <h2 className="text-xl font-bold text-white truncate mt-0.5">
-                {product_name || 'Processed Product'}
-              </h2>
-              {/* Safety Badge */}
-              <div className="flex flex-wrap items-center gap-2 mt-2">
-                <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${currentSafety.colorClass}`}>
-                  {currentSafety.icon}
-                  {currentSafety.text}
-                </div>
-                {reportId && (
-                  <a
-                    href={`/api/export-pdf?scanId=${reportId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-bold text-zinc-350 hover:bg-zinc-905 hover:text-white transition"
+            <div className="lg:max-w-md lg:border-l lg:border-zinc-800/80 lg:pl-8 flex flex-col justify-center gap-4">
+              <div className="space-y-3">
+                {health_score_reason && (
+                  <div className="bg-zinc-950/60 border border-zinc-800/80 rounded-xl p-3">
+                    <p className="text-xs font-bold text-zinc-300 flex items-start gap-2">
+                      <Activity className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      {health_score_reason}
+                    </p>
+                  </div>
+                )}
+                <p className="text-zinc-400 text-sm leading-relaxed">
+                  {description || 'This product was analyzed by ScanSafe Ultra. Review details below for potential warnings.'}
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button 
+                  onClick={handleShare}
+                  disabled={isGeneratingPoster}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl text-sm font-black transition shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50"
+                >
+                  {isGeneratingPoster ? (
+                    <span className="animate-pulse">Generating...</span>
+                  ) : (
+                    <>
+                      <Camera className="w-4 h-4 text-white" /> EXPOSE ON SOCIAL
+                    </>
+                  )}
+                </button>
+                <button 
+                  onClick={handleListen}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold transition shadow-lg active:scale-95 ${
+                    isSpeaking 
+                      ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20' 
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20'
+                  }`}
+                >
+                  {isSpeaking ? (
+                    <>
+                      <Square className="w-4 h-4 fill-current" /> Stop Audio
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="w-4 h-4 text-black" /> Listen
+                    </>
+                  )}
+                </button>
+                {onScanAnother && (
+                  <button 
+                    onClick={onScanAnother}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold transition shadow-lg active:scale-95 bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700"
                   >
-                    <FileText className="w-3.5 h-3.5 text-emerald-400" /> Export PDF
-                  </a>
+                    <ArrowLeft className="w-4 h-4" /> Scan New Product
+                  </button>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Description */}
-          <div className="max-w-md lg:border-l lg:border-zinc-800/80 lg:pl-6">
-            <p className="text-zinc-300 text-sm leading-relaxed">
-              {description || 'This product was analyzed by ScanSafe Ultra. Review details below for potential warnings.'}
-            </p>
-          </div>
+          {/* Scanned Image (Right Side) */}
+          {imageUrl && (
+            <div className="w-full md:w-56 shrink-0 md:border-l md:border-zinc-800/80 md:pl-8 flex items-center justify-center">
+              <div className="rounded-xl border border-zinc-800 overflow-hidden shadow-2xl relative group w-full aspect-square">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none z-10" />
+                <img 
+                  src={imageUrl} 
+                  alt={product_name || "Scanned Product"} 
+                  className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                />
+                <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-xs font-bold text-white shadow-sm z-20">
+                  <Camera className="w-3.5 h-3.5" /> Scanned Item
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -500,6 +690,9 @@ export default function ResultCard({ result, scanId }: ResultCardProps) {
           )}
         </div>
       </div>
+
+
+
     </div>
   )
 }
