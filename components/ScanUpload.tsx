@@ -18,7 +18,7 @@ import {
 
 interface ScanUploadProps {
   onScanStart: () => void
-  onScanSuccess: (result: any, scanId?: string) => void
+  onScanSuccess: (result: any, scanId?: string, imageUrl?: string) => void
   onScanError: (error: string) => void
 }
 
@@ -161,14 +161,36 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
       onScanError('Please select a valid image file.')
       return
     }
-
     setFileName(file.name)
     const reader = new FileReader()
     reader.readAsDataURL(file)
     reader.onloadend = () => {
-      const dataUrl = reader.result as string
-      setImagePreview(dataUrl)
-      setSelectionRequired(false)
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let width = img.width
+        let height = img.height
+        const maxDim = 800 // Reduced from 1080 for faster upload
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = (height / width) * maxDim
+            width = maxDim
+          } else {
+            width = (width / height) * maxDim
+            height = maxDim
+          }
+        }
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height)
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.4) // Reduced quality to 0.4 for extremely fast upload
+          setImagePreview(dataUrl)
+          setSelectionRequired(false)
+        }
+      }
+      img.src = reader.result as string
     }
   }
 
@@ -273,16 +295,26 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
     setIsCameraActive(true)
     setImagePreview(null)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      })
+      let stream
+      try {
+        // Try rear camera first (ideal for mobile)
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        })
+      } catch (e) {
+        // Fallback to any available camera (desktop/laptop) without strict constraints
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        })
+      }
+      
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
       }
     } catch (err) {
       console.error('Error accessing camera:', err)
-      onScanError('Unable to access camera. Please upload an image instead.')
+      onScanError('Unable to access camera. Please check your browser permissions or upload an image.')
       setIsCameraActive(false)
     }
   }
@@ -296,21 +328,57 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
   }
 
   const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
+    try {
+      if (!videoRef.current || !canvasRef.current) {
+        onScanError('Camera elements not fully loaded. Please wait a second.')
+        return
+      }
+      
       const video = videoRef.current
       const canvas = canvasRef.current
       const context = canvas.getContext('2d')
       
-      if (context) {
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        context.drawImage(video, 0, 0, canvas.width, canvas.height)
-        
-        const dataUrl = canvas.toDataURL('image/jpeg')
-        setImagePreview(dataUrl)
-        stopCamera()
-        setSelectionRequired(false)
+      if (!context) {
+        onScanError('Could not initialize image capture.')
+        return
       }
+
+      // Fallback for mobile browsers where videoWidth might initially be 0
+      let width = video.videoWidth || video.clientWidth || 800
+      let height = video.videoHeight || video.clientHeight || 800
+      
+      const maxDim = 800 // Compressed max dimension
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = (height / width) * maxDim
+          width = maxDim
+        } else {
+          width = (width / height) * maxDim
+          height = maxDim
+        }
+      }
+      
+      if (width === 0 || height === 0) {
+        onScanError('Camera feed not ready. Please wait.')
+        return
+      }
+
+      canvas.width = width
+      canvas.height = height
+      context.drawImage(video, 0, 0, width, height)
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.4) // Aggressive compression for speed
+      if (!dataUrl || dataUrl === 'data:,') {
+        onScanError('Failed to capture image data.')
+        return
+      }
+
+      setImagePreview(dataUrl)
+      stopCamera()
+      setSelectionRequired(false)
+    } catch (err: any) {
+      console.error('Camera capture error:', err)
+      onScanError('Error taking photo: ' + (err.message || 'Unknown error'))
     }
   }
 
@@ -365,7 +433,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         throw new Error(data.message)
       }
 
-      onScanSuccess(data.analysis, data.scanId)
+      onScanSuccess(data.analysis, data.scanId, targetImage || undefined)
     } catch (err: any) {
       onScanError(err.message || 'An unexpected error occurred.')
     } finally {
@@ -459,267 +527,77 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
           </div>
         </div>
       ) : (
-        /* Standard Scanner tab selector views */
+        /* Standard Scanner View */
         <div className="flex flex-col gap-6">
-          {/* Sub Navigation */}
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
-            <div className="flex gap-2">
-              <button
-                onClick={() => { clearSelection(); setActiveSubTab('vision'); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  activeSubTab === 'vision' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <Camera className="w-3.5 h-3.5 inline mr-1" /> Label Photo
-              </button>
-              <button
-                onClick={() => { clearSelection(); setActiveSubTab('barcode'); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  activeSubTab === 'barcode' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <Barcode className="w-3.5 h-3.5 inline mr-1" /> Barcode Scan
-              </button>
-              <button
-                onClick={() => { clearSelection(); setActiveSubTab('batch'); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  activeSubTab === 'batch' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <ListOrdered className="w-3.5 h-3.5 inline mr-1" /> Batch Scans
-              </button>
-            </div>
-
-            {/* Voice Control MIC */}
-            {recognitionRef.current && (
-              <button
-                type="button"
-                onClick={toggleVoiceListening}
-                className={`p-2 rounded-full border transition flex items-center gap-1.5 text-xs font-bold ${
-                  isListening 
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' 
-                    : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-                }`}
-                title="Trigger Voice Control"
-              >
-                {isListening ? <Mic className="w-4 h-4 animate-bounce" /> : <MicOff className="w-4 h-4" />}
-                <span className="hidden sm:inline">{isListening ? 'Listening...' : 'Voice control'}</span>
-              </button>
-            )}
-          </div>
-
-          {speechTranscript && (
-            <div className="bg-zinc-950/40 border border-zinc-850 p-2.5 rounded-xl text-xs text-zinc-400 text-center">
-              Voice Heard: <strong className="text-white italic">"{speechTranscript}"</strong>
-            </div>
-          )}
-
-          {/* TAB 1: VISION UPLOADER */}
-          {activeSubTab === 'vision' && (
-            <div className="flex flex-col gap-6">
-              <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-emerald-400" /> Choose Label Photo
-                </h2>
-                <p className="text-zinc-400 text-sm mt-1">
-                  Upload or snap a photo of the food ingredients list, or{' '}
-                  <button
-                    type="button"
-                    onClick={() => handleScanSubmit(undefined, true)}
-                    className="text-emerald-400 hover:underline font-semibold cursor-pointer"
-                  >
-                    try with a Sample Cereal
-                  </button>{' '}
-                  instantly.
-                </p>
-              </div>
-
-              {/* Product Name Inputs */}
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-zinc-400">
-                    Product Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={productNameInput}
-                    onChange={(e) => setProductNameInput(e.target.value)}
-                    placeholder="e.g. Lotte Choco Pie, Oreo, Coca-Cola..."
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none transition duration-150"
-                  />
-                </div>
-              </div>
-
-              {/* Drag and drop zone */}
-              <div className="relative">
-                {isCameraActive ? (
-                  <div className="relative overflow-hidden rounded-xl border border-zinc-800 bg-black aspect-[4/3] max-h-[380px] flex items-center justify-center">
-                    <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                    <div className="absolute inset-8 border border-dashed border-emerald-400/50 pointer-events-none rounded-lg flex items-center justify-center">
-                      <span className="text-[10px] text-emerald-400/60 uppercase tracking-widest bg-black/40 px-2 py-0.5 rounded">
-                        Align packaging label here
-                      </span>
-                    </div>
-                    <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4 px-4">
-                      <button onClick={stopCamera} className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white"><X className="w-5 h-5" /></button>
-                      <button onClick={capturePhoto} className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-black hover:bg-emerald-400 transform hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/20"><Camera className="w-6 h-6" /></button>
-                    </div>
-                  </div>
-                ) : imagePreview ? (
-                  <div className="relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 aspect-[4/3] max-h-[380px] flex items-center justify-center">
-                    <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
-                    <div className="absolute top-3 right-3 flex gap-2">
-                      <button onClick={clearSelection} className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-900/90 text-zinc-400 hover:text-white hover:bg-zinc-850"><X className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    onDragEnter={handleDrag}
-                    onDragOver={handleDrag}
-                    onDragLeave={handleDrag}
-                    onDrop={handleDrop}
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition ${
-                      dragActive ? 'border-emerald-400 bg-emerald-950/10' : 'border-zinc-800 bg-zinc-950/20 hover:border-zinc-700 hover:bg-zinc-900/10'
-                    }`}
-                  >
-                    <input ref={fileInputRef} type="file" onChange={handleFileChange} accept="image/*" className="hidden" />
-                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900 text-zinc-400">
-                      <Upload className="w-5 h-5" />
-                    </div>
-                    <p className="text-zinc-200 font-semibold text-sm">Drag label photo, or <span className="text-emerald-400 hover:underline">browse</span></p>
-                    <p className="text-zinc-500 text-xs mt-1">PNG, JPG, WEBP</p>
-                    <div className="mt-4 flex gap-2">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); startCamera(); }} className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-semibold text-zinc-350 hover:bg-zinc-800 hover:text-white"><Camera className="w-4 h-4" /> Camera</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: BARCODE ENRICHMENT SEARCH */}
-          {activeSubTab === 'barcode' && (
-            <div className="flex flex-col gap-5">
-              <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Barcode className="w-5 h-5 text-emerald-400" /> Barcode Database Search
-                </h2>
-                <p className="text-zinc-400 text-sm mt-1">
-                  Query product codes instantly. Bypasses Vision costs using Cached audits or Open Food Facts indexes.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-4 top-3.5 h-4.5 w-4.5 text-zinc-500" />
-                  <input
-                    type="text"
-                    value={barcodeInput}
-                    onChange={(e) => setBarcodeInput(e.target.value.replace(/[^0-9]/g, ''))}
-                    placeholder="Enter EAN/UPC product barcode (e.g. 8901058860269)..."
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-11 pr-4 py-3 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-emerald-500 transition"
-                  />
-                </div>
+          <div className="flex flex-col gap-6">
+            <div className="text-center">
+              <h2 className="text-2xl font-black text-white flex items-center justify-center gap-2">
+                <Sparkles className="w-6 h-6 text-emerald-400" /> SCAN PRODUCT LABEL
+              </h2>
+              <p className="text-zinc-400 text-sm mt-2">
+                Upload or snap a photo of the food ingredients list, or{' '}
                 <button
                   type="button"
-                  onClick={() => handleScanSubmit(undefined, false, undefined, undefined, barcodeInput)}
-                  disabled={!barcodeInput}
-                  className="bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-bold px-6 rounded-xl text-sm transition shrink-0"
+                  onClick={() => handleScanSubmit(undefined, true)}
+                  className="text-emerald-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Search
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-2.5">
-                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Audited Code Presets:</span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                  {MOCK_PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setBarcodeInput(p.barcode)
-                        handleScanSubmit(undefined, false, undefined, p.name, p.barcode)
-                      }}
-                      className="flex items-center gap-2.5 rounded-lg border border-zinc-850 bg-zinc-950/20 p-2.5 text-left hover:border-emerald-500/30 transition text-xs cursor-pointer"
-                    >
-                      <span>{p.emoji}</span>
-                      <div className="min-w-0">
-                        <strong className="text-zinc-200 block truncate">{p.name}</strong>
-                        <span className="text-[10px] text-zinc-550 block font-mono">{p.barcode}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+                  try with a Sample Cereal
+                </button>{' '}
+                instantly.
+              </p>
             </div>
-          )}
 
-          {/* TAB 3: BATCH SCAN QUEUE */}
-          {activeSubTab === 'batch' && (
-            <div className="flex flex-col gap-5">
-              <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <ListOrdered className="w-5 h-5 text-emerald-400" /> Batch Scanning Queue
-                </h2>
-                <p className="text-zinc-400 text-sm mt-1">
-                  Upload multiple labels to run parallel toxicology evaluations in series.
-                </p>
-              </div>
-
-              <div className="border-2 border-dashed border-zinc-850 rounded-xl p-8 text-center bg-zinc-950/10 hover:border-zinc-800 transition cursor-pointer" onClick={() => batchInputRef.current?.click()}>
-                <input ref={batchInputRef} type="file" multiple onChange={handleBatchFileChange} accept="image/*" className="hidden" />
-                <Upload className="w-6 h-6 text-zinc-500 mx-auto mb-2" />
-                <span className="text-zinc-300 font-bold text-xs block">Choose Multiple Images</span>
-                <span className="text-zinc-550 text-[10px] block mt-0.5">Hold Ctrl/Cmd to select multiple files</span>
-              </div>
-
-              {batchQueue.length > 0 && (
-                <div className="flex flex-col gap-2.5 border-t border-zinc-800 pt-4">
-                  <div className="flex justify-between items-center text-xs text-zinc-400">
-                    <span>Queue Items: {batchQueue.length}</span>
-                    <button type="button" onClick={clearSelection} className="text-rose-400 font-bold hover:underline">Clear Queue</button>
+            {/* Drag and drop zone */}
+            <div className="relative">
+              {isCameraActive ? (
+                <div className="relative overflow-hidden rounded-xl border-2 border-emerald-500 bg-black aspect-[4/3] max-h-[380px] flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.15)]">
+                  <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                  <canvas ref={canvasRef} className="hidden" />
+                  <div className="absolute inset-8 border-2 border-dashed border-emerald-400/50 pointer-events-none rounded-lg flex items-center justify-center">
+                    <span className="text-[12px] font-bold text-emerald-400 uppercase tracking-widest bg-black/60 px-4 py-1.5 rounded-md backdrop-blur-sm">
+                      Align label inside frame
+                    </span>
                   </div>
-
-                  <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto pr-1">
-                    {batchQueue.map((item, idx) => (
-                      <div key={idx} className="bg-zinc-950/30 border border-zinc-850 rounded-lg p-2.5 flex justify-between items-center text-xs">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <img src={item.preview} className="h-9 w-9 object-cover rounded border border-zinc-800 shrink-0" />
-                          <span className="text-zinc-200 block truncate pr-2">{item.file.name}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                            item.status === 'success' ? 'text-emerald-400' :
-                            item.status === 'scanning' ? 'text-amber-400 animate-pulse' :
-                            item.status === 'failed' ? 'text-rose-400' : 'text-zinc-500'
-                          }`}>
-                            {item.status}
-                          </span>
-                          <button onClick={() => removeBatchItem(idx)} className="text-zinc-550 hover:text-zinc-200 p-1"><X className="w-3.5 h-3.5 cursor-pointer" /></button>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-6 px-4">
+                    <button onClick={stopCamera} className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white transition"><X className="w-6 h-6" /></button>
+                    <button onClick={capturePhoto} className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-black hover:bg-emerald-400 transform hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(16,185,129,0.4)] transition"><Camera className="w-7 h-7" /></button>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={handleScanBatch}
-                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-black py-3 rounded-xl text-sm transition"
-                  >
-                    Analyze Queue ({batchQueue.filter(i=>i.status !== 'success').length} pending)
-                  </button>
+                </div>
+              ) : imagePreview ? (
+                <div className="relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 aspect-[4/3] max-h-[380px] flex items-center justify-center">
+                  <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
+                  <div className="absolute top-3 right-3 flex gap-2">
+                    <button onClick={clearSelection} className="flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-zinc-300 hover:text-white hover:bg-zinc-900 border border-zinc-800 backdrop-blur-sm transition"><X className="w-5 h-5" /></button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onDragEnter={handleDrag}
+                  onDragOver={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition ${
+                    dragActive ? 'border-emerald-400 bg-emerald-950/20' : 'border-zinc-700 bg-zinc-950/40 hover:border-emerald-500/50 hover:bg-zinc-900/40'
+                  }`}
+                >
+                  <input ref={fileInputRef} type="file" onChange={handleFileChange} accept="image/*" className="hidden" />
+                  <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400 group-hover:scale-110 transition">
+                    <Upload className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-white font-bold text-lg mb-1">Upload Label Photo</h3>
+                  <p className="text-zinc-400 text-sm mb-6">Drag and drop, or click to browse</p>
+                  <div className="flex gap-4">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); startCamera(); }} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 text-sm font-bold text-black hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20"><Camera className="w-5 h-5" /> Take Photo</button>
+                  </div>
                 </div>
               )}
             </div>
-          )}
 
-          {/* Diet Preferences Selection */}
-          {activeSubTab === 'vision' && (
-            <div className="border-t border-zinc-800 pt-6">
-              <h3 className="text-sm font-semibold text-zinc-300 mb-3 flex items-center gap-1.5">
-                Customize Dietary Warnings
+            {/* Diet Preferences Selection */}
+            <div className="border-t border-zinc-800 pt-6 mt-2">
+              <h3 className="text-sm font-bold text-white mb-3">
+                Dietary & Health Profile (Optional)
               </h3>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {DIETARY_PREFERENCES.map((pref) => {
@@ -731,8 +609,8 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
                       onClick={() => togglePreference(pref.id)}
                       className={`flex items-center gap-2 rounded-xl border p-3 text-left transition cursor-pointer ${
                         selected
-                          ? 'border-emerald-500/40 bg-emerald-950/15 text-emerald-400'
-                          : 'border-zinc-850 bg-zinc-950/20 text-zinc-400 hover:border-zinc-800 hover:bg-zinc-900/10'
+                          ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
+                          : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-300'
                       }`}
                     >
                       <div
@@ -742,23 +620,24 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
                       >
                         {selected && <Check className="w-3 h-3 stroke-[3]" />}
                       </div>
-                      <span className="text-xs font-medium leading-none truncate">{pref.label}</span>
+                      <span className="text-xs font-semibold leading-none truncate">{pref.label}</span>
                     </button>
                   )
                 })}
               </div>
             </div>
-          )}
 
-          {/* Action Trigger Button */}
-          {activeSubTab === 'vision' && imagePreview && (
-            <button
-              onClick={() => handleScanSubmit()}
-              className="mt-2 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3 text-sm font-bold text-black hover:bg-emerald-400 transition duration-200 shadow-lg shadow-emerald-500/10"
-            >
-              Analyze Ingredient Label
-            </button>
-          )}
+            {/* Action Trigger Button */}
+            {imagePreview && (
+              <button
+                onClick={() => handleScanSubmit()}
+                className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 py-4 text-base font-black tracking-wide text-black hover:bg-emerald-400 transition duration-200 shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:scale-[1.01]"
+              >
+                <Sparkles className="w-5 h-5" />
+                ANALYZE INGREDIENTS
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

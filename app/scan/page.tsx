@@ -22,7 +22,8 @@ import {
   Plus, 
   Check, 
   FileText,
-  X
+  X,
+  Zap
 } from 'lucide-react'
 
 export default function ScanPage() {
@@ -35,8 +36,7 @@ export default function ScanPage() {
   const [profile, setProfile] = useState<{ 
     plan: string 
     plan_type?: string
-    plan_expires_at?: string | null
-    scans_today: number
+    scan_credits: number
     dietary_profile?: {
       age?: number
       weight?: number
@@ -49,6 +49,7 @@ export default function ScanPage() {
   // Scanner State
   const [scanResult, setScanResult] = useState<IngredientAnalysisResult | null>(null)
   const [scanId, setScanId] = useState<string>('')
+  const [scanImageUrl, setScanImageUrl] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   // History / Recent scans
@@ -76,9 +77,7 @@ export default function ScanPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
-        router.push('/auth')
-      } else {
+      if (user) {
         setUser(user)
         await fetch('/api/profile/ensure', { method: 'POST' })
         await fetchProfile(user.id)
@@ -95,18 +94,11 @@ export default function ScanPage() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('plan, plan_type, plan_expires_at, scans_today, dietary_profile')
+        .select('plan, plan_type, scan_credits, dietary_profile')
         .eq('id', userId)
         .single()
       
       if (!error && data) {
-        const now = new Date()
-        const expired = data.plan === 'pro' && data.plan_expires_at && new Date(data.plan_expires_at) <= now
-        if (expired) {
-          data.plan = 'free'
-          data.plan_type = 'free'
-          data.plan_expires_at = null
-        }
         setProfile(data)
         const dp = data.dietary_profile || {}
         setUserAge(dp.age || '')
@@ -185,15 +177,22 @@ export default function ScanPage() {
   const handleScanStart = () => {
     setScanResult(null)
     setScanId('')
+    setScanImageUrl(null)
     setErrorMsg(null)
   }
 
-  const handleScanSuccess = (analysis: IngredientAnalysisResult, id?: string) => {
-    setScanResult(analysis)
-    if (id) setScanId(id)
+  const handleScanComplete = async (result: any, newScanId?: string, imageUrl?: string) => {
+    setScanResult(result)
+    setScanId(newScanId || '')
+    setScanImageUrl(imageUrl || null)
+    setErrorMsg(null)
+    setCompositing(false)
+    setMealName('')
+    
+    // Refresh credits and history
     if (user) {
-      fetchProfile(user.id)
-      fetchRecentScans(user.id)
+      await fetchProfile(user.id)
+      await fetchRecentScans(user.id)
     }
   }
 
@@ -209,6 +208,7 @@ export default function ScanPage() {
   const resetScanner = () => {
     setScanResult(null)
     setScanId('')
+    setScanImageUrl(null)
     setErrorMsg(null)
   }
 
@@ -391,51 +391,11 @@ export default function ScanPage() {
             <div className="flex items-center gap-3 bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-350 self-start md:self-auto">
               <span>Plan: <strong className="text-white uppercase">{profile.plan === 'pro' ? `PRO (${profile.plan_type || 'lifetime'})` : 'free'}</strong></span>
               <div className="w-[1px] h-3.5 bg-zinc-850" />
-              {profile.plan === 'pro' ? (
-                <span className="text-emerald-400 font-bold">
-                  Unlimited scans {profile.plan_expires_at && `(expires ${new Date(profile.plan_expires_at).toLocaleDateString()})`}
-                </span>
-              ) : (
-                <span>Daily Scans Used: <strong className="text-white">{profile.scans_today} / 5</strong></span>
-              )}
+              <span className="text-emerald-400 font-bold flex items-center gap-1">
+                <Zap className="w-3.5 h-3.5 fill-emerald-400" /> {profile.scan_credits} Scans Left
+              </span>
             </div>
           )}
-        </div>
-
-        {/* Tab Controls */}
-        <div className="flex border-b border-zinc-800 mb-8 bg-zinc-950/20 p-1.5 rounded-xl border max-w-lg">
-          <button
-            onClick={() => setActiveTab('scan')}
-            className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition ${
-              activeTab === 'scan' ? 'bg-emerald-500 text-black' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5 inline mr-1.5" /> Scan
-          </button>
-          <button
-            onClick={() => setActiveTab('composer')}
-            className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition ${
-              activeTab === 'composer' ? 'bg-emerald-500 text-black' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <ChefHat className="w-3.5 h-3.5 inline mr-1.5" /> Composer
-          </button>
-          <button
-            onClick={() => setActiveTab('family')}
-            className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition ${
-              activeTab === 'family' ? 'bg-emerald-500 text-black' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5 inline mr-1.5" /> Family
-          </button>
-          <button
-            onClick={() => setActiveTab('trends')}
-            className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition ${
-              activeTab === 'trends' ? 'bg-emerald-500 text-black' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <TrendingUp className="w-3.5 h-3.5 inline mr-1.5" /> Trends
-          </button>
         </div>
 
         {/* SCANNER PANEL */}
@@ -455,30 +415,20 @@ export default function ScanPage() {
               <div className="max-w-2xl mx-auto w-full">
                 <ScanUpload
                   onScanStart={handleScanStart}
-                  onScanSuccess={(res) => handleScanSuccess(res, res.id)}
+                  onScanSuccess={handleScanComplete}
                   onScanError={handleScanError}
                 />
               </div>
             ) : (
               <div className="flex flex-col gap-6">
-                <div className="flex justify-between items-center bg-zinc-950/40 border border-zinc-850 rounded-xl p-4">
-                  <button
-                    onClick={resetScanner}
-                    className="flex items-center gap-2 text-xs font-bold text-zinc-400 hover:text-white transition"
-                  >
-                    <ArrowLeft className="w-4 h-4" /> Scan Another Product
-                  </button>
-                  <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                    <HelpCircle className="w-3.5 h-3.5 animate-pulse" /> Double-Check ingredients list details
-                  </div>
-                </div>
 
-                <div className="flex flex-col lg:flex-row gap-6 items-start">
-                  <div className="flex-[2] w-full">
-                    <ResultCard result={scanResult} scanId={scanId} />
+
+                <div className="flex flex-col gap-6 items-start">
+                  <div className="w-full">
+                    <ResultCard result={scanResult} scanId={scanId} imageUrl={scanImageUrl} onScanAnother={resetScanner} />
                   </div>
                   {scanResult.nutrition_facts && Object.keys(scanResult.nutrition_facts).length > 0 && (
-                    <div className="flex-1 w-full lg:sticky lg:top-24">
+                    <div className="w-full mt-4">
                       <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3.5">Nutrition facts Panel</h3>
                       <NutritionTable nutrition={scanResult.nutrition_facts} />
                     </div>

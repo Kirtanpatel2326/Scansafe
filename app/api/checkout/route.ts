@@ -23,8 +23,10 @@ export async function POST(request: Request) {
       // Body might be empty, default to year
     }
 
-    // Map planType to price in paise (1 INR = 100 paise)
+    // Map planType to price in paise or cents
     let amount = 99900 // Default: ₹999 (year)
+    let currency = 'INR'
+
     if (planType === 'day') {
       amount = 1000 // ₹10
     } else if (planType === 'week') {
@@ -33,9 +35,20 @@ export async function POST(request: Request) {
       amount = 29900 // ₹299
     } else if (planType === 'year') {
       amount = 99900 // ₹999
+    } else if (planType === 'usd_1') {
+      amount = 100 // $1
+      currency = 'USD'
+    } else if (planType === 'usd_9') {
+      amount = 900 // $9
+      currency = 'USD'
+    } else if (planType === 'usd_99') {
+      amount = 9900 // $99
+      currency = 'USD'
+    } else if (planType === 'usd_299') {
+      amount = 29900 // $299
+      currency = 'USD'
     }
 
-    const currency = 'INR'
     const options = {
       amount,
       currency,
@@ -43,7 +56,7 @@ export async function POST(request: Request) {
       notes: {
         userId: user.id,
         email: user.email || '',
-        planType,
+        planType: planType,
       },
     }
 

@@ -8,9 +8,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     full_name TEXT,
     plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'pro')),
     plan_type TEXT DEFAULT 'free',
-    plan_expires_at TIMESTAMP WITH TIME ZONE,
-    scans_today INTEGER DEFAULT 0,
-    scans_reset_at DATE DEFAULT CURRENT_DATE,
+    scan_credits INTEGER DEFAULT 5,
     dietary_profile JSONB DEFAULT '{"age": null, "weight": null, "allergies": [], "conditions": [], "goals": []}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );

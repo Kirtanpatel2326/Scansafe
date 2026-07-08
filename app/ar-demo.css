@@ -1,0 +1,68 @@
+.ar-demo-container {
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  width: 100%;
+}
+
+.ar-demo-container #ss-eyebrow { font-size: 11px; letter-spacing: 4px; color: #00C853; text-transform: uppercase; text-align: center; margin-bottom: 16px; }
+.ar-demo-container #ss-title { font-size: clamp(28px, 5vw, 48px); font-weight: 800; text-align: center; line-height: 1.1; margin-bottom: 12px; letter-spacing: -1px; }
+.ar-demo-container #ss-title span { color: #00C853; }
+.ar-demo-container #ss-sub { font-size: 15px; color: #a1a1aa; text-align: center; margin-bottom: 48px; max-width: 480px; margin-left: auto; margin-right: auto; line-height: 1.6; }
+.ar-demo-container #ss-stage { display: flex; gap: 40px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.ar-demo-container #ss-phone-wrap { position: relative; flex-shrink: 0; }
+.ar-demo-container #ss-phone { width: 260px; height: 520px; background: #050a05; border-radius: 36px; border: 4px solid #27272a; overflow: hidden; position: relative; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(16, 185, 129, 0.1); }
+.ar-demo-container #ss-notch { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 80px; height: 22px; background: #000; border-radius: 11px; z-index: 20; border: 1px solid #27272a; }
+.ar-demo-container #ss-cam-feed { position: absolute; inset: 0; background: #060e06; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+
+/* Real Product Background */
+.ar-demo-container #ss-pkg-bg { position: absolute; inset: 0; background: url('/coke-can-full.png') center/cover; opacity: 0.8; filter: blur(1px); }
+
+.ar-demo-container #ss-pkg { width: 170px; height: 280px; background: rgba(12, 26, 12, 0.7); backdrop-filter: blur(4px); border-radius: 12px; border: 1px solid #1e301e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px; opacity: 0; transition: opacity 0.6s; z-index: 5; }
+.ar-demo-container .ss-ing-row { font-size: 10px; color: #3a6a3a; font-family: monospace; letter-spacing: 0.3px; text-align: center; line-height: 1.8; transition: color 0.3s; font-weight: 600; }
+.ar-demo-container .ss-ing-row.highlight-r { color: #FF3D00; text-shadow: 0 0 6px #FF3D0066; }
+.ar-demo-container .ss-ing-row.highlight-y { color: #FFD600; text-shadow: 0 0 6px #FFD60066; }
+.ar-demo-container .ss-ing-row.highlight-g { color: #00C853; text-shadow: 0 0 6px #00C85366; }
+.ar-demo-container #ss-hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.ar-demo-container .ss-c { position: absolute; width: 24px; height: 24px; opacity: 0; transition: opacity 0.4s; }
+.ar-demo-container #c1 { top: 46px; left: 16px; border-top: 2px solid #00C853; border-left: 2px solid #00C853; }
+.ar-demo-container #c2 { top: 46px; right: 16px; border-top: 2px solid #00C853; border-right: 2px solid #00C853; }
+.ar-demo-container #c3 { bottom: 46px; left: 16px; border-bottom: 2px solid #00C853; border-left: 2px solid #00C853; }
+.ar-demo-container #c4 { bottom: 46px; right: 16px; border-bottom: 2px solid #00C853; border-right: 2px solid #00C853; }
+.ar-demo-container #ss-sl { position: absolute; left: 16px; right: 16px; height: 2px; background: #00C853; box-shadow: 0 0 12px #00C853; top: 100px; opacity: 0; z-index: 11; }
+.ar-demo-container #ss-status { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #00C853; font-family: monospace; font-weight: 700; letter-spacing: 2px; opacity: 0; white-space: nowrap; transition: opacity 0.3s; z-index: 12; text-shadow: 0 0 8px #00C85388; }
+.ar-demo-container .ss-ar-box { position: absolute; left: 24px; right: 24px; padding: 6px 10px; border-radius: 4px; font-size: 9px; font-family: monospace; font-weight: 800; display: flex; justify-content: space-between; align-items: center; opacity: 0; transform: scaleX(0.6); transform-origin: left; transition: opacity 0.3s, transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); border: 1px solid; z-index: 12; backdrop-filter: blur(2px); }
+.ar-demo-container .ar-r { background: #FF3D0022; border-color: #FF3D00; color: #FF3D00; }
+.ar-demo-container .ar-y { background: #FFD60022; border-color: #FFD600; color: #FFD600; }
+.ar-demo-container .ar-g { background: #00C85322; border-color: #00C853; color: #00C853; }
+.ar-demo-container #b1 { top: 170px; } .ar-demo-container #b2 { top: 200px; } .ar-demo-container #b3 { top: 230px; } .ar-demo-container #b4 { top: 260px; } .ar-demo-container #b5 { top: 290px; }
+.ar-demo-container .ss-badge { font-size: 8px; padding: 2px 5px; border-radius: 3px; font-weight: 800; letter-spacing: 0.5px; }
+.ar-demo-container .ar-r .ss-badge { background: #FF3D00; color: #fff; }
+.ar-demo-container .ar-y .ss-badge { background: #FFD600; color: #000; }
+.ar-demo-container .ar-g .ss-badge { background: #00C853; color: #000; }
+.ar-demo-container #ss-score { position: absolute; bottom: 60px; left: 16px; right: 16px; background: rgba(5, 10, 5, 0.9); border: 1px solid #1a3a1a; border-radius: 10px; padding: 12px; opacity: 0; transform: translateY(12px); transition: opacity 0.5s, transform 0.5s; z-index: 12; backdrop-filter: blur(4px); }
+.ar-demo-container #ss-sc-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.ar-demo-container #ss-sc-lbl { font-size: 9px; color: #4ade80; letter-spacing: 2px; font-family: monospace; font-weight: 700; }
+.ar-demo-container #ss-sc-val { font-size: 24px; font-weight: 900; color: #FF3D00; font-family: monospace; text-shadow: 0 0 10px #FF3D0044; }
+.ar-demo-container #ss-sc-track { height: 4px; background: #1a2a1a; border-radius: 2px; overflow: hidden; }
+.ar-demo-container #ss-sc-fill { height: 100%; width: 0; background: linear-gradient(90deg, #FFD600, #FF3D00); transition: width 1.2s cubic-bezier(.22, 1, .36, 1); box-shadow: 0 0 10px #FF3D00; }
+.ar-demo-container #ss-expose { position: absolute; bottom: 16px; left: 16px; right: 16px; background: #1a0505; border: 1px solid #FF3D00; border-radius: 6px; padding: 10px; font-size: 10px; font-family: monospace; color: #FF3D00; font-weight: 800; letter-spacing: 1px; text-align: center; opacity: 0; transition: opacity 0.4s, background 0.3s; z-index: 12; cursor: pointer; pointer-events: auto; }
+.ar-demo-container #ss-expose:hover { background: #330a0a; }
+.ar-demo-container #ss-info { flex: 1; min-width: 280px; max-width: 440px; }
+.ar-demo-container #ss-steps { display: flex; flex-direction: column; gap: 28px; }
+.ar-demo-container .ss-step { display: flex; gap: 16px; align-items: flex-start; opacity: 0; transform: translateY(16px); transition: opacity 0.5s, transform 0.5s; }
+.ar-demo-container .ss-step.visible { opacity: 1; transform: translateY(0); }
+.ar-demo-container .ss-step-num { width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid #00C853; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #00C853; font-family: monospace; font-weight: 800; flex-shrink: 0; margin-top: 2px; box-shadow: 0 0 10px #00C85333; }
+.ar-demo-container .ss-step-title { font-size: 16px; font-weight: 800; margin-bottom: 6px; color: #fff; }
+.ar-demo-container .ss-step-desc { font-size: 14px; color: #a1a1aa; line-height: 1.6; }
+.ar-demo-container .ss-step-tag { display: inline-block; font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 800; margin-top: 8px; letter-spacing: 0.5px; margin-right: 6px; }
+.ar-demo-container .tag-r { background: #FF3D0022; color: #FF3D00; border: 1px solid #FF3D0044; }
+.ar-demo-container .tag-y { background: #FFD60022; color: #FFD600; border: 1px solid #FFD60044; }
+.ar-demo-container .tag-g { background: #00C85322; color: #00C853; border: 1px solid #00C85344; }
+.ar-demo-container #ss-play { text-align: center; margin-top: 32px; }
+.ar-demo-container #ss-play button { background: rgba(0, 200, 83, 0.1); border: 1px solid rgba(0, 200, 83, 0.3); color: #00C853; padding: 10px 20px; border-radius: 8px; font-size: 12px; font-family: monospace; font-weight: 700; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; transition: all 0.3s; }
+.ar-demo-container #ss-play button:hover:not(:disabled) { background: rgba(0, 200, 83, 0.2); border-color: #00C853; box-shadow: 0 0 15px rgba(0, 200, 83, 0.2); }
+.ar-demo-container #ss-play button:disabled { opacity: 0.5; cursor: not-allowed; }
+.ar-demo-container #ss-divider { width: 1px; height: 380px; background: linear-gradient(to bottom, transparent, #27272a 30%, #27272a 70%, transparent); margin: 0 24px; flex-shrink: 0; display: none; }
+@media (min-width: 900px) {
+  .ar-demo-container #ss-divider { display: block; }
+}
