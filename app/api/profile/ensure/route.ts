@@ -28,7 +28,8 @@ export async function POST() {
         email: email,
         full_name: fullName,
         plan: 'free',
-        scan_credits: 5
+        scans_today: 0,
+        scans_reset_at: new Date().toISOString().split('T')[0]
       })
 
       if (insertError) {

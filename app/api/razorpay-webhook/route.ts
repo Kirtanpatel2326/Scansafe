@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     }
 
     // Process upgrade on payment success
-    if (body.event === 'payment.captured') {
+    if (body.event === 'payment.captured' || body.event === 'order.paid') {
       const entity = body.payload?.payment?.entity || body.payload?.order?.entity
       const notes = entity?.notes
       const userId = notes?.userId
@@ -44,49 +44,41 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'No userId in notes' }, { status: 400 })
       }
 
-      // Calculate credits to add
-      let creditsToAdd = 0
-      if (planType === 'day') creditsToAdd = 10
-      else if (planType === 'week') creditsToAdd = 100
-      else if (planType === 'month') creditsToAdd = 320
-      else if (planType === 'year') creditsToAdd = 1200
-      else if (planType === 'usd_1') creditsToAdd = 10
-      else if (planType === 'usd_9') creditsToAdd = 120
-      else if (planType === 'usd_99') creditsToAdd = 1500
-      else if (planType === 'usd_299') creditsToAdd = 5000
+      // Calculate expiration date
+      let expiresAt: string | null = null
+      const now = new Date()
+      if (planType === 'day') {
+        expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      } else if (planType === 'week') {
+        expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      } else if (planType === 'month') {
+        expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      } else if (planType === 'year') {
+        expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString()
+      }
 
-      console.log(`Adding ${creditsToAdd} scans to user ${userId} (Payment: ${paymentId})...`)
+      console.log(`Upgrading user ${userId} to Pro plan: type=${planType}, expires=${expiresAt} (Payment: ${paymentId})...`)
 
       const supabaseAdmin = createAdminClient()
 
-      // Fetch current credits
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('scan_credits')
-        .eq('id', userId)
-        .single()
-
-      const currentCredits = profile?.scan_credits || 0
-      const newCredits = currentCredits + creditsToAdd
-
-      // Upgrade profile with new credits
+      // Upgrade profile to Pro with subscription fields
       const { data, error } = await supabaseAdmin
         .from('profiles')
         .update({
           plan: 'pro',
           plan_type: planType,
-          scan_credits: newCredits,
+          plan_expires_at: expiresAt,
           razorpay_subscription_id: paymentId
         })
         .eq('id', userId)
         .select()
 
       if (error) {
-        console.error('Failed to add scan credits to profile in DB:', error)
+        console.error('Failed to upgrade user profile in DB:', error)
         return NextResponse.json({ error: 'DB upgrade failed' }, { status: 500 })
       }
 
-      console.log('User scan credits successfully updated:', data)
+      console.log('User successfully upgraded to Pro:', data)
     }
 
     return NextResponse.json({ success: true })

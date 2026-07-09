@@ -73,7 +73,8 @@ export async function POST(request: Request) {
           email: email,
           full_name: fullName,
           plan: 'free',
-          scan_credits: 5
+          scans_today: 0,
+          scans_reset_at: new Date().toISOString().split('T')[0]
         })
         .select()
         .single()
@@ -85,26 +86,62 @@ export async function POST(request: Request) {
       profile = newProfile
     }
 
-    // Check if user has scan credits remaining
-    const currentCredits = profile.scan_credits ?? 0
+    // Check plan expiration on-the-fly and sync to DB
+    const now = new Date()
+    const hasExpired = profile.plan === 'pro' && profile.plan_expires_at && new Date(profile.plan_expires_at) <= now
 
-    if (currentCredits <= 0) {
-      return NextResponse.json({
-        error: 'LIMIT_EXCEEDED',
-        message: 'Out of scans! Please purchase a scan pack to continue.'
-      }, { status: 403 })
+    if (hasExpired) {
+      console.log(`User ${user.id} subscription expired on ${profile.plan_expires_at}. Reverting to free plan.`)
+      
+      const { error: revertError } = await supabase
+        .from('profiles')
+        .update({
+          plan: 'free',
+          plan_type: 'free',
+          plan_expires_at: null
+        })
+        .eq('id', user.id)
+
+      if (revertError) {
+        console.error('Failed to auto-revert expired profile plan to free:', revertError)
+      } else {
+        profile.plan = 'free'
+        profile.plan_type = 'free'
+        profile.plan_expires_at = null
+      }
     }
 
-    // Decrement count in database
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({
-        scan_credits: currentCredits - 1
-      })
-      .eq('id', user.id)
+    // Check scan limits for free users
+    const todayStr = new Date().toISOString().split('T')[0]
+    if (profile.plan !== 'pro') {
+      let scansToday = profile.scans_today
+      let resetAt = profile.scans_reset_at
 
-    if (updateError) {
-      console.error('Failed to decrement scan count:', updateError)
+      // Check if reset is needed
+      if (resetAt !== todayStr) {
+        scansToday = 0
+        resetAt = todayStr
+      }
+
+      if (scansToday >= 5) {
+        return NextResponse.json({
+          error: 'LIMIT_EXCEEDED',
+          message: 'You have reached your limit of 5 free scans for today. Please upgrade to Pro for unlimited scans!'
+        }, { status: 403 })
+      }
+
+      // Increment count in database
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          scans_today: scansToday + 1,
+          scans_reset_at: resetAt
+        })
+        .eq('id', user.id)
+
+      if (updateError) {
+        console.error('Failed to update scan count:', updateError)
+      }
     }
 
     // Parse request body
