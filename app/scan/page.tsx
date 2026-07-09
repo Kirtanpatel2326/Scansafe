@@ -36,7 +36,8 @@ export default function ScanPage() {
   const [profile, setProfile] = useState<{ 
     plan: string 
     plan_type?: string
-    scan_credits: number
+    plan_expires_at?: string | null
+    scans_today: number
     dietary_profile?: {
       age?: number
       weight?: number
@@ -94,7 +95,7 @@ export default function ScanPage() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('plan, plan_type, scan_credits, dietary_profile')
+        .select('plan, plan_type, plan_expires_at, scans_today, dietary_profile')
         .eq('id', userId)
         .single()
       
@@ -391,9 +392,13 @@ export default function ScanPage() {
             <div className="flex items-center gap-3 bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-350 self-start md:self-auto">
               <span>Plan: <strong className="text-white uppercase">{profile.plan === 'pro' ? `PRO (${profile.plan_type || 'lifetime'})` : 'free'}</strong></span>
               <div className="w-[1px] h-3.5 bg-zinc-850" />
-              <span className="text-emerald-400 font-bold flex items-center gap-1">
-                <Zap className="w-3.5 h-3.5 fill-emerald-400" /> {profile.scan_credits} Scans Left
-              </span>
+              {profile.plan === 'pro' ? (
+                <span className="text-emerald-400 font-bold">
+                  Unlimited scans {profile.plan_expires_at && `(expires ${new Date(profile.plan_expires_at).toLocaleDateString()})`}
+                </span>
+              ) : (
+                <span>Daily Scans Used: <strong className="text-white">{profile.scans_today} / 5</strong></span>
+              )}
             </div>
           )}
         </div>

@@ -42,12 +42,12 @@ export default function Header() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('scan_credits')
+        .select('scans_today')
         .eq('id', userId)
         .single()
       
       if (!error && data) {
-        setScanCredits(data.scan_credits || 0)
+        setScanCredits(data.scans_today || 0)
       }
     } catch (e) {
       console.error('Error fetching profile plan:', e)
