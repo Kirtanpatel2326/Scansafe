@@ -39,7 +39,7 @@ export default function ContactPage() {
                   kirtanpatel2305@gmail.com
                 </a>
                 <span className="text-zinc-500 text-[10px]">
-                  Alternative: support@scansafe.in (inactive)
+                  Direct Founder & Technical Support Channel
                 </span>
               </div>
             </div>

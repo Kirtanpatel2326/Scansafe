@@ -28,7 +28,7 @@ export default function PricingPage() {
   const [upgrading, setUpgrading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
   const [isInternational, setIsInternational] = useState(false)
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('year')
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('week')
   const [showManualModal, setShowManualModal] = useState(false)
   const [utr, setUtr] = useState('')
   const [submittingUtr, setSubmittingUtr] = useState(false)
@@ -319,10 +319,10 @@ export default function PricingPage() {
               {/* Pro Plan */}
               {(() => {
                 const inrPeriods = [
-                  { id: 'day', name: '10 Scans', price: 10, symbol: '₹', period: '', desc: '10 lifetime scans', savings: 'Quick Trial' },
-                  { id: 'week', name: '100 Scans', price: 99, symbol: '₹', period: '', desc: '100 lifetime scans', savings: 'Save 70%' },
-                  { id: 'month', name: '320 Scans', price: 299, symbol: '₹', period: '', desc: '320 lifetime scans', savings: 'Save 90%' },
-                  { id: 'year', name: '1200 Scans', price: 999, symbol: '₹', period: '', desc: '1200 lifetime scans', savings: 'Best Value ⭐' },
+                  { id: 'day', name: '10 Scans', price: 10, symbol: '₹', period: '', desc: '10 lifetime scans', savings: '₹1.00/scan' },
+                  { id: 'week', name: '100 Scans', price: 99, symbol: '₹', period: '', desc: '100 lifetime scans', savings: '₹0.99/scan' },
+                  { id: 'month', name: '320 Scans', price: 299, symbol: '₹', period: '', desc: '320 lifetime scans', savings: '₹0.93/scan' },
+                  { id: 'year', name: '1200 Scans', price: 999, symbol: '₹', period: '', desc: '1200 lifetime scans', savings: '₹0.83/scan' },
                 ] as const
                 
                 const usdPeriods = [

@@ -772,7 +772,8 @@ export default function ScanPage() {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {[
                       { id: 'gluten-free', label: 'Gluten-Free' },
-                      { id: 'dairy-free', label: 'Dairy-Free' },
+                      { id: 'dairy-free', label: 'Dairy-Free (Milk Allergy)' },
+                      { id: 'lactose-free', label: 'Lactose Intolerant' },
                       { id: 'nut-free', label: 'Nut-Free' },
                       { id: 'vegan', label: 'Vegan' },
                       { id: 'vegetarian', label: 'Vegetarian' },
@@ -784,7 +785,7 @@ export default function ScanPage() {
                     ].map((pref) => {
                       const isSelected = selectedAllergies.includes(pref.id) || selectedConditions.includes(pref.id)
                       const togglePref = () => {
-                        if (['gluten-free', 'dairy-free', 'nut-free', 'vegan', 'vegetarian'].includes(pref.id)) {
+                        if (['gluten-free', 'dairy-free', 'lactose-free', 'nut-free', 'vegan', 'vegetarian'].includes(pref.id)) {
                           setSelectedAllergies((prev) => 
                             prev.includes(pref.id) ? prev.filter((p) => p !== pref.id) : [...prev, pref.id]
                           )

@@ -80,7 +80,7 @@ export default function PrivacyPage() {
               <ol className="list-decimal pl-5 space-y-1">
                 <li>Go to the <strong className="text-zinc-200">Family Profiles</strong> tab inside the scanner page.</li>
                 <li>Clear any secondary profile names and remove all entries from your ingredient blacklist.</li>
-                <li>To completely delete your scan logs, clear your scans queue or send an account deletion email directly to <span className="text-emerald-400 underline">support@scansafe.in</span>.</li>
+                <li>To completely delete your scan logs, clear your scans queue or send an account deletion email directly to <span className="text-emerald-400 underline">kirtanpatel2305@gmail.com</span>.</li>
               </ol>
               <p className="text-zinc-500 italic mt-2">
                 Upon request, your user record, associated profiles, and all scan logs will be permanently deleted from our live PostgreSQL databases within 48 hours.

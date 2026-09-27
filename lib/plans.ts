@@ -26,7 +26,7 @@ export const SCAN_PACKS: Record<string, ScanPack> = {
     pricePaise: 1000,
     priceUsd: 1,
     priceCents: 100,
-    tag: "Quick Trial",
+    tag: "₹1.00/scan",
     description: "10 lifetime scans for quick label checks.",
     features: [
       "10 High-Precision Food Scans",
@@ -43,7 +43,7 @@ export const SCAN_PACKS: Record<string, ScanPack> = {
     pricePaise: 9900,
     priceUsd: 9,
     priceCents: 900,
-    tag: "Save 70%",
+    tag: "₹0.99/scan",
     description: "100 lifetime scans for regular grocery shopping.",
     features: [
       "100 High-Precision Food Scans",
@@ -61,7 +61,7 @@ export const SCAN_PACKS: Record<string, ScanPack> = {
     pricePaise: 29900,
     priceUsd: 29,
     priceCents: 2900,
-    tag: "Most Popular ⭐",
+    tag: "Most Popular ⭐ (₹0.93/scan)",
     isPopular: true,
     description: "320 lifetime scans for health-conscious families.",
     features: [
@@ -81,78 +81,56 @@ export const SCAN_PACKS: Record<string, ScanPack> = {
     pricePaise: 99900,
     priceUsd: 99,
     priceCents: 9900,
-    tag: "Best Value 👑",
+    tag: "Best Value 👑 (₹0.83/scan)",
     description: "1,200 lifetime scans for fitness enthusiasts & bulk shoppers.",
     features: [
       "1,200 High-Precision Food Scans",
       "Unlimited Family Profiles",
       "Exportable Clean PDF Health Breakdowns",
       "Priority AI Engine Access",
-      "Dedicated Email Support",
+      "Dedicated Support",
       "Never Expires"
     ]
-  },
-  // Legacy aliases for backward compatibility
-  day: {
-    id: "pack_10",
-    name: "10 Scan Pack",
-    scans: 10,
-    priceInr: 10,
-    pricePaise: 1000,
-    priceUsd: 1,
-    priceCents: 100,
-    tag: "Quick Trial",
-    description: "10 lifetime scans for quick label checks.",
-    features: ["10 High-Precision Food Scans", "Never Expires"]
-  },
-  week: {
-    id: "pack_100",
-    name: "100 Scan Pack",
-    scans: 100,
-    priceInr: 99,
-    pricePaise: 9900,
-    priceUsd: 9,
-    priceCents: 900,
-    tag: "Save 70%",
-    description: "100 lifetime scans for regular grocery shopping.",
-    features: ["100 High-Precision Food Scans", "Never Expires"]
-  },
-  month: {
-    id: "pack_320",
-    name: "320 Scan Pack",
-    scans: 320,
-    priceInr: 299,
-    pricePaise: 29900,
-    priceUsd: 29,
-    priceCents: 2900,
-    tag: "Most Popular ⭐",
-    isPopular: true,
-    description: "320 lifetime scans for health-conscious families.",
-    features: ["320 High-Precision Food Scans", "Never Expires"]
-  },
-  year: {
-    id: "pack_1200",
-    name: "1200 Scan Pack",
-    scans: 1200,
-    priceInr: 999,
-    pricePaise: 99900,
-    priceUsd: 99,
-    priceCents: 9900,
-    tag: "Best Value 👑",
-    description: "1,200 lifetime scans for fitness enthusiasts & bulk shoppers.",
-    features: ["1,200 High-Precision Food Scans", "Never Expires"]
   }
 };
 
-export const INITIAL_FREE_SCANS = 3;
+const LEGACY_PACK_ALIASES: Record<string, string> = {
+  day: "pack_10",
+  week: "pack_100",
+  month: "pack_320",
+  year: "pack_1200"
+};
+
+export const INITIAL_FREE_SCANS = 5;
 export const CREDIT_COSTS = {
   SCAN: 1,
   COMPARE: 2,
   MEAL_COMPOSER: 1
 } as const;
 
-export function getScanPack(packId: string): ScanPack | null {
-  return SCAN_PACKS[packId] || null;
+/**
+ * Validates and retrieves a scan pack. Strictly checks own properties
+ * to prevent inherited prototype pollution or malformed strings.
+ */
+export function getScanPack(packId: unknown): ScanPack | null {
+  if (typeof packId !== "string" || !packId || packId.length > 50) {
+    return null;
+  }
+
+  const normalized = packId.trim();
+
+  // Check official catalog directly with hasOwnProperty
+  if (Object.prototype.hasOwnProperty.call(SCAN_PACKS, normalized)) {
+    return SCAN_PACKS[normalized];
+  }
+
+  // Check legacy aliases
+  if (Object.prototype.hasOwnProperty.call(LEGACY_PACK_ALIASES, normalized)) {
+    const aliasTarget = LEGACY_PACK_ALIASES[normalized];
+    return SCAN_PACKS[aliasTarget] || null;
+  }
+
+  return null;
 }
 
 export function getAllPacks(): ScanPack[] {
