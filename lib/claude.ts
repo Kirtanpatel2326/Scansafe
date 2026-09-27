@@ -389,6 +389,18 @@ export function applyPreferences(
     return cloned;
   }
 
+  const declaredAllergensList = cloned.allergens_declared || cloned.allergens || [];
+  if (cloned.ingredients.length === 0 && declaredAllergensList.length === 0) {
+    cloned.dietary_compatibility = {
+      is_compatible: false,
+      status: "insufficient_data",
+      matched_preferences: userPreferences,
+      violations: [],
+      allergen_warnings: ["Insufficient ingredient or allergen data on packaging to verify dietary compatibility."],
+    };
+    return cloned;
+  }
+
   const violations: Array<{ preference: string; ingredient: string; reason: string }> = [];
   const allergenWarnings: string[] = [];
   const normalizedPrefs = userPreferences.map(p => p.toLowerCase().trim());
@@ -890,9 +902,12 @@ JSON.stringify({
     throw new Error("Failed to parse AI response as valid JSON.");
   }
 
-  // Runtime Zod Schema Validation
+  // Runtime Zod Schema Validation (strictly fail-closed)
   const validatedFacts = RawProductFactsSchema.safeParse(parsedRaw);
-  const rawJson = validatedFacts.success ? validatedFacts.data : parsedRaw;
+  if (!validatedFacts.success) {
+    throw new Error(`AI generated invalid product facts schema: ${validatedFacts.error.message}`);
+  }
+  const rawJson = validatedFacts.data;
 
   const nf = rawJson.nutrition_facts || { panel_status: rawJson.panel_status || "extracted" };
   const ps = nf.per_serving || {};
@@ -1023,7 +1038,10 @@ JSON.stringify({
   }
 
   const validated = RawProductFactsSchema.safeParse(rawParsed);
-  const rawJson = validated.success ? validated.data : rawParsed;
+  if (!validated.success) {
+    throw new Error(`Enrichment AI returned invalid product facts: ${validated.error.message}`);
+  }
+  const rawJson = validated.data;
 
   const nf = rawJson.nutrition_facts || { per_100g: {} };
   const p100 = nf.per_100g || {};

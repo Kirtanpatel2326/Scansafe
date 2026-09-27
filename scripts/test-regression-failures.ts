@@ -161,6 +161,32 @@ if (!declaredAllergenCheck.dietary_compatibility?.is_compatible && declaredAller
 }
 
 // -------------------------------------------------------------
+// Test 7b: Empty ingredient list with zero declared allergens (Insufficient Data)
+// -------------------------------------------------------------
+console.log("\n--- Testing Empty ingredient list with zero declared allergens ---");
+const emptyProduct: IngredientAnalysis = {
+  product_name: "Empty Fact Product",
+  brand: "Brand",
+  health_score: null,
+  health_score_reason: "Insufficient evidence",
+  safety_level: "insufficient_evidence",
+  description: "",
+  ingredients: [],
+  additives: [],
+  allergens_declared: [],
+  allergens: [],
+  nutrition_facts: { panel_status: "unreadable" },
+  recommendations: []
+};
+const emptyCheck = applyPreferences(emptyProduct, ["gluten-free"]);
+console.log("Empty product compatibility:", emptyCheck.dietary_compatibility);
+if (!emptyCheck.dietary_compatibility?.is_compatible && emptyCheck.dietary_compatibility?.status === "insufficient_data") {
+  console.log("✅ Empty Data Handled: Returns status: 'insufficient_data' and is_compatible: false");
+} else {
+  console.log("❌ Empty Data Failed: Allowed empty product with active preferences!");
+}
+
+// -------------------------------------------------------------
 // Test 8: Rolled oats with "May contain trace wheat"
 // -------------------------------------------------------------
 console.log("\n--- Testing Failure 8: Rolled oats with 'May contain trace wheat' ---");

@@ -62,6 +62,7 @@ export default function ScanPage() {
 
   // Meal Composer State
   const [selectedScanIds, setSelectedScanIds] = useState<string[]>([])
+  const [itemQuantities, setItemQuantities] = useState<Record<string, { quantity: number; unit: 'g' | 'ml' | 'servings' }>>({})
   const [mealName, setMealName] = useState('')
   const [compositing, setCompositing] = useState(false)
   const [composedMeal, setComposedMeal] = useState<any | null>(null)
@@ -234,17 +235,43 @@ export default function ScanPage() {
   }
 
   // Meal Composer Submissions
+  const handleQuantityChange = (id: string, qty: number) => {
+    setItemQuantities((prev) => ({
+      ...prev,
+      [id]: {
+        quantity: Math.max(1, isNaN(qty) ? 100 : qty),
+        unit: prev[id]?.unit || 'g'
+      }
+    }))
+  }
+
+  const handleUnitChange = (id: string, unit: 'g' | 'ml' | 'servings') => {
+    setItemQuantities((prev) => ({
+      ...prev,
+      [id]: {
+        quantity: prev[id]?.quantity || 100,
+        unit
+      }
+    }))
+  }
+
   const handleComposeMeal = async (e: React.FormEvent) => {
     e.preventDefault()
     if (selectedScanIds.length === 0) return
     setCompositing(true)
     setComposedMeal(null)
     try {
+      const items = selectedScanIds.map((id) => ({
+        scanId: id,
+        quantity: itemQuantities[id]?.quantity ?? 100,
+        unit: itemQuantities[id]?.unit ?? 'g'
+      }))
+
       const res = await fetch('/api/meal-composer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          scanIds: selectedScanIds,
+          items,
           mealName: mealName || 'Balanced Mix'
         })
       })
@@ -578,30 +605,61 @@ export default function ScanPage() {
 
                 <div>
                   <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-2">Select Items to Combine</label>
-                  <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
+                  <div className="flex flex-col gap-2.5 max-h-[340px] overflow-y-auto pr-1">
                     {recentScans.length > 0 ? (
-                      recentScans.map((s) => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() => toggleSelectScan(s.id)}
-                          className={`flex items-center justify-between rounded-xl border p-3.5 text-left transition text-xs cursor-pointer ${
-                            selectedScanIds.includes(s.id)
-                              ? 'bg-emerald-950/20 border-emerald-500 text-emerald-350'
-                              : 'bg-zinc-900/50 border-zinc-850 text-zinc-300'
-                          }`}
-                        >
-                          <div className="min-w-0 pr-2">
-                            <span className="font-semibold text-white block truncate">{s.product_name}</span>
-                            <span className="text-[10px] text-zinc-500">Score: {s.health_score}</span>
+                      recentScans.map((s) => {
+                        const isSelected = selectedScanIds.includes(s.id);
+                        return (
+                          <div
+                            key={s.id}
+                            className={`rounded-xl border p-3 transition text-xs ${
+                              isSelected
+                                ? 'bg-emerald-950/20 border-emerald-500 text-emerald-350'
+                                : 'bg-zinc-900/50 border-zinc-850 text-zinc-300'
+                            }`}
+                          >
+                            <div
+                              onClick={() => toggleSelectScan(s.id)}
+                              className="flex items-center justify-between cursor-pointer"
+                            >
+                              <div className="min-w-0 pr-2">
+                                <span className="font-semibold text-white block truncate">{s.product_name}</span>
+                                <span className="text-[10px] text-zinc-500">Score: {s.health_score ?? 'N/A'}</span>
+                              </div>
+                              <div className={`h-5 w-5 shrink-0 rounded-full border flex items-center justify-center ${
+                                isSelected ? 'bg-emerald-500 border-emerald-500 text-black' : 'border-zinc-700'
+                              }`}>
+                                {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                              </div>
+                            </div>
+
+                            {isSelected && (
+                              <div className="mt-2.5 pt-2 border-t border-emerald-900/40 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Portion:</span>
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="5000"
+                                    value={itemQuantities[s.id]?.quantity ?? 100}
+                                    onChange={(e) => handleQuantityChange(s.id, parseInt(e.target.value, 10))}
+                                    className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-emerald-500"
+                                  />
+                                  <select
+                                    value={itemQuantities[s.id]?.unit ?? 'g'}
+                                    onChange={(e) => handleUnitChange(s.id, e.target.value as 'g' | 'ml' | 'servings')}
+                                    className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                  >
+                                    <option value="g">g</option>
+                                    <option value="ml">ml</option>
+                                    <option value="servings">servings</option>
+                                  </select>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <div className={`h-5 w-5 shrink-0 rounded-full border flex items-center justify-center ${
-                            selectedScanIds.includes(s.id) ? 'bg-emerald-500 border-emerald-500 text-black' : 'border-zinc-700'
-                          }`}>
-                            {selectedScanIds.includes(s.id) && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                          </div>
-                        </button>
-                      ))
+                        );
+                      })
                     ) : (
                       <p className="text-zinc-500 text-center py-4 text-xs">No recent scans available. Go scan some foods first!</p>
                     )}
@@ -611,7 +669,7 @@ export default function ScanPage() {
                 <button
                   type="submit"
                   disabled={selectedScanIds.length === 0 || compositing}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3.5 rounded-xl text-sm transition disabled:bg-zinc-850 disabled:text-zinc-500"
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3.5 rounded-xl text-sm transition disabled:bg-zinc-850 disabled:text-zinc-500 cursor-pointer"
                 >
                   {compositing ? 'Analyzing Composite Meal...' : `Analyze Combined Items (${selectedScanIds.length})`}
                 </button>
@@ -639,8 +697,18 @@ export default function ScanPage() {
                     )}
                   </div>
 
+                  {composedMeal.quantity_breakdown && composedMeal.quantity_breakdown.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {composedMeal.quantity_breakdown.map((q: any, idx: number) => (
+                        <span key={idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-300">
+                          <span className="font-bold text-emerald-400">{q.quantity}</span> {q.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-4 bg-zinc-900/40 border border-zinc-850 p-4 rounded-xl">
-                    <div className="h-16 w-16 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex flex-col items-center justify-center">
+                    <div className="h-16 w-16 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex flex-col items-center justify-center shrink-0">
                       <span className="text-lg font-black">{composedMeal.health_score}</span>
                       <span className="text-[8px] uppercase font-bold text-zinc-500 tracking-wider">Score</span>
                     </div>
