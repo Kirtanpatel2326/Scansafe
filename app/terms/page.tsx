@@ -62,23 +62,26 @@ export default function TermsPage() {
               </ul>
             </section>
 
-            {/* Section 3: Billing, Payments, and Upgrades */}
+            {/* Section 3: Billing, Payments, and Scan Packs */}
             <section className="space-y-3">
               <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
-                <Coins className="w-5 h-5 text-emerald-400" /> 3. Pro Subscription & Razorpay Gateway
+                <Coins className="w-5 h-5 text-emerald-400" /> 3. Scan Packs, Billing & Razorpay Gateway
               </h2>
               <p className="text-zinc-400 text-sm leading-relaxed">
-                We offer free trial usage and a premium tier ("ScanSafe Pro") via one-time or recurring payments processed through Razorpay.
+                ScanSafe operates on a transparent, credit-based scan pack model processed securely through Razorpay:
               </p>
               <ul className="list-disc pl-6 text-zinc-400 text-xs space-y-2">
                 <li>
-                  <strong className="text-zinc-200">Billing Policies:</strong> All transaction records and details are secured. Payments are processed securely via UPI, cards, or net banking.
+                  <strong className="text-zinc-200">Scan Packs Catalog:</strong> We provide 10 Scan Pack (₹10), 100 Scan Pack (₹99), 320 Scan Pack (₹299), and 1200 Scan Pack (₹999).
                 </li>
                 <li>
-                  <strong className="text-zinc-200">₹1 Promo Trial:</strong> For promotional trials, your card or UPI channel is charged ₹1 to verify credentials. No recurring auto-debits are configured without explicit consent.
+                  <strong className="text-zinc-200">Lifetime Validity:</strong> Purchased scan credits never expire and remain available in your account until consumed.
                 </li>
                 <li>
-                  <strong className="text-zinc-200">Refunds:</strong> Refund requests for one-time Pro upgrades must be submitted within 7 days of payment to <span className="text-emerald-400 underline">support@scansafe.in</span>. Valid refunds will be processed to the original payment channel.
+                  <strong className="text-zinc-200">Credit Costs:</strong> 1 credit per single product scan, 2 credits per head-to-head comparison, and 1 credit per composite meal analysis.
+                </li>
+                <li>
+                  <strong className="text-zinc-200">Refunds:</strong> Refund requests for unused scan packs submitted within 7 days of purchase to <span className="text-emerald-400 underline">support@scansafe.in</span> will be refunded to the original payment channel.
                 </li>
               </ul>
             </section>
@@ -113,8 +116,8 @@ export default function TermsPage() {
                 If you encounter payment failures, account syncing bugs, or have general terms inquiries, reach out to our team at:
               </p>
               <p className="text-xs text-zinc-500">
-                Email: <span className="text-emerald-400 font-bold">support@scansafe.in</span><br />
-                ScanSafe India Inc., Bangalore, Karnataka, India.
+                Email: <span className="text-emerald-400 font-bold">kirtanpatel2305@gmail.com</span><br />
+                ScanSafe AI Pvt. Ltd., Anand, Gujarat, India, 388001.
               </p>
             </section>
           </div>

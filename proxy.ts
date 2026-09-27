@@ -10,6 +10,12 @@ export async function proxy(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: {
+        maxAge: 31536000, // 1 year in seconds
+        secure: true,
+        sameSite: 'lax',
+        path: '/'
+      },
       cookies: {
         getAll() {
           return request.cookies.getAll()
@@ -32,13 +38,18 @@ export async function proxy(request: NextRequest) {
   // issues with cross-browser cookies.
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isProtectedRoute = request.nextUrl.pathname.startsWith('/scan') || 
-                           request.nextUrl.pathname.startsWith('/history')
-
-  if (isProtectedRoute && !user) {
-    const redirectUrl = request.nextUrl.clone()
-    redirectUrl.pathname = '/auth'
-    return NextResponse.redirect(redirectUrl)
+  // Auto-detect browser language if not set
+  const existingCookie = request.cookies.get('preferred_lang')?.value
+  if (!existingCookie) {
+    const acceptLanguage = request.headers.get('accept-language') || ''
+    const browserLang = acceptLanguage.split(',')[0].split('-')[0].toLowerCase()
+    const supportedLangs = ['en', 'hi', 'gu', 'te', 'ta', 'kn', 'mr', 'bn']
+    const lang = supportedLangs.includes(browserLang) ? browserLang : 'en'
+    
+    supabaseResponse.cookies.set('preferred_lang', lang, {
+      maxAge: 31536000,
+      path: '/'
+    })
   }
 
   return supabaseResponse

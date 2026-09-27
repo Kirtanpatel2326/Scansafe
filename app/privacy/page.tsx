@@ -108,8 +108,8 @@ export default function PrivacyPage() {
               If you have any questions regarding this Privacy Policy, cookie settings, or data processing, please contact us at:
             </p>
             <p className="text-xs text-zinc-500">
-              Email: <span className="text-emerald-400 font-bold">privacy@scansafe.in</span><br />
-              ScanSafe India Inc., Bangalore, Karnataka, India.
+              Email: <span className="text-emerald-400 font-bold">kirtanpatel2305@gmail.com</span><br />
+              ScanSafe AI Pvt. Ltd., Anand, Gujarat, India, 388001.
             </p>
           </section>
         </div>

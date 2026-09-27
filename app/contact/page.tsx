@@ -34,9 +34,14 @@ export default function ContactPage() {
               <p className="text-zinc-400 mb-6 flex-1">
                 For general inquiries, technical support, and billing questions. We typically respond within 24 hours.
               </p>
-              <a href="mailto:support@scansafe.in" className="text-emerald-400 font-bold hover:text-emerald-300 transition-colors">
-                support@scansafe.in
-              </a>
+              <div className="flex flex-col gap-2">
+                <a href="mailto:kirtanpatel2305@gmail.com" className="text-emerald-400 font-bold hover:text-emerald-300 transition-colors">
+                  kirtanpatel2305@gmail.com
+                </a>
+                <span className="text-zinc-500 text-[10px]">
+                  Alternative: support@scansafe.in (inactive)
+                </span>
+              </div>
             </div>
 
             {/* Business Address */}
@@ -46,9 +51,10 @@ export default function ContactPage() {
               </div>
               <h3 className="text-xl font-bold mb-2">Registered Address</h3>
               <p className="text-zinc-400 mb-6 flex-1">
-                ScanSafe Technologies Pvt. Ltd.<br />
-                Ahmedabad, Gujarat<br />
-                India, 380001
+                ScanSafe AI Pvt. Ltd.<br />
+                <span className="text-xs text-zinc-500">Founder: Kirtan Patel</span><br />
+                Anand, Gujarat<br />
+                India, 388001
               </p>
               <span className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Mail Only</span>
             </div>

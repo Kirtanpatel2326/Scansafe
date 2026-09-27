@@ -26,33 +26,33 @@ export default function RefundPage() {
             
             <section className="rounded-2xl border border-white/5 bg-white/[0.02] p-8">
               <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-                <CheckCircle className="w-6 h-6 text-emerald-400" /> Subscription Cancellations
+                <CheckCircle className="w-6 h-6 text-emerald-400" /> Scan Packs & Credit Validity
               </h2>
               <div className="space-y-4">
                 <p>
-                  You may cancel your ScanSafe subscription at any time through your account settings or by contacting our support team. 
+                  ScanSafe offers pay-as-you-go Scan Packs (₹10 for 10 scans, ₹99 for 100 scans, ₹299 for 320 scans, and ₹999 for 1200 scans).
                 </p>
                 <p>
-                  If you cancel your subscription, you will retain access to the Pro features until the end of your current billing cycle. After that date, your account will revert to the Free tier. We do not charge cancellation fees.
+                  All purchased scan credits come with <strong>lifetime validity</strong> and do not expire. You maintain full ownership of your credits until they are consumed for scans, comparisons, or meal compositions.
                 </p>
               </div>
             </section>
 
             <section className="rounded-2xl border border-white/5 bg-white/[0.02] p-8">
               <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-                <RotateCcw className="w-6 h-6 text-emerald-400" /> Refund Eligibility (Digital Service)
+                <RotateCcw className="w-6 h-6 text-emerald-400" /> Refund Eligibility for Scan Packs
               </h2>
               <div className="space-y-4">
                 <p>
-                  Because ScanSafe is a digital SaaS (Software as a Service) platform providing immediate access to AI analysis, <strong>all sales are final and non-refundable</strong> once the subscription is activated and the service is used.
+                  We offer a transparent <strong>7-Day Unused Pack Refund Guarantee</strong>. If you purchase a scan pack and have not used any scan credits from that pack, you may request a 100% full refund within 7 days of purchase.
                 </p>
                 <p>
-                  However, we want you to be satisfied. If you experience critical technical issues that prevent you from using the core scanning features, you may request a refund within <strong>3 days</strong> of your initial purchase.
+                  To request a refund, simply email <span className="text-emerald-400 font-semibold">kirtanpatel2305@gmail.com</span> with your transaction reference.
                 </p>
                 <ul className="list-disc pl-6 space-y-2 mt-4 text-zinc-400">
-                  <li>Refunds are not provided for partial months of service.</li>
-                  <li>Refunds will not be granted if our system logs show that the AI scanner has been successfully used during the billing period.</li>
-                  <li>Approved refunds will be processed to the original payment method within 5-7 business days via Razorpay.</li>
+                  <li>Full refunds apply to packs where zero credits have been consumed.</li>
+                  <li>If an AI scan encounters a server-side error, that credit is automatically restored to your account ledger immediately.</li>
+                  <li>Approved refunds are processed back to the original payment channel (UPI / Card) within 5-7 business days via Razorpay.</li>
                 </ul>
               </div>
             </section>
@@ -76,7 +76,7 @@ export default function RefundPage() {
                 To request a cancellation or report a billing issue, please email our support team directly. We strive to respond to all inquiries within 24 hours.
               </p>
               <p>
-                Email: <span className="text-emerald-400 font-bold">support@scansafe.in</span><br />
+                Email: <span className="text-emerald-400 font-bold">kirtanpatel2305@gmail.com</span><br />
                 Subject: <span className="text-zinc-400">Billing Inquiry - [Your Email]</span>
               </p>
             </section>

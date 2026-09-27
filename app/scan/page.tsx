@@ -2,10 +2,12 @@
 
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import Header from '@/components/Header'
 import ScanUpload from '@/components/ScanUpload'
 import ResultCard, { IngredientAnalysisResult } from '@/components/ResultCard'
 import NutritionTable from '@/components/NutritionTable'
+import ScanFeedback from '@/components/ScanFeedback'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
 import { 
@@ -23,7 +25,8 @@ import {
   Check, 
   FileText,
   X,
-  Zap
+  Zap,
+  GitCompare
 } from 'lucide-react'
 
 export default function ScanPage() {
@@ -38,6 +41,7 @@ export default function ScanPage() {
     plan_type?: string
     plan_expires_at?: string | null
     scans_today: number
+    scan_credits?: number
     dietary_profile?: {
       age?: number
       weight?: number
@@ -77,30 +81,45 @@ export default function ScanPage() {
   const [newBlacklistItem, setNewBlacklistItem] = useState('')
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (user) {
-        setUser(user)
+    // 1. Check active session (retrieves cached session and handles background refreshes)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      if (currentUser) {
         await fetch('/api/profile/ensure', { method: 'POST' })
-        await fetchProfile(user.id)
-        await fetchRecentScans(user.id)
-        await fetchFamilyMembers(user.id)
-        await fetchComposerHistory(user.id)
-        await fetchBlacklist(user.id)
+        await fetchProfile(currentUser.id)
+        await fetchRecentScans(currentUser.id)
+        await fetchFamilyMembers(currentUser.id)
+        await fetchComposerHistory(currentUser.id)
+        await fetchBlacklist(currentUser.id)
       }
       setLoadingSession(false)
     })
+
+    // 2. Listen for auth changes (token refreshes, sign ins, sign outs)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      if (currentUser) {
+        await fetchProfile(currentUser.id)
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
   }, [router])
 
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('plan, plan_type, plan_expires_at, scans_today, dietary_profile')
+        .select('plan, plan_type, plan_expires_at, scans_today, scan_credits, dietary_profile')
         .eq('id', userId)
         .single()
       
       if (!error && data) {
-        setProfile(data)
+        setProfile(data as any)
         const dp = data.dietary_profile || {}
         setUserAge(dp.age || '')
         setUserWeight(dp.weight || '')
@@ -185,7 +204,8 @@ export default function ScanPage() {
   const handleScanComplete = async (result: any, newScanId?: string, imageUrl?: string) => {
     setScanResult(result)
     setScanId(newScanId || '')
-    setScanImageUrl(imageUrl || null)
+    const finalImg = imageUrl || result?.image_url || result?.image || null
+    setScanImageUrl(finalImg)
     setErrorMsg(null)
     setCompositing(false)
     setMealName('')
@@ -388,19 +408,93 @@ export default function ScanPage() {
             </p>
           </div>
           
-          {profile && (
+          {user && profile ? (
             <div className="flex items-center gap-3 bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-350 self-start md:self-auto">
-              <span>Plan: <strong className="text-white uppercase">{profile.plan === 'pro' ? `PRO (${profile.plan_type || 'lifetime'})` : 'free'}</strong></span>
+              <span>Plan: <strong className="text-white uppercase">{profile.plan === 'pro' ? `PRO (${profile.plan_type || 'Pack'})` : 'Free'}</strong></span>
               <div className="w-[1px] h-3.5 bg-zinc-850" />
-              {profile.plan === 'pro' ? (
-                <span className="text-emerald-400 font-bold">
-                  Unlimited scans {profile.plan_expires_at && `(expires ${new Date(profile.plan_expires_at).toLocaleDateString()})`}
-                </span>
-              ) : (
-                <span>Daily Scans Used: <strong className="text-white">{profile.scans_today} / 5</strong></span>
-              )}
+              <span>Available Credits: <strong className="text-emerald-400 font-black text-sm">{profile.scan_credits ?? 0}</strong></span>
+              <div className="w-[1px] h-3.5 bg-zinc-850" />
+              <Link href="/pricing" className="text-emerald-400 font-bold hover:underline">
+                + Refill Pack
+              </Link>
             </div>
-          )}
+          ) : !user ? (
+            <div className="flex items-center gap-3 bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-350 self-start md:self-auto">
+              <span>Plan: <strong className="text-white uppercase">Guest</strong></span>
+              <div className="w-[1px] h-3.5 bg-zinc-850" />
+              <Link href="/auth" className="text-emerald-400 font-bold hover:underline">
+                Sign In to Scan
+              </Link>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex border-b border-zinc-850 mb-8 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('scan')}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+              activeTab === 'scan'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Camera className="w-4 h-4" /> Scanner
+          </button>
+          <button
+            onClick={() => router.push('/compare')}
+            className="flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 border-transparent text-zinc-450 hover:text-white transition whitespace-nowrap cursor-pointer"
+          >
+            <GitCompare className="w-4 h-4 text-emerald-400 fill-emerald-500/10" /> Compare Mode
+          </button>
+          <button
+            onClick={() => {
+              if (!user) {
+                alert('Please sign in to use the Meal Composer.')
+                return
+              }
+              setActiveTab('composer')
+            }}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+              activeTab === 'composer'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            } ${!user ? 'opacity-50' : ''}`}
+          >
+            <ChefHat className="w-4 h-4" /> Meal Composer
+          </button>
+          <button
+            onClick={() => {
+              if (!user) {
+                alert('Please sign in to manage family profiles.')
+                return
+              }
+              setActiveTab('family')
+            }}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+              activeTab === 'family'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            } ${!user ? 'opacity-50' : ''}`}
+          >
+            <Users className="w-4 h-4" /> Family Mode
+          </button>
+          <button
+            onClick={() => {
+              if (!user) {
+                alert('Please sign in to view trends.')
+                return
+              }
+              setActiveTab('trends')
+            }}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+              activeTab === 'trends'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            } ${!user ? 'opacity-50' : ''}`}
+          >
+            <TrendingUp className="w-4 h-4" /> Trends
+          </button>
         </div>
 
         {/* SCANNER PANEL */}
@@ -416,7 +510,21 @@ export default function ScanPage() {
               </div>
             )}
 
-            {!scanResult ? (
+            {!user ? (
+              <div className="max-w-2xl mx-auto w-full text-center border border-zinc-800 bg-zinc-950/60 rounded-3xl p-8 py-12">
+                <Camera className="w-12 h-12 text-zinc-500 mx-auto mb-4 animate-pulse" />
+                <h3 className="text-xl font-bold text-white mb-2">Scan Food Ingredients</h3>
+                <p className="text-zinc-400 text-sm max-w-md mx-auto mb-6">
+                  You can browse our website and review dashboard statistics, but you must sign in to scan product ingredients.
+                </p>
+                <Link
+                  href="/auth"
+                  className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl transition cursor-pointer"
+                >
+                  Sign In to Scan
+                </Link>
+              </div>
+            ) : !scanResult ? (
               <div className="max-w-2xl mx-auto w-full">
                 <ScanUpload
                   onScanStart={handleScanStart}
@@ -431,6 +539,9 @@ export default function ScanPage() {
                 <div className="flex flex-col gap-6 items-start">
                   <div className="w-full">
                     <ResultCard result={scanResult} scanId={scanId} imageUrl={scanImageUrl} onScanAnother={resetScanner} />
+                  </div>
+                  <div className="w-full max-w-2xl mx-auto mt-2">
+                    <ScanFeedback scanId={scanId} />
                   </div>
                   {scanResult.nutrition_facts && Object.keys(scanResult.nutrition_facts).length > 0 && (
                     <div className="w-full mt-4">
@@ -909,6 +1020,7 @@ export default function ScanPage() {
                           onClick={() => {
                             setScanResult(scan.result_json)
                             setScanId(scan.id)
+                            setScanImageUrl(scan.result_json?.image_url || scan.result_json?.image || null)
                             setActiveTab('scan')
                           }}
                           className="bg-zinc-800 hover:bg-zinc-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition"
@@ -921,6 +1033,22 @@ export default function ScanPage() {
                 ) : (
                   <p className="text-zinc-550 text-xs italic text-center py-6">Your scanned items will show up here.</p>
                 )}
+              </div>
+            </div>
+
+            {/* Toxin Tracking Engine Coming Soon Card */}
+            <div className="col-span-full border border-rose-500/20 bg-rose-500/5 rounded-3xl p-8 relative overflow-hidden group">
+              <div className="absolute right-10 top-1/2 -translate-y-1/2 opacity-10 group-hover:rotate-12 transition-transform duration-700">
+                <Zap className="w-32 h-32 text-rose-500" />
+              </div>
+              <div className="relative z-10">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/20 border border-rose-500/30 px-3 py-1 text-[10px] font-bold text-rose-400 uppercase tracking-widest mb-4">
+                  Feature Coming Soon
+                </span>
+                <h3 className="text-2xl font-black text-white mb-2">Toxin Tracking Engine</h3>
+                <p className="text-zinc-400 text-sm leading-relaxed max-w-2xl">
+                  We are building a ruthless tracking engine to monitor your cumulative toxic intake over time, warning you before irreversible damage occurs.
+                </p>
               </div>
             </div>
           </div>

@@ -80,7 +80,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
     'Initializing ScanSafe ULTRA Intelligence...',
     'Decoding barcode indexes / running Vision OCR...',
     'Querying food science database & additives register...',
-    'Evaluating heavy metals & microplastics toxicity risks...',
+    'Checking NOVA food processing & additive safety standards...',
     'Sourcing clean alternatives from Blinkit / BigBasket...',
   ]
 
@@ -263,7 +263,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
       // Automatically recall first successful scan results
       const firstSuccess = updatedQueue.find(item => item.status === 'success')
       if (firstSuccess && firstSuccess.result) {
-        onScanSuccess(firstSuccess.result)
+        onScanSuccess(firstSuccess.result, undefined, firstSuccess.preview || firstSuccess.result?.image_url)
       } else {
         onScanError('Batch scans completed, but all items failed analysis.')
       }
@@ -433,7 +433,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         throw new Error(data.message)
       }
 
-      onScanSuccess(data.analysis, data.scanId, targetImage || undefined)
+      onScanSuccess(data.analysis, data.scanId, targetImage || data.analysis?.image_url || undefined)
     } catch (err: any) {
       onScanError(err.message || 'An unexpected error occurred.')
     } finally {
