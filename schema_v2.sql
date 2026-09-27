@@ -13,6 +13,30 @@ ALTER TABLE public.profiles
 ALTER TABLE public.profiles 
   ALTER COLUMN scan_credits SET DEFAULT 5;
 
+-- 1.1 SCANS TABLE CONSTRAINT ADJUSTMENTS (Preserve null/insufficient evidence health scores)
+ALTER TABLE public.scans 
+  ALTER COLUMN health_score DROP NOT NULL;
+
+ALTER TABLE public.scans 
+  DROP CONSTRAINT IF EXISTS scans_health_score_check;
+
+ALTER TABLE public.scans 
+  ADD CONSTRAINT scans_health_score_check 
+  CHECK (health_score IS NULL OR (health_score >= 0 AND health_score <= 100));
+
+ALTER TABLE public.scans 
+  DROP CONSTRAINT IF EXISTS scans_safety_level_check;
+
+ALTER TABLE public.scans 
+  ADD CONSTRAINT scans_safety_level_check 
+  CHECK (safety_level IN ('safe', 'moderate', 'danger', 'insufficient_evidence'));
+
+-- 1.2 PENDING PAYMENTS AUDIT COLUMNS
+ALTER TABLE public.pending_payments 
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+  ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES public.profiles(id),
+  ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE;
+
 -- 2. CREDIT RESERVATIONS TABLE (For two-phase atomic credit reservation & release)
 CREATE TABLE IF NOT EXISTS public.credit_reservations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -426,3 +450,14 @@ BEGIN
     RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- 9. PERMISSIONS HARDENING (Strict service_role execution for transactional functions)
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reserve_credits(UUID, INT, TEXT, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.finalize_reservation(UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.release_reservation(UUID, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fulfill_purchase(UUID, TEXT, INT, TEXT, NUMERIC, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.refund_credits(UUID, INT, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.approve_manual_payment(UUID, UUID, INT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.cleanup_expired_reservations() TO service_role;
+
