@@ -52,15 +52,15 @@ export const NutritionFactsSchema = z.object({
 
 export const IngredientItemSchema = z.object({
   name: z.string(),
-  status: z.enum(["safe", "caution", "avoid"]),
-  reason: z.string(),
+  status: z.enum(["safe", "caution", "avoid"]).default("safe"),
+  reason: z.string().default(""),
 });
 
 export const AdditiveItemSchema = z.object({
   name: z.string(),
   code: z.string().nullable().optional(),
-  risk: z.enum(["low", "medium", "high"]),
-  description: z.string(),
+  risk: z.enum(["low", "medium", "high"]).default("low"),
+  description: z.string().default(""),
   source: z.string().nullable().optional(),
 });
 
@@ -75,6 +75,7 @@ export const AlternativeItemSchema = z.object({
 
 export const DietaryCompatibilitySchema = z.object({
   is_compatible: z.boolean(),
+  status: z.enum(["compatible", "incompatible", "precautionary_warning", "insufficient_data"]).default("compatible"),
   matched_preferences: z.array(z.string()),
   violations: z.array(
     z.object({
@@ -87,13 +88,15 @@ export const DietaryCompatibilitySchema = z.object({
 });
 
 export const RawProductFactsSchema = z.object({
-  product_name: z.string(),
-  brand: z.string(),
+  product_name: z.string().default("Food Product"),
+  brand: z.string().default("Brand"),
   panel_status: z.enum(["extracted", "unreadable", "missing"]).default("extracted"),
-  ingredients: z.array(IngredientItemSchema),
-  additives: z.array(AdditiveItemSchema),
-  allergens_declared: z.array(z.string()),
-  nutrition_facts: NutritionFactsSchema,
+  unreadable_instructions: z.string().nullable().optional(),
+  description: z.string().default("Food product label analysis."),
+  ingredients: z.array(IngredientItemSchema).default([]),
+  additives: z.array(AdditiveItemSchema).default([]),
+  allergens_declared: z.array(z.string()).default([]),
+  nutrition_facts: NutritionFactsSchema.default({ panel_status: "extracted" }),
   upf_score: z.number().min(1).max(4).default(3),
   upf_reason: z.string().optional(),
   glycemic_index_estimate: z.enum(["low", "medium", "high"]).default("medium"),
@@ -102,19 +105,50 @@ export const RawProductFactsSchema = z.object({
   alternatives_detailed: z.array(AlternativeItemSchema).default([]),
 });
 
+export const ComparisonResultSchema = z.object({
+  winner: z.enum(["A", "B", "tie", "undetermined"]).default("tie"),
+  winner_reason: z.string().default(""),
+  product_a: z.object({
+    name: z.string().default("Product A"),
+    brand: z.string().default("Brand A"),
+    health_score: z.number().nullable().optional(),
+    safety_level: z.enum(["safe", "moderate", "danger", "insufficient_evidence"]).default("safe"),
+    highlights: z.array(z.string()).default([])
+  }),
+  product_b: z.object({
+    name: z.string().default("Product B"),
+    brand: z.string().default("Brand B"),
+    health_score: z.number().nullable().optional(),
+    safety_level: z.enum(["safe", "moderate", "danger", "insufficient_evidence"]).default("safe"),
+    highlights: z.array(z.string()).default([])
+  }),
+  comparison_table: z.object({
+    calories: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
+    sugar: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
+    sodium: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
+    protein: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
+    fat: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
+    fiber: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
+    additives: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
+    basis: z.string().default("per 100g")
+  }).optional(),
+  verdict_english: z.string().default("")
+});
+
 export type RawProductFacts = z.infer<typeof RawProductFactsSchema>;
 export type DietaryCompatibility = z.infer<typeof DietaryCompatibilitySchema>;
+export type ComparisonResult = z.infer<typeof ComparisonResultSchema>;
 
 export interface IngredientAnalysis {
   id?: string;
   product_name: string;
   brand: string;
-  health_score: number;
+  health_score: number | null;
   health_score_reason: string;
-  safety_level: "safe" | "moderate" | "danger";
+  safety_level: "safe" | "moderate" | "danger" | "insufficient_evidence";
   description: string;
   panel_status?: "extracted" | "unreadable" | "missing";
-  unreadable_instructions?: string;
+  unreadable_instructions?: string | null;
   ingredients: Array<{
     name: string;
     status: "safe" | "caution" | "avoid";
@@ -122,10 +156,10 @@ export interface IngredientAnalysis {
   }>;
   additives: Array<{
     name: string;
-    code?: string;
+    code?: string | null;
     risk: "low" | "medium" | "high";
     description: string;
-    source?: string;
+    source?: string | null;
   }>;
   allergens: string[];
   allergens_declared?: string[];
@@ -135,9 +169,9 @@ export interface IngredientAnalysis {
     name: string;
     brand: string;
     reason: string;
-    estimated_price_inr?: number;
-    buy_url_blinkit?: string;
-    buy_url_bigbasket?: string;
+    estimated_price_inr?: number | null;
+    buy_url_blinkit?: string | null;
+    buy_url_bigbasket?: string | null;
   }>;
   upf_score?: number;
   upf_reason?: string;
@@ -162,16 +196,17 @@ const GLUTEN_FREE_EXCLUSIONS = [
 ];
 
 const DAIRY_ITEMS = [
-  "milk", "dairy butter", "butter fat", "anhydrous milk fat", "ghee", 
-  "cream", "cheese", "paneer", "curd", "yogurt", "whey", "casein", 
-  "sodium caseinate", "calcium caseinate", "milk solids", "skimmed milk powder", 
-  "whole milk powder", "lactose", "condensed milk", "milk fat"
+  "butter", "dairy butter", "salted butter", "unsalted butter", "butter fat", "butterfat", "butter oil",
+  "milk", "cow milk", "buffalo milk", "milk solids", "skimmed milk powder", "whole milk powder",
+  "milk powder", "ghee", "clarified butter", "cream", "cheese", "paneer", "curd", "yogurt",
+  "whey", "casein", "sodium caseinate", "calcium caseinate", "lactose", "condensed milk", "milk fat"
 ];
 
 const DAIRY_FREE_EXCLUSIONS = [
   "cocoa butter", "cacao butter", "peanut butter", "almond butter", 
   "sunflower butter", "shea butter", "apple butter", "fruit butter", 
-  "mango butter", "kokum butter", "coconut butter", "cashew butter"
+  "mango butter", "kokum butter", "coconut butter", "cashew butter",
+  "soy butter", "seed butter"
 ];
 
 const TREE_NUTS = [
@@ -199,7 +234,45 @@ const HIGH_GLYCEMIC_SWEETENERS = [
   "glucose syrup", "maltodextrin", "dextrose", "sucrose", "invert sugar syrup"
 ];
 
-export function calculateHealthScore(facts: Partial<RawProductFacts>): { score: number; reason: string; safetyLevel: "safe" | "moderate" | "danger" } {
+/**
+ * Splits a compound ingredient string into discrete clauses/tokens.
+ */
+function splitCompoundIngredients(rawName: string): string[] {
+  if (!rawName) return [];
+  // Split on commas, semicolons, brackets, parentheses, dots
+  return rawName
+    .split(/[,;()\[\]]/)
+    .map(token => token.trim())
+    .filter(token => token.length > 0);
+}
+
+/**
+ * Calculates evidence-based health score strictly from verified data.
+ * If evidence is insufficient (unreadable/missing panel or missing ingredients/nutrition),
+ * it returns null score with safetyLevel: 'insufficient_evidence'.
+ */
+export function calculateHealthScore(facts: Partial<RawProductFacts>): { 
+  score: number | null; 
+  reason: string; 
+  safetyLevel: "safe" | "moderate" | "danger" | "insufficient_evidence" 
+} {
+  const panelStatus = facts.panel_status || facts.nutrition_facts?.panel_status;
+  const ingredients = facts.ingredients || [];
+  const nf = facts.nutrition_facts;
+
+  // Check for insufficient evidence
+  if (
+    panelStatus === "unreadable" || 
+    panelStatus === "missing" || 
+    (ingredients.length === 0 && !nf?.per_100g && !nf?.per_serving && !nf?.calories && !nf?.sugar_100g)
+  ) {
+    return {
+      score: null,
+      reason: "Insufficient readable evidence on product label. Please take a clear, well-lit photo of the ingredient list or nutrition table.",
+      safetyLevel: "insufficient_evidence"
+    };
+  }
+
   let score = 100;
   const penalties: string[] = [];
   const bonuses: string[] = [];
@@ -228,14 +301,12 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): { score: 
   if (highRiskAdditives > 0) penalties.push(`${highRiskAdditives} high-risk additive(s)`);
   if (medRiskAdditives > 0) penalties.push(`${medRiskAdditives} moderate-risk additive(s)`);
 
-  const ingredients = facts.ingredients || [];
   const avoidCount = ingredients.filter(i => i.status === "avoid").length;
   if (avoidCount > 0) {
     score -= Math.min(25, avoidCount * 6);
     penalties.push(`${avoidCount} restricted ingredient(s)`);
   }
 
-  const nf = facts.nutrition_facts;
   const p100 = nf?.per_100g || {};
   const sugar100g = p100.sugar_g ?? (nf?.sugar_100g ? parseFloat(nf.sugar_100g) : undefined);
   const sodium100g = p100.sodium_mg ?? (nf?.sodium_100g ? parseFloat(nf.sodium_100g) : undefined);
@@ -244,32 +315,35 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): { score: 
   const fiber100g = p100.fiber_g ?? (nf?.fiber_100g ? parseFloat(nf.fiber_100g) : undefined);
   const protein100g = p100.protein_g ?? (nf?.protein_100g ? parseFloat(nf.protein_100g) : undefined);
 
-  if (trans100g && trans100g > 0.1) {
+  if (typeof trans100g === "number" && trans100g > 0.1) {
     score -= 20;
     penalties.push("trans fats detected");
   }
-  if (sugar100g && sugar100g > 15) {
-    score -= 15;
-    penalties.push(`high sugar (${sugar100g}g/100g)`);
-  } else if (sugar100g && sugar100g > 8) {
-    score -= 6;
+
+  if (typeof sugar100g === "number") {
+    if (sugar100g > 15) {
+      score -= 15;
+      penalties.push(`high sugar (${sugar100g}g/100g)`);
+    } else if (sugar100g > 8) {
+      score -= 6;
+    }
   }
 
-  if (sodium100g && sodium100g > 600) {
+  if (typeof sodium100g === "number" && sodium100g > 600) {
     score -= 12;
     penalties.push(`high sodium (${sodium100g}mg/100g)`);
   }
 
-  if (satFat100g && satFat100g > 5) {
+  if (typeof satFat100g === "number" && satFat100g > 5) {
     score -= 8;
     penalties.push("elevated saturated fat");
   }
 
-  if (fiber100g && fiber100g >= 3) {
+  if (typeof fiber100g === "number" && fiber100g >= 3) {
     score = Math.min(100, score + 5);
     bonuses.push("beneficial fiber");
   }
-  if (protein100g && protein100g >= 10) {
+  if (typeof protein100g === "number" && protein100g >= 10) {
     score = Math.min(100, score + 5);
     bonuses.push("good protein");
   }
@@ -277,7 +351,7 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): { score: 
   const finalScore = Math.max(0, Math.min(100, Math.round(score)));
 
   let safetyLevel: "safe" | "moderate" | "danger" = "safe";
-  if (finalScore < 40 || highRiskAdditives > 0 || (trans100g && trans100g > 0.5)) {
+  if (finalScore < 40 || highRiskAdditives > 0 || (typeof trans100g === "number" && trans100g > 0.5)) {
     safetyLevel = "danger";
   } else if (finalScore < 70) {
     safetyLevel = "moderate";
@@ -293,6 +367,11 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): { score: 
   return { score: finalScore, reason, safetyLevel };
 }
 
+/**
+ * Evaluates dietary compatibility and personal allergen alerts independently from the base score.
+ * Tokenizes compound ingredients to ensure exceptions like 'rice flour' or 'cocoa butter'
+ * only apply to their specific token without suppressing adjacent tokens (e.g. 'wheat flour', 'milk powder').
+ */
 export function applyPreferences(
   product: IngredientAnalysis,
   userPreferences: string[] = []
@@ -302,6 +381,7 @@ export function applyPreferences(
   if (!userPreferences || userPreferences.length === 0) {
     cloned.dietary_compatibility = {
       is_compatible: true,
+      status: "compatible",
       matched_preferences: [],
       violations: [],
       allergen_warnings: [],
@@ -313,75 +393,96 @@ export function applyPreferences(
   const allergenWarnings: string[] = [];
   const normalizedPrefs = userPreferences.map(p => p.toLowerCase().trim());
 
+  // Check discrete ingredient tokens
   cloned.ingredients = cloned.ingredients.map(ing => {
     const rawName = ing.name;
-    const nameLower = rawName.toLowerCase();
     let status = ing.status;
     let reason = ing.reason;
+    const tokens = splitCompoundIngredients(rawName);
 
-    const matchesToken = (tokens: string[], exclusions: string[]): boolean => {
-      const isExcluded = exclusions.some(ex => nameLower.includes(ex));
-      if (isExcluded) return false;
-      return tokens.some(token => {
-        const regex = new RegExp(`\\b${token}\\b`, "i");
-        return regex.test(nameLower) || nameLower.includes(token);
-      });
+    const matchesSpecificToken = (tokenList: string[], searchTerms: string[], exclusions: string[]): { matched: boolean; matchedTerm?: string; offendingToken?: string } => {
+      for (const token of tokenList) {
+        const tokenLower = token.toLowerCase();
+        const isExcluded = exclusions.some(ex => tokenLower.includes(ex));
+        if (isExcluded) continue;
+
+        for (const term of searchTerms) {
+          const regex = new RegExp(`\\b${term}\\b`, "i");
+          if (regex.test(tokenLower) || tokenLower.includes(term)) {
+            return { matched: true, matchedTerm: term, offendingToken: token };
+          }
+        }
+      }
+      return { matched: false };
     };
 
+    // 1. Gluten-Free Check
     if (normalizedPrefs.some(p => p.includes("gluten") || p === "celiac")) {
-      if (matchesToken(GLUTEN_GRAINS, GLUTEN_FREE_EXCLUSIONS)) {
+      const match = matchesSpecificToken(tokens, GLUTEN_GRAINS, GLUTEN_FREE_EXCLUSIONS);
+      if (match.matched) {
         violations.push({
           preference: "Gluten-Free",
           ingredient: rawName,
-          reason: `${rawName} contains gluten grains.`,
+          reason: `${match.offendingToken || rawName} contains gluten grains.`,
         });
         status = "avoid";
-        reason = `${rawName} contains gluten, violating your Gluten-Free preference.`;
+        reason = `${rawName} contains gluten (${match.offendingToken || match.matchedTerm}), violating your Gluten-Free preference.`;
       }
     }
 
+    // 2. Dairy-Free / Milk Allergy Check
     if (normalizedPrefs.some(p => p.includes("dairy") || p.includes("milk"))) {
-      if (matchesToken(DAIRY_ITEMS, DAIRY_FREE_EXCLUSIONS)) {
+      const match = matchesSpecificToken(tokens, DAIRY_ITEMS, DAIRY_FREE_EXCLUSIONS);
+      if (match.matched) {
         violations.push({
-          preference: "Dairy-Free",
+          preference: "Dairy-Free / Milk Allergy",
           ingredient: rawName,
-          reason: `${rawName} is a dairy-derived ingredient or milk protein.`,
+          reason: `${match.offendingToken || rawName} contains dairy or milk protein.`,
         });
         status = "avoid";
-        reason = `${rawName} contains dairy, violating your Dairy-Free profile.`;
+        reason = `${rawName} contains dairy (${match.offendingToken || match.matchedTerm}), violating your Dairy-Free profile.`;
       }
     }
 
+    // 3. Lactose Intolerance Check
     if (normalizedPrefs.some(p => p.includes("lactose"))) {
-      const isLactoseFreeDeclared = nameLower.includes("lactose-free") || nameLower.includes("lactase");
-      if (!isLactoseFreeDeclared && matchesToken(["milk", "whey", "lactose", "cream", "curd", "paneer"], DAIRY_FREE_EXCLUSIONS)) {
-        violations.push({
-          preference: "Lactose Intolerant",
-          ingredient: rawName,
-          reason: `${rawName} contains lactose.`,
-        });
-        status = "avoid";
-        reason = `${rawName} contains lactose, which may cause digestive distress.`;
+      const isLactoseFreeDeclared = rawName.toLowerCase().includes("lactose-free") || rawName.toLowerCase().includes("lactase");
+      if (!isLactoseFreeDeclared) {
+        const match = matchesSpecificToken(tokens, ["milk", "whey", "lactose", "cream", "curd", "paneer", "dairy"], DAIRY_FREE_EXCLUSIONS);
+        if (match.matched) {
+          violations.push({
+            preference: "Lactose Intolerant",
+            ingredient: rawName,
+            reason: `${match.offendingToken || rawName} contains lactose.`,
+          });
+          status = "avoid";
+          reason = `${rawName} contains lactose, which may cause digestive discomfort.`;
+        }
       }
     }
 
+    // 4. Nut Allergy Check
     if (normalizedPrefs.some(p => p.includes("nut"))) {
-      const hasPeanut = nameLower.includes("peanut") || nameLower.includes("groundnut");
-      const hasTreeNut = matchesToken(TREE_NUTS, SEED_EXCLUSIONS);
-      if (hasPeanut || hasTreeNut) {
+      const hasPeanut = matchesSpecificToken(tokens, ["peanut", "groundnut"], []);
+      const hasTreeNut = matchesSpecificToken(tokens, TREE_NUTS, SEED_EXCLUSIONS);
+      if (hasPeanut.matched || hasTreeNut.matched) {
+        const off = hasPeanut.offendingToken || hasTreeNut.offendingToken || rawName;
         violations.push({
           preference: "Nut-Free",
           ingredient: rawName,
-          reason: `${rawName} contains peanuts or tree nuts.`,
+          reason: `${off} contains peanuts or tree nuts.`,
         });
         status = "avoid";
         reason = `${rawName} contains nuts, violating your Nut-Free allergy profile.`;
       }
     }
 
+    // 5. Vegan Check
     if (normalizedPrefs.includes("vegan")) {
-      const isAnimalDerived = matchesToken(ANIMAL_DERIVED_ITEMS, []) || matchesToken(DAIRY_ITEMS, DAIRY_FREE_EXCLUSIONS) || nameLower.includes("honey");
-      if (isAnimalDerived) {
+      const animalMatch = matchesSpecificToken(tokens, ANIMAL_DERIVED_ITEMS, []);
+      const dairyMatch = matchesSpecificToken(tokens, DAIRY_ITEMS, DAIRY_FREE_EXCLUSIONS);
+      const honeyMatch = matchesSpecificToken(tokens, ["honey", "beeswax"], []);
+      if (animalMatch.matched || dairyMatch.matched || honeyMatch.matched) {
         violations.push({
           preference: "Vegan",
           ingredient: rawName,
@@ -392,8 +493,10 @@ export function applyPreferences(
       }
     }
 
+    // 6. Vegetarian Check
     if (normalizedPrefs.includes("vegetarian")) {
-      if (matchesToken(ANIMAL_DERIVED_ITEMS, [])) {
+      const animalMatch = matchesSpecificToken(tokens, ANIMAL_DERIVED_ITEMS, []);
+      if (animalMatch.matched) {
         violations.push({
           preference: "Vegetarian",
           ingredient: rawName,
@@ -404,22 +507,25 @@ export function applyPreferences(
       }
     }
 
+    // 7. Jain Check
     if (normalizedPrefs.includes("jain")) {
-      const isRoot = matchesToken(JAIN_RESTRICTED_ROOTS, []);
-      const isAnimal = matchesToken(ANIMAL_DERIVED_ITEMS, []);
-      if (isRoot || isAnimal) {
+      const rootMatch = matchesSpecificToken(tokens, JAIN_RESTRICTED_ROOTS, []);
+      const animalMatch = matchesSpecificToken(tokens, ANIMAL_DERIVED_ITEMS, []);
+      if (rootMatch.matched || animalMatch.matched) {
         violations.push({
           preference: "Jain",
           ingredient: rawName,
-          reason: `${rawName} is a root vegetable or animal byproduct restricted in Jain diet.`,
+          reason: `${rawName} is restricted in Jain dietary practice.`,
         });
         status = "avoid";
         reason = `${rawName} is restricted in Jain dietary rules.`;
       }
     }
 
+    // 8. Diabetic / Low Sugar Check
     if (normalizedPrefs.some(p => p.includes("diabet") || p.includes("sugar"))) {
-      if (matchesToken(HIGH_GLYCEMIC_SWEETENERS, [])) {
+      const sugarMatch = matchesSpecificToken(tokens, HIGH_GLYCEMIC_SWEETENERS, []);
+      if (sugarMatch.matched) {
         violations.push({
           preference: "Diabetic / Low Sugar",
           ingredient: rawName,
@@ -430,8 +536,10 @@ export function applyPreferences(
       }
     }
 
+    // 9. Hypertension / Low Sodium Check
     if (normalizedPrefs.some(p => p.includes("hypertens") || p.includes("salt") || p.includes("blood pressure"))) {
-      if (nameLower.includes("salt") || nameLower.includes("sodium") || nameLower.includes("msg") || nameLower.includes("monosodium glutamate")) {
+      const saltMatch = matchesSpecificToken(tokens, ["salt", "sodium", "msg", "monosodium glutamate"], []);
+      if (saltMatch.matched) {
         violations.push({
           preference: "Hypertension / Low Sodium",
           ingredient: rawName,
@@ -441,40 +549,58 @@ export function applyPreferences(
       }
     }
 
-    if (normalizedPrefs.includes("pregnancy")) {
-      if (nameLower.includes("caffeine") || nameLower.includes("saccharin") || nameLower.includes("bha") || nameLower.includes("bht") || nameLower.includes("nitrite") || nameLower.includes("nitrate")) {
-        violations.push({
-          preference: "Pregnancy Safe",
-          ingredient: rawName,
-          reason: `${rawName} is advised against during pregnancy.`,
-        });
-        status = "avoid";
-        reason = `${rawName} has safety advisories during pregnancy.`;
-      }
-    }
-
     return { ...ing, status, reason };
   });
 
+  // Check Declared & Precautionary Allergen Statements
   const declared = cloned.allergens_declared || cloned.allergens || [];
+  let hasPrecautionaryWarning = false;
+
   declared.forEach(all => {
     const allLower = all.toLowerCase();
-    if (normalizedPrefs.some(p => p.includes("gluten")) && allLower.includes("gluten")) {
-      allergenWarnings.push("Declared Allergen: Contains Gluten");
+    const isPrecautionary = allLower.includes("may contain") || allLower.includes("processed in a facility") || allLower.includes("trace");
+
+    // Gluten checks
+    if (normalizedPrefs.some(p => p.includes("gluten") || p === "celiac")) {
+      if (allLower.includes("gluten") || allLower.includes("wheat") || allLower.includes("barley") || allLower.includes("rye")) {
+        allergenWarnings.push(isPrecautionary ? `Precautionary: ${all}` : `Declared Allergen: ${all}`);
+        if (isPrecautionary) hasPrecautionaryWarning = true;
+      }
     }
-    if (normalizedPrefs.some(p => p.includes("dairy") || p.includes("milk")) && (allLower.includes("milk") || allLower.includes("dairy"))) {
-      allergenWarnings.push("Declared Allergen: Contains Milk / Dairy");
+
+    // Dairy checks
+    if (normalizedPrefs.some(p => p.includes("dairy") || p.includes("milk"))) {
+      if (allLower.includes("milk") || allLower.includes("dairy") || allLower.includes("butter") || allLower.includes("cheese")) {
+        allergenWarnings.push(isPrecautionary ? `Precautionary: ${all}` : `Declared Allergen: ${all}`);
+        if (isPrecautionary) hasPrecautionaryWarning = true;
+      }
     }
-    if (normalizedPrefs.some(p => p.includes("nut")) && (allLower.includes("nut") || allLower.includes("peanut"))) {
-      allergenWarnings.push("Declared Allergen: Contains Peanuts / Tree Nuts");
+
+    // Nut checks
+    if (normalizedPrefs.some(p => p.includes("nut"))) {
+      if (allLower.includes("nut") || allLower.includes("peanut") || allLower.includes("almond") || allLower.includes("cashew")) {
+        allergenWarnings.push(isPrecautionary ? `Precautionary: ${all}` : `Declared Allergen: ${all}`);
+        if (isPrecautionary) hasPrecautionaryWarning = true;
+      }
     }
   });
 
+  const uniqueWarnings = Array.from(new Set(allergenWarnings));
+  const isCompatible = violations.length === 0 && uniqueWarnings.length === 0;
+
+  let compatibilityStatus: "compatible" | "incompatible" | "precautionary_warning" | "insufficient_data" = "compatible";
+  if (violations.length > 0 || uniqueWarnings.some(w => w.startsWith("Declared Allergen:"))) {
+    compatibilityStatus = "incompatible";
+  } else if (hasPrecautionaryWarning || uniqueWarnings.length > 0) {
+    compatibilityStatus = "precautionary_warning";
+  }
+
   cloned.dietary_compatibility = {
-    is_compatible: violations.length === 0,
+    is_compatible: isCompatible,
+    status: compatibilityStatus,
     matched_preferences: userPreferences,
     violations,
-    allergen_warnings: Array.from(new Set(allergenWarnings)),
+    allergen_warnings: uniqueWarnings,
   };
 
   return cloned;
@@ -683,7 +809,7 @@ async function analyzeLabelWithGemini(
 "3. Always distinguish between per-serving and per-100g values if both are printed.\n" +
 "4. NOVA classification (1 to 4): 1-unprocessed, 2-culinary, 3-processed, 4-ultraprocessed.\n" +
 "5. DO NOT include fake microplastics, heavy metals, organ damage triage, or carbon footprints.\n\n" +
-"Return a single JSON object matching the specification:\n" +
+"Return a single JSON object matching:\n" +
 JSON.stringify({
   product_name: "Product Name from packaging (or Unknown Product)",
   brand: "Brand Name from packaging (or Unknown Brand)",
@@ -757,32 +883,42 @@ JSON.stringify({
     cleanedText = jsonBlockMatch[1];
   }
 
-  const rawJson = JSON.parse(cleanedText.trim());
+  let parsedRaw: any;
+  try {
+    parsedRaw = JSON.parse(cleanedText.trim());
+  } catch (parseErr) {
+    throw new Error("Failed to parse AI response as valid JSON.");
+  }
 
-  const nf = rawJson.nutrition_facts || {};
+  // Runtime Zod Schema Validation
+  const validatedFacts = RawProductFactsSchema.safeParse(parsedRaw);
+  const rawJson = validatedFacts.success ? validatedFacts.data : parsedRaw;
+
+  const nf = rawJson.nutrition_facts || { panel_status: rawJson.panel_status || "extracted" };
   const ps = nf.per_serving || {};
   const p100 = nf.per_100g || {};
 
-  nf.calories = ps.calories !== undefined ? ps.calories : (nf.calories || null);
-  nf.calories_100g = p100.calories !== undefined ? p100.calories : (nf.calories_100g || null);
-  nf.fat = ps.fat_g !== undefined ? (ps.fat_g + "g") : (nf.fat || "0g");
-  nf.fat_100g = p100.fat_g !== undefined ? (p100.fat_g + "g") : (nf.fat_100g || "0g");
-  nf.saturated_fat = ps.saturated_fat_g !== undefined ? (ps.saturated_fat_g + "g") : (nf.saturated_fat || "0g");
-  nf.saturated_fat_100g = p100.saturated_fat_g !== undefined ? (p100.saturated_fat_g + "g") : (nf.saturated_fat_100g || "0g");
-  nf.trans_fat = ps.trans_fat_g !== undefined ? (ps.trans_fat_g + "g") : (nf.trans_fat || "0g");
-  nf.trans_fat_100g = p100.trans_fat_g !== undefined ? (p100.trans_fat_g + "g") : (nf.trans_fat_100g || "0g");
-  nf.cholesterol = ps.cholesterol_mg !== undefined ? (ps.cholesterol_mg + "mg") : (nf.cholesterol || "0mg");
-  nf.cholesterol_100g = p100.cholesterol_mg !== undefined ? (p100.cholesterol_mg + "mg") : (nf.cholesterol_100g || "0mg");
-  nf.sodium = ps.sodium_mg !== undefined ? (ps.sodium_mg + "mg") : (nf.sodium || "0mg");
-  nf.sodium_100g = p100.sodium_mg !== undefined ? (p100.sodium_mg + "mg") : (nf.sodium_100g || "0mg");
-  nf.carbs = ps.carbs_g !== undefined ? (ps.carbs_g + "g") : (nf.carbs || "0g");
-  nf.carbs_100g = p100.carbs_g !== undefined ? (p100.carbs_g + "g") : (nf.carbs_100g || "0g");
-  nf.fiber = ps.fiber_g !== undefined ? (ps.fiber_g + "g") : (nf.fiber || "0g");
-  nf.fiber_100g = p100.fiber_g !== undefined ? (p100.fiber_g + "g") : (nf.fiber_100g || "0g");
-  nf.sugar = ps.sugar_g !== undefined ? (ps.sugar_g + "g") : (nf.sugar || "0g");
-  nf.sugar_100g = p100.sugar_g !== undefined ? (p100.sugar_g + "g") : (nf.sugar_100g || "0g");
-  nf.protein = ps.protein_g !== undefined ? (ps.protein_g + "g") : (nf.protein || "0g");
-  nf.protein_100g = p100.protein_g !== undefined ? (p100.protein_g + "g") : (nf.protein_100g || "0g");
+  // Preserve null / unknown values - do NOT convert to "0g" or "nullg"
+  nf.calories = ps.calories !== undefined ? ps.calories : (nf.calories ?? null);
+  nf.calories_100g = p100.calories !== undefined ? p100.calories : (nf.calories_100g ?? null);
+  nf.fat = ps.fat_g != null ? `${ps.fat_g}g` : (nf.fat ?? null);
+  nf.fat_100g = p100.fat_g != null ? `${p100.fat_g}g` : (nf.fat_100g ?? null);
+  nf.saturated_fat = ps.saturated_fat_g != null ? `${ps.saturated_fat_g}g` : (nf.saturated_fat ?? null);
+  nf.saturated_fat_100g = p100.saturated_fat_g != null ? `${p100.saturated_fat_g}g` : (nf.saturated_fat_100g ?? null);
+  nf.trans_fat = ps.trans_fat_g != null ? `${ps.trans_fat_g}g` : (nf.trans_fat ?? null);
+  nf.trans_fat_100g = p100.trans_fat_g != null ? `${p100.trans_fat_g}g` : (nf.trans_fat_100g ?? null);
+  nf.cholesterol = ps.cholesterol_mg != null ? `${ps.cholesterol_mg}mg` : (nf.cholesterol ?? null);
+  nf.cholesterol_100g = p100.cholesterol_mg != null ? `${p100.cholesterol_mg}mg` : (nf.cholesterol_100g ?? null);
+  nf.sodium = ps.sodium_mg != null ? `${ps.sodium_mg}mg` : (nf.sodium ?? null);
+  nf.sodium_100g = p100.sodium_mg != null ? `${p100.sodium_mg}mg` : (nf.sodium_100g ?? null);
+  nf.carbs = ps.carbs_g != null ? `${ps.carbs_g}g` : (nf.carbs ?? null);
+  nf.carbs_100g = p100.carbs_g != null ? `${p100.carbs_g}g` : (nf.carbs_100g ?? null);
+  nf.fiber = ps.fiber_g != null ? `${ps.fiber_g}g` : (nf.fiber ?? null);
+  nf.fiber_100g = p100.fiber_g != null ? `${p100.fiber_g}g` : (nf.fiber_100g ?? null);
+  nf.sugar = ps.sugar_g != null ? `${ps.sugar_g}g` : (nf.sugar ?? null);
+  nf.sugar_100g = p100.sugar_g != null ? `${p100.sugar_g}g` : (nf.sugar_100g ?? null);
+  nf.protein = ps.protein_g != null ? `${ps.protein_g}g` : (nf.protein ?? null);
+  nf.protein_100g = p100.protein_g != null ? `${p100.protein_g}g` : (nf.protein_100g ?? null);
   rawJson.nutrition_facts = nf;
 
   const { score, reason, safetyLevel } = calculateHealthScore(rawJson);
@@ -795,7 +931,7 @@ JSON.stringify({
     safety_level: safetyLevel,
     description: rawJson.description || "Food product label analysis.",
     panel_status: rawJson.panel_status || "extracted",
-    unreadable_instructions: rawJson.unreadable_instructions,
+    unreadable_instructions: rawJson.unreadable_instructions || null,
     ingredients: rawJson.ingredients || [],
     additives: rawJson.additives || [],
     allergens: rawJson.allergens_declared || [],
@@ -879,7 +1015,15 @@ JSON.stringify({
   const jsonBlockMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (jsonBlockMatch) cleanedText = jsonBlockMatch[1];
 
-  const rawJson = JSON.parse(cleanedText.trim());
+  let rawParsed: any;
+  try {
+    rawParsed = JSON.parse(cleanedText.trim());
+  } catch {
+    throw new Error("Failed to parse Gemini response as JSON.");
+  }
+
+  const validated = RawProductFactsSchema.safeParse(rawParsed);
+  const rawJson = validated.success ? validated.data : rawParsed;
 
   const nf = rawJson.nutrition_facts || { per_100g: {} };
   const p100 = nf.per_100g || {};
@@ -894,15 +1038,15 @@ JSON.stringify({
   if (nutriments.proteins_100g !== undefined) p100.protein_g = parseFloat(nutriments.proteins_100g);
 
   nf.per_100g = p100;
-  nf.calories_100g = p100.calories;
-  nf.fat_100g = p100.fat_g !== undefined ? (p100.fat_g + "g") : "0g";
-  nf.saturated_fat_100g = p100.saturated_fat_g !== undefined ? (p100.saturated_fat_g + "g") : "0g";
-  nf.trans_fat_100g = p100.trans_fat_g !== undefined ? (p100.trans_fat_g + "g") : "0g";
-  nf.sodium_100g = p100.sodium_mg !== undefined ? (p100.sodium_mg + "mg") : "0mg";
-  nf.carbs_100g = p100.carbs_g !== undefined ? (p100.carbs_g + "g") : "0g";
-  nf.sugar_100g = p100.sugar_g !== undefined ? (p100.sugar_g + "g") : "0g";
-  nf.fiber_100g = p100.fiber_g !== undefined ? (p100.fiber_g + "g") : "0g";
-  nf.protein_100g = p100.protein_g !== undefined ? (p100.protein_g + "g") : "0g";
+  nf.calories_100g = p100.calories ?? null;
+  nf.fat_100g = p100.fat_g != null ? `${p100.fat_g}g` : (nf.fat_100g ?? null);
+  nf.saturated_fat_100g = p100.saturated_fat_g != null ? `${p100.saturated_fat_g}g` : (nf.saturated_fat_100g ?? null);
+  nf.trans_fat_100g = p100.trans_fat_g != null ? `${p100.trans_fat_g}g` : (nf.trans_fat_100g ?? null);
+  nf.sodium_100g = p100.sodium_mg != null ? `${p100.sodium_mg}mg` : (nf.sodium_100g ?? null);
+  nf.carbs_100g = p100.carbs_g != null ? `${p100.carbs_g}g` : (nf.carbs_100g ?? null);
+  nf.sugar_100g = p100.sugar_g != null ? `${p100.sugar_g}g` : (nf.sugar_100g ?? null);
+  nf.fiber_100g = p100.fiber_g != null ? `${p100.fiber_g}g` : (nf.fiber_100g ?? null);
+  nf.protein_100g = p100.protein_g != null ? `${p100.protein_g}g` : (nf.protein_100g ?? null);
   rawJson.nutrition_facts = nf;
 
   const { score, reason, safetyLevel } = calculateHealthScore(rawJson);

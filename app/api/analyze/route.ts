@@ -1,6 +1,6 @@
-import { createClient } from "@/lib/supabase-server";
+import { createClient, createAdminClient } from "@/lib/supabase-server";
 import { analyzeLabel, enrichIngredientsText, applyPreferences, SAMPLE_PRODUCTS, IngredientAnalysis } from "@/lib/claude";
-import { checkAndDeductCredits, refundCredits } from "@/lib/credits";
+import { reserveCredits, finalizeReservation, releaseReservation } from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -62,7 +62,7 @@ function checkRateLimit(ip: string): boolean {
 }
 
 export async function POST(request: Request) {
-  let reservedCredit = false;
+  let activeReservationOpId: string | null = null;
   let currentUserId: string | null = null;
 
   try {
@@ -125,24 +125,25 @@ export async function POST(request: Request) {
       }, { status: 401 });
     }
 
-    // 3. ATOMIC CREDIT DEDUCTION (1 Credit per single scan)
-    const deduction = await checkAndDeductCredits(
+    // 3. ATOMIC CREDIT RESERVATION (1 Credit per single scan)
+    const opId = `op_scan_${user.id.slice(0, 8)}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const reservation = await reserveCredits(
       user.id,
       CREDIT_COSTS.SCAN,
       "scan",
-      null,
+      opId,
       `Food label scan: ${productName || filename || barcode || "Image Scan"}`
     );
 
-    if (!deduction.success) {
+    if (!reservation.success) {
       return NextResponse.json({
         error: "INSUFFICIENT_CREDITS",
-        message: deduction.error || "You do not have enough scan credits. Please purchase a scan pack to continue.",
-        availableCredits: deduction.previousBalance
+        message: reservation.error || "You do not have enough scan credits. Please purchase a scan pack to continue.",
+        availableCredits: reservation.availableCreditsAfter ?? 0
       }, { status: 403 });
     }
 
-    reservedCredit = true;
+    activeReservationOpId = opId;
 
     // Fetch user dietary preferences from profile if not passed in body
     let finalPrefs = preferences || [];
@@ -162,12 +163,13 @@ export async function POST(request: Request) {
 
     // 4. BARCODE LOOKUP (CACHE OR OPEN FOOD FACTS)
     if (barcode) {
-      // A. Local cache lookup
+      // A. Local cache lookup with schema version check
       const { data: cachedProduct } = await supabase
         .from("products_cache")
         .select("*")
         .eq("barcode", barcode)
-        .single();
+        .eq("schema_version", "2.0")
+        .maybeSingle();
 
       if (cachedProduct && cachedProduct.raw_data) {
         // Cache contains neutral raw facts; apply preferences & localization dynamically
@@ -178,108 +180,115 @@ export async function POST(request: Request) {
           .from("scans")
           .insert({
             user_id: user.id,
-            product_name: analysis.product_name || "Unknown Product",
+            product_name: analysis.product_name,
             barcode: barcode,
-            health_score: analysis.health_score || 0,
-            safety_level: analysis.safety_level || "moderate",
+            health_score: analysis.health_score,
+            safety_level: analysis.safety_level,
             result_json: analysis
           })
           .select()
           .single();
+
         scanId = scanData?.id || "";
+
+        // Finalize credit deduction on successful scan
+        if (activeReservationOpId) {
+          await finalizeReservation(user.id, activeReservationOpId);
+          activeReservationOpId = null;
+        }
 
         return NextResponse.json({
           success: true,
           analysis,
           scanId,
-          source: "cache",
-          remainingCredits: deduction.newBalance
+          source: "cache"
         });
       }
 
-      // B. Open Food Facts lookup
+      // B. Open Food Facts API query
       try {
-        const offRes = await axios.get(`https://world.openfoodfacts.org/api/v3/product/${barcode}.json`, {
-          headers: { "User-Agent": "ScanSafe - Web - Version 2.0" },
-          timeout: 8000
-        });
+        const offRes = await axios.get(
+          `https://world.openfoodfacts.org/api/v2/product/${barcode}.json`,
+          { timeout: 8000 }
+        );
 
-        const productData = offRes.data?.product;
-        if (productData && (productData.ingredients_text || productData.ingredients_text_en)) {
-          const rawName = productData.product_name || productData.product_name_en || "Unknown Product";
-          const rawBrand = productData.brands || "Unknown Brand";
-          const rawIngredients = productData.ingredients_text || productData.ingredients_text_en;
-          const rawNutriments = productData.nutriments || {};
+        if (offRes.data && offRes.data.status === 1 && offRes.data.product) {
+          const offProd = offRes.data.product;
+          const offName = offProd.product_name || offProd.product_name_en || "Food Product";
+          const offBrand = offProd.brands || "Brand";
+          const offIngredients = offProd.ingredients_text || offProd.ingredients_text_en || "";
 
-          // AI text parsing & enrichment
-          const rawEnriched = await enrichIngredientsText(
-            rawIngredients,
-            rawName,
-            rawBrand,
-            rawNutriments,
-            [], // extract neutral facts for cache
-            "en"
-          );
+          if (offIngredients.length > 5) {
+            const enriched = await enrichIngredientsText(
+              offIngredients,
+              offName,
+              offBrand,
+              offProd.nutriments || {},
+              finalPrefs,
+              preferredLanguage
+            );
 
-          const rawImage = productData.image_url || productData.image_front_url || productData.image_front_small_url || null;
-          if (rawImage) {
-            rawEnriched.image_url = rawImage;
-          }
+            // Store product image
+            const offImageUrl = offProd.image_url || offProd.image_front_url || offProd.image_front_small_url || null;
+            if (offImageUrl) {
+              enriched.image_url = offImageUrl;
+            }
 
-          // Cache neutral facts
-          await supabase
-            .from("products_cache")
-            .upsert({
-              barcode: barcode,
-              product_name: rawName,
-              brand: rawBrand,
-              raw_data: rawEnriched
+            // Save neutral facts to shared products_cache
+            const adminClient = createAdminClient();
+            await adminClient
+              .from("products_cache")
+              .upsert({
+                barcode,
+                product_name: offName,
+                brand: offBrand,
+                raw_data: enriched,
+                schema_version: "2.0",
+                source: "openfoodfacts",
+                updated_at: new Date().toISOString()
+              }, { onConflict: "barcode" });
+
+            const { data: scanData } = await supabase
+              .from("scans")
+              .insert({
+                user_id: user.id,
+                product_name: offName,
+                barcode: barcode,
+                health_score: enriched.health_score,
+                safety_level: enriched.safety_level,
+                result_json: enriched
+              })
+              .select()
+              .single();
+
+            if (activeReservationOpId) {
+              await finalizeReservation(user.id, activeReservationOpId);
+              activeReservationOpId = null;
+            }
+
+            return NextResponse.json({
+              success: true,
+              analysis: enriched,
+              scanId: scanData?.id || "",
+              source: "openfoodfacts"
             });
-
-          // Apply user preferences on top
-          const personalizedAnalysis = applyPreferences(rawEnriched, finalPrefs);
-
-          // Save to user scan history
-          const { data: scanData } = await supabase
-            .from("scans")
-            .insert({
-              user_id: user.id,
-              product_name: personalizedAnalysis.product_name || rawName,
-              barcode: barcode,
-              health_score: personalizedAnalysis.health_score || 0,
-              safety_level: personalizedAnalysis.safety_level || "moderate",
-              result_json: personalizedAnalysis
-            })
-            .select()
-            .single();
-
-          return NextResponse.json({
-            success: true,
-            analysis: personalizedAnalysis,
-            scanId: scanData?.id || "",
-            source: "open_food_facts",
-            remainingCredits: deduction.newBalance
-          });
+          }
         }
-      } catch (offErr: any) {
-        console.warn("Open Food Facts lookup failed:", offErr.message);
-      }
-
-      if (!image) {
-        // Barcode not found and no image uploaded; refund the 1 reserved credit
-        await refundCredits(user.id, CREDIT_COSTS.SCAN, null, "Barcode not found in catalog");
-        return NextResponse.json({
-          success: false,
-          errorType: "BARCODE_NOT_FOUND",
-          message: "Product not found in Open Food Facts database. Please snap a photo of the ingredients list so our AI Vision can scan it directly."
-        });
+      } catch (offErr) {
+        console.warn("OpenFoodFacts lookup failed:", offErr);
       }
     }
 
-    // 5. IMAGE OCR SCAN VIA GEMINI VISION
+    // 5. OCR VISION SCANNING VIA GEMINI
     if (!image) {
-      await refundCredits(user.id, CREDIT_COSTS.SCAN, null, "No image or barcode provided");
-      return NextResponse.json({ error: "Image or barcode is required for analysis" }, { status: 400 });
+      if (activeReservationOpId && currentUserId) {
+        await releaseReservation(currentUserId, activeReservationOpId, "Missing product image or barcode");
+        activeReservationOpId = null;
+      }
+      return NextResponse.json({
+        error: "IMAGE_REQUIRED",
+        message: "No product image provided or product could not be found by barcode."
+      }, { status: 400 });
     }
 
     const analysis = await analyzeLabel(
@@ -290,49 +299,69 @@ export async function POST(request: Request) {
       preferredLanguage
     );
 
-    if (image) {
+    if (image && image.length > 50) {
       analysis.image_url = image;
     }
 
-    // Save scan to user history
+    // Save scan to history
     let scanId = "";
-    const { data: scanData, error: scanInsertError } = await supabase
+    const { data: scanData, error: scanInsertErr } = await supabase
       .from("scans")
       .insert({
         user_id: user.id,
-        product_name: analysis.product_name || "Unknown Product",
-        health_score: analysis.health_score || 0,
-        safety_level: analysis.safety_level || "moderate",
+        product_name: analysis.product_name,
+        barcode: barcode || null,
+        health_score: analysis.health_score,
+        safety_level: analysis.safety_level,
         result_json: analysis
       })
       .select()
       .single();
 
-    if (scanInsertError) {
-      console.error("Error saving scan to history:", scanInsertError);
-    } else {
-      scanId = scanData?.id || "";
+    if (!scanInsertErr && scanData) {
+      scanId = scanData.id;
+    }
+
+    // If barcode was provided, cache the neutral facts
+    if (barcode && analysis.panel_status === "extracted") {
+      const adminClient = createAdminClient();
+      await adminClient
+        .from("products_cache")
+        .upsert({
+          barcode,
+          product_name: analysis.product_name,
+          brand: analysis.brand,
+          raw_data: analysis,
+          schema_version: "2.0",
+          source: "ocr",
+          updated_at: new Date().toISOString()
+        }, { onConflict: "barcode" });
+    }
+
+    // Finalize credit deduction
+    if (activeReservationOpId) {
+      await finalizeReservation(user.id, activeReservationOpId);
+      activeReservationOpId = null;
     }
 
     return NextResponse.json({
       success: true,
       analysis,
       scanId,
-      source: "vision_ai",
-      remainingCredits: deduction.newBalance
+      source: "gemini_vision"
     });
 
   } catch (error: any) {
-    console.error("Error in analyze API route:", error);
+    console.error("Scan analysis failed:", error);
 
-    // If credit was deducted before crash, automatically refund it
-    if (reservedCredit && currentUserId) {
-      await refundCredits(currentUserId, CREDIT_COSTS.SCAN, null, "Analysis API processing failed");
+    // Release reserved credit on failure
+    if (activeReservationOpId && currentUserId) {
+      await releaseReservation(currentUserId, activeReservationOpId, error.message || "Scan execution error");
     }
 
     return NextResponse.json({
       error: "ANALYSIS_FAILED",
-      message: "Failed to analyze food product label. Your scan credit has been preserved. Please try again."
+      message: error.message || "An unexpected error occurred during scan processing. Your credits have not been deducted."
     }, { status: 500 });
   }
 }

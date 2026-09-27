@@ -81,7 +81,7 @@ export default function TermsPage() {
                   <strong className="text-zinc-200">Credit Costs:</strong> 1 credit per single product scan, 2 credits per head-to-head comparison, and 1 credit per composite meal analysis.
                 </li>
                 <li>
-                  <strong className="text-zinc-200">Refunds:</strong> Refund requests for unused scan packs submitted within 7 days of purchase to <span className="text-emerald-400 underline">support@scansafe.in</span> will be refunded to the original payment channel.
+                  <strong className="text-zinc-200">Refunds:</strong> Refund requests for unused scan packs submitted within 7 days of purchase to <span className="text-emerald-400 underline">kirtanpatel2305@gmail.com</span> will be processed to the original payment channel.
                 </li>
               </ul>
             </section>

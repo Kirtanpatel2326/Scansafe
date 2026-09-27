@@ -1,7 +1,13 @@
-import { createClient } from "@/lib/supabase-server";
+import { createClient, createAdminClient } from "@/lib/supabase-server";
 import { razorpay } from "@/lib/razorpay";
 import { getScanPack } from "@/lib/plans";
 import { NextResponse } from "next/server";
+import { z } from "zod";
+
+const CheckoutPayloadSchema = z.object({
+  packId: z.string().min(1, "Scan pack ID is required").max(50),
+  planType: z.string().max(50).optional()
+});
 
 export async function POST(request: Request) {
   try {
@@ -13,23 +19,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Parse plan / pack ID from request body
-    let packId = "pack_320";
+    let rawBody: any;
     try {
-      const body = await request.json();
-      if (body && (body.planType || body.packId)) {
-        packId = body.packId || body.planType;
-      }
-    } catch (e) {
-      // Default to pack_320
+      rawBody = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON request body" }, { status: 400 });
     }
 
-    const pack = getScanPack(packId);
+    const parsed = CheckoutPayloadSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json({ 
+        error: "INVALID_PACK_ID", 
+        message: "A valid, explicit scan pack ID must be provided." 
+      }, { status: 400 });
+    }
+
+    const requestedId = parsed.data.packId || parsed.data.planType;
+    const pack = getScanPack(requestedId);
     if (!pack) {
-      return NextResponse.json({ error: `Invalid scan pack ID: ${packId}` }, { status: 400 });
+      return NextResponse.json({ 
+        error: "UNKNOWN_PACK_ID", 
+        message: `Unknown or unsupported scan pack ID: '${requestedId}'. Please select a valid pack from the pricing catalog.` 
+      }, { status: 400 });
     }
 
-    const isUsd = packId.startsWith("usd_") || packId.startsWith("pack_usd_");
+    const isUsd = pack.id.startsWith("usd_") || pack.id.startsWith("pack_usd_");
     const amount = isUsd ? (pack.priceCents || 900) : pack.pricePaise;
     const currency = isUsd ? "USD" : "INR";
 
@@ -47,6 +61,23 @@ export async function POST(request: Request) {
     };
 
     const order = await razorpay.orders.create(options);
+
+    // Store server-side order association in payment_orders
+    try {
+      const adminClient = createAdminClient();
+      await adminClient
+        .from("payment_orders")
+        .insert({
+          id: order.id,
+          user_id: user.id,
+          pack_id: pack.id,
+          amount_paise: amount,
+          currency: currency,
+          status: "created"
+        });
+    } catch (orderSaveErr) {
+      console.warn("Could not save payment_orders record:", orderSaveErr);
+    }
 
     return NextResponse.json({
       success: true,

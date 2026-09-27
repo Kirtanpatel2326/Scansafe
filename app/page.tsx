@@ -149,13 +149,18 @@ export default function LandingPage() {
             <h2 className="text-3xl md:text-5xl font-black text-white mb-6">{t.metricsTitle}</h2>
             <div className="flex flex-wrap justify-center gap-8 md:gap-16 mt-4">
               <div className="flex flex-col items-center">
-                <span className="text-4xl md:text-5xl font-black text-indigo-400">150,000+</span>
-                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">{t.metricsProducts}</span>
+                <span className="text-4xl md:text-5xl font-black text-emerald-400">100%</span>
+                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Evidence-Based Vision</span>
               </div>
               <div className="hidden md:block w-px h-16 bg-zinc-800"></div>
               <div className="flex flex-col items-center">
-                <span className="text-4xl md:text-5xl font-black text-rose-400">98%</span>
-                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">{t.metricsFound}</span>
+                <span className="text-4xl md:text-5xl font-black text-indigo-400">FSSAI & Global</span>
+                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Regulatory Auditing</span>
+              </div>
+              <div className="hidden md:block w-px h-16 bg-zinc-800"></div>
+              <div className="flex flex-col items-center">
+                <span className="text-4xl md:text-5xl font-black text-rose-400">0</span>
+                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Hallucinated Data</span>
               </div>
             </div>
           </div>

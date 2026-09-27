@@ -1,11 +1,19 @@
 import { createClient } from "@/lib/supabase-server";
-import { checkAndDeductCredits, refundCredits } from "@/lib/credits";
+import { reserveCredits, finalizeReservation, releaseReservation } from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
+import { ComparisonResultSchema } from "@/lib/claude";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import axios from "axios";
+import { z } from "zod";
 
 export const maxDuration = 60;
+
+const ComparePayloadSchema = z.object({
+  imageA: z.string().min(50, "Product image A is required"),
+  imageB: z.string().min(50, "Product image B is required"),
+  preferences: z.array(z.string()).optional().default([])
+});
 
 function getBase64Data(base64Image: string) {
   let mediaType = "image/jpeg";
@@ -22,7 +30,7 @@ function getBase64Data(base64Image: string) {
 }
 
 export async function POST(request: Request) {
-  let reservedCredit = false;
+  let activeReservationOpId: string | null = null;
   let currentUserId: string | null = null;
 
   try {
@@ -39,48 +47,50 @@ export async function POST(request: Request) {
 
     currentUserId = user.id;
 
-    // 2. Atomic Credit Deduction (2 credits for compare)
-    const deduction = await checkAndDeductCredits(
+    // 2. Validate request payload
+    let rawBody: any;
+    try {
+      rawBody = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON request body" }, { status: 400 });
+    }
+
+    const parsed = ComparePayloadSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json({
+        error: "INVALID_PAYLOAD",
+        details: parsed.error.format()
+      }, { status: 400 });
+    }
+
+    const { imageA, imageB, preferences } = parsed.data;
+
+    // 3. Atomic Credit Reservation (2 credits for compare)
+    const opId = `op_comp_${user.id.slice(0, 8)}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const reservation = await reserveCredits(
       user.id,
       CREDIT_COSTS.COMPARE,
       "compare",
-      null,
+      opId,
       "Side-by-side product comparison"
     );
 
-    if (!deduction.success) {
+    if (!reservation.success) {
       return NextResponse.json({
         error: "INSUFFICIENT_CREDITS",
-        message: deduction.error || "You need at least 2 scan credits to compare products. Please refill your scan pack.",
-        availableCredits: deduction.previousBalance
+        message: reservation.error || "You need at least 2 scan credits to compare products. Please refill your scan pack.",
+        availableCredits: reservation.availableCreditsAfter ?? 0
       }, { status: 403 });
     }
 
-    reservedCredit = true;
-
-    const body = await request.json();
-    const { imageA, imageB, preferences } = body;
-
-    if (!imageA || !imageB) {
-      await refundCredits(user.id, CREDIT_COSTS.COMPARE, null, "Missing comparison images");
-      return NextResponse.json({
-        error: "MISSING_IMAGES",
-        message: "Both product images must be provided to run comparison."
-      }, { status: 400 });
-    }
+    activeReservationOpId = opId;
 
     const { mediaType: typeA, base64Data: dataA } = getBase64Data(imageA);
     const { mediaType: typeB, base64Data: dataB } = getBase64Data(imageB);
 
-    const userPrefs = preferences || [];
     const apiKey = process.env.GEMINI_API_KEY;
-
     if (!apiKey) {
-      await refundCredits(user.id, CREDIT_COSTS.COMPARE, null, "AI service not configured");
-      return NextResponse.json({
-        error: "CONFIGURATION_ERROR",
-        message: "Gemini API is not configured on server."
-      }, { status: 500 });
+      throw new Error("AI service is not configured on server.");
     }
 
     const cookieStore = await cookies();
@@ -90,12 +100,12 @@ export async function POST(request: Request) {
       : "";
 
     const systemPrompt = "You are ScanSafe COMPARE, an objective food toxicology and nutrition auditor.\n" +
-"Compare the two product images (Image 1 = Product A, Image 2 = Product B) strictly based on visible label evidence against the user preferences: [" + userPrefs.join(", ") + "]." + langPrompt + "\n\n" +
+"Compare the two product images (Image 1 = Product A, Image 2 = Product B) strictly based on visible label evidence against the user preferences: [" + preferences.join(", ") + "]." + langPrompt + "\n\n" +
 "EVIDENCE INTEGRITY RULES:\n" +
 "1. Extract nutrition and ingredient facts strictly from what is visible in the photos.\n" +
-"2. If an image is unreadable or blurry, mark its panel_status as unreadable or missing, and evaluate based only on what can be reliably identified.\n" +
-"3. Compare NOVA UPF degree, sugar, saturated fat, sodium, fiber, protein, and presence of high-risk synthetic additives.\n" +
-"4. Select the healthier, less processed choice as the winner with clear factual justification.\n\n" +
+"2. If an image is unreadable or blurry, set safety_level to 'insufficient_evidence' and health_score to null.\n" +
+"3. Compare NOVA UPF degree, sugar, saturated fat, sodium, fiber, protein, and presence of high-risk synthetic additives on the same basis (per 100g).\n" +
+"4. Select winner as 'A', 'B', 'tie', or 'undetermined' with clear factual justification.\n\n" +
 "Return a single JSON object matching:\n" +
 JSON.stringify({
   winner: "A",
@@ -121,7 +131,8 @@ JSON.stringify({
     protein: { a: "5g", b: "2g" },
     fat: { a: "3g", b: "8g" },
     fiber: { a: "4g", b: "1g" },
-    additives: { a: "0 additives", b: "3 additives (E322, E471, E150d)" }
+    additives: { a: "0 additives", b: "3 additives" },
+    basis: "per 100g"
   },
   verdict_english: "Comprehensive plain-language comparison summary."
 }, null, 2) + "\n\nReturn ONLY raw JSON string.";
@@ -148,8 +159,8 @@ JSON.stringify({
       { headers: { "content-type": "application/json" } }
     );
 
-    const candidate = response && response.data && response.data.candidates && response.data.candidates[0];
-    const responseText = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text ? candidate.content.parts[0].text.trim() : null;
+    const candidate = response?.data?.candidates?.[0];
+    const responseText = candidate?.content?.parts?.[0]?.text?.trim();
     if (!responseText) {
       throw new Error("Empty response from Gemini API");
     }
@@ -159,7 +170,17 @@ JSON.stringify({
     if (jsonBlockMatch) {
       cleanedText = jsonBlockMatch[1];
     }
-    const comparisonData = JSON.parse(cleanedText.trim());
+
+    let rawComparison: any;
+    try {
+      rawComparison = JSON.parse(cleanedText.trim());
+    } catch {
+      throw new Error("Failed to parse comparison response as JSON");
+    }
+
+    // Runtime Schema Validation
+    const validated = ComparisonResultSchema.safeParse(rawComparison);
+    const comparisonData = validated.success ? validated.data : rawComparison;
 
     // Save comparison scan to history database
     let scanId = "";
@@ -170,12 +191,12 @@ JSON.stringify({
           user_id: user.id,
           product_name: (comparisonData.product_a?.name || "Product A") + " vs " + (comparisonData.product_b?.name || "Product B"),
           barcode: "COMPARE:" + comparisonData.winner,
-          health_score: Math.max(comparisonData.product_a?.health_score || 0, comparisonData.product_b?.health_score || 0),
+          health_score: comparisonData.product_a?.health_score ?? comparisonData.product_b?.health_score ?? null,
           safety_level: comparisonData.winner === "A" 
             ? (comparisonData.product_a?.safety_level || "safe")
             : comparisonData.winner === "B" 
             ? (comparisonData.product_b?.safety_level || "safe")
-            : (comparisonData.product_a?.safety_level || "moderate"),
+            : "moderate",
           result_json: comparisonData
         })
         .select()
@@ -185,21 +206,29 @@ JSON.stringify({
       console.error("Failed to save comparison to history database:", dbErr);
     }
 
+    // Finalize 2 credits deduction
+    let remainingCredits: number | undefined;
+    if (activeReservationOpId) {
+      const finalization = await finalizeReservation(user.id, activeReservationOpId);
+      remainingCredits = finalization.newBalance;
+      activeReservationOpId = null;
+    }
+
     return NextResponse.json({
       success: true,
       comparison: comparisonData,
       scanId,
-      remainingCredits: deduction.newBalance
+      remainingCredits
     });
 
   } catch (err: any) {
     console.error("Comparison API error:", err);
-    if (reservedCredit && currentUserId) {
-      await refundCredits(currentUserId, CREDIT_COSTS.COMPARE, null, "Comparison processing error");
+    if (activeReservationOpId && currentUserId) {
+      await releaseReservation(currentUserId, activeReservationOpId, err.message || "Comparison processing error");
     }
     return NextResponse.json({
       error: "COMPARISON_FAILED",
-      message: err.message || "An error occurred during comparison analysis. Your credits have been restored."
+      message: err.message || "An error occurred during comparison analysis. Your credits have not been deducted."
     }, { status: 500 });
   }
 }

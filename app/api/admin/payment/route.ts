@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { fulfillPackPurchase } from "@/lib/credits";
+import { getScanPack } from "@/lib/plans";
 
 export async function POST(req: Request) {
   try {
@@ -51,24 +52,50 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Payment request not found" }, { status: 404 });
       }
 
-      // Update status in pending_payments
-      const { error: updatePayErr } = await supabase
-        .from("pending_payments")
-        .update({ status: "approved" })
-        .eq("id", paymentId);
+      if (payment.status === "approved") {
+        return NextResponse.json({ error: "Payment has already been approved" }, { status: 400 });
+      }
 
-      if (updatePayErr) throw updatePayErr;
+      const pack = getScanPack(payment.plan_type) || getScanPack("pack_100");
+      const creditsToGrant = pack ? pack.scans : 100;
+      const refId = payment.utr ? `UTR:${payment.utr}` : `MANUAL:${paymentId}`;
 
-      // Idempotently fulfill credits in credit_ledger and profiles
+      // 1. Try atomic approve RPC function
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc("approve_manual_payment", {
+          p_payment_id: paymentId,
+          p_admin_id: user.id,
+          p_credits_to_grant: creditsToGrant
+        });
+
+        if (!rpcErr && rpcRes?.success) {
+          return NextResponse.json({ success: true, totalCredits: rpcRes.total_credits });
+        }
+      } catch (rpcErr) {
+        console.warn("Manual payment RPC not available, using fallback:", rpcErr);
+      }
+
+      // 2. Fallback: Fulfill credits first, only update status if fulfillment succeeds
       const fulfillment = await fulfillPackPurchase(
         payment.user_id,
-        payment.plan_type,
-        payment.utr || paymentId,
+        pack ? pack.id : "pack_100",
+        refId,
         payment.amount
       );
 
       if (!fulfillment.success) {
         console.error("Fulfillment failed on admin approval:", fulfillment.error);
+        return NextResponse.json({ error: "Failed to fulfill credits: " + fulfillment.error }, { status: 500 });
+      }
+
+      const { error: updatePayErr } = await supabase
+        .from("pending_payments")
+        .update({ status: "approved" })
+        .eq("id", paymentId);
+
+      if (updatePayErr) {
+        console.error("Failed to update payment status:", updatePayErr);
+        return NextResponse.json({ error: "Failed to update approval status" }, { status: 500 });
       }
 
       return NextResponse.json({ success: true, fulfillment });
