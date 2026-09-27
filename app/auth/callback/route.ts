@@ -29,7 +29,6 @@ export async function GET(request: NextRequest) {
           email: email,
           full_name: fullName,
           plan: 'free',
-          scans_today: 5,
           scans_today: 0,
           scans_reset_at: new Date().toISOString().split('T')[0]
         })
@@ -37,6 +36,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Redirect to scanner dashboard
-  return NextResponse.redirect(new URL('/scan', request.url))
+  // Redirect to home page
+  return NextResponse.redirect(new URL('/', request.url))
 }

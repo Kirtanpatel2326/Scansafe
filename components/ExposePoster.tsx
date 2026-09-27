@@ -1,88 +1,139 @@
-import React, { forwardRef } from 'react'
-import { AlertTriangle, ShieldAlert, Zap, CheckCircle2 } from 'lucide-react'
-import { IngredientAnalysisResult } from './ResultCard'
+import React, { forwardRef } from "react";
+import { AlertTriangle, ShieldAlert, Zap, CheckCircle2, ShieldCheck, Heart } from "lucide-react";
+import { IngredientAnalysisResult } from "./ResultCard";
 
 interface ExposePosterProps {
-  result: IngredientAnalysisResult
+  result: IngredientAnalysisResult;
 }
 
 export const ExposePoster = forwardRef<HTMLDivElement, ExposePosterProps>(({ result }, ref) => {
-  const { product_name, health_score, ingredients = [], alternatives_detailed = [] } = result
+  const { 
+    product_name, 
+    brand,
+    health_score, 
+    ingredients = [], 
+    additives = [],
+    alternatives_detailed = [],
+    upf_score = 3
+  } = result;
 
-  // Get the most dangerous ingredients
-  const toxicIngredients = ingredients.filter(i => i.status === 'avoid' || i.status === 'caution').slice(0, 3)
-  
-  // Get alternatives
-  const alternatives = alternatives_detailed.slice(0, 2)
+  const flaggedIngredients = ingredients.filter(i => i.status === "avoid" || i.status === "caution").slice(0, 3);
+  const alternatives = alternatives_detailed.slice(0, 2);
+
+  const getScoreColor = (score: number) => {
+    if (score >= 70) return "#10b981";
+    if (score >= 40) return "#f59e0b";
+    return "#f43f5e";
+  };
+
+  const scoreColor = getScoreColor(health_score);
 
   return (
-    // We use fixed positioning underneath the main content to avoid html-to-image rendering bugs on iOS/Safari (opacity: 0 or moving offscreen completely breaks it)
-    <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -50, pointerEvents: 'none' }}>
+    <div style={{ width: 0, height: 0, overflow: "hidden", pointerEvents: "none" }} className="notranslate" translate="no">
       <div 
         ref={ref} 
         id="expose-poster-node"
-        className="w-[1080px] h-[1080px] bg-black text-white p-12 flex flex-col justify-between"
-        style={{ fontFamily: 'system-ui, sans-serif' }}
+        className="notranslate"
+        translate="no"
+        style={{
+          width: "1080px",
+          height: "1080px",
+          backgroundColor: "#000000",
+          color: "#ffffff",
+          padding: "48px",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          position: "relative",
+          overflow: "hidden",
+          boxSizing: "border-box"
+        }}
       >
-        {/* Background Accents */}
-        <div className="absolute inset-0 bg-rose-500/5 pointer-events-none" />
-        <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-rose-600/10 blur-[150px] rounded-full pointer-events-none -translate-y-1/2 translate-x-1/3" />
-        <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-emerald-600/10 blur-[100px] rounded-full pointer-events-none translate-y-1/3 -translate-x-1/3" />
+        {/* Ambient Gradients */}
+        <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(16,185,129,0.02)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: 0, right: 0, width: "700px", height: "700px", backgroundColor: "rgba(16,185,129,0.06)", filter: "blur(140px)", borderRadius: "9999px", pointerEvents: "none", transform: "translate(33%, -33%)" }} />
 
         {/* Header */}
-        <div className="relative z-10 flex gap-8 items-center border-b border-zinc-800 pb-8">
-           <div className="flex items-center justify-center w-32 h-32 rounded-3xl bg-rose-500 text-black font-black text-6xl shadow-[0_0_50px_rgba(244,63,94,0.4)] shrink-0">
+        <div style={{ position: "relative", zIndex: 10, display: "flex", gap: "32px", alignItems: "center", borderBottom: "1px solid #27272a", paddingBottom: "32px" }}>
+           <div style={{ 
+             display: "flex", 
+             alignItems: "center", 
+             justifyContent: "center", 
+             width: "128px", 
+             height: "128px", 
+             borderRadius: "24px", 
+             backgroundColor: scoreColor, 
+             color: "#000000", 
+             fontWeight: 900, 
+             fontSize: "64px", 
+             boxShadow: `0 0 40px ${scoreColor}40`, 
+             flexShrink: 0 
+           }}>
              {health_score}
            </div>
-           <div className="min-w-0">
-              <p className="text-3xl font-black text-rose-500 tracking-widest uppercase mb-1">Health Score</p>
-              <h1 className="text-6xl font-black leading-tight tracking-tight text-white truncate max-w-[800px]">
+           <div style={{ minWidth: 0 }}>
+              <p style={{ fontSize: "20px", fontWeight: 800, color: scoreColor, letterSpacing: "0.15em", textTransform: "uppercase", margin: 0, marginBottom: "4px" }}>
+                ScanSafe Health Score / 100
+              </p>
+              <h1 style={{ fontSize: "52px", fontWeight: 900, lineHeight: 1.2, letterSpacing: "-0.025em", color: "#ffffff", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "820px" }}>
                 {product_name}
               </h1>
+              {brand && (
+                <p style={{ fontSize: "22px", color: "#a1a1aa", marginTop: "4px", margin: 0 }}>by {brand} • NOVA Group {upf_score}</p>
+              )}
            </div>
         </div>
 
         {/* Middle Content */}
-        <div className="relative z-10 flex-1 flex flex-col justify-center gap-8 my-8">
-          {toxicIngredients.length > 0 && (
-            <div className="bg-zinc-950/80 border-l-8 border-rose-500 rounded-r-3xl p-8 shadow-2xl backdrop-blur-md">
-              <div className="flex items-center gap-4 mb-6">
-                <ShieldAlert className="w-10 h-10 text-rose-500" />
-                <h3 className="text-4xl font-black text-rose-400">AVOID:</h3>
+        <div style={{ position: "relative", zIndex: 10, flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: "28px", margin: "28px 0" }}>
+          {flaggedIngredients.length > 0 ? (
+            <div style={{ backgroundColor: "rgba(18,18,22,0.9)", borderLeft: `8px solid ${scoreColor}`, borderRadius: "0 24px 24px 0", padding: "32px", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "20px" }}>
+                <AlertTriangle style={{ width: "36px", height: "36px", color: scoreColor }} />
+                <h3 style={{ fontSize: "32px", fontWeight: 900, color: "#ffffff", margin: 0 }}>INGREDIENTS OF NOTE:</h3>
               </div>
               
-              <div className="flex flex-col gap-5">
-                {toxicIngredients.map((ing, i) => (
-                  <div key={i} className="flex gap-4 items-start">
-                    <div className="mt-1 flex-shrink-0">
-                      <AlertTriangle className="w-8 h-8 text-rose-500" />
+              <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                {flaggedIngredients.map((ing, i) => (
+                  <div key={i} style={{ display: "flex", gap: "14px", alignItems: "flex-start" }}>
+                    <div style={{ marginTop: "4px", flexShrink: 0 }}>
+                      <AlertTriangle style={{ width: "26px", height: "26px", color: scoreColor }} />
                     </div>
                     <div>
-                      <h4 className="text-3xl font-bold text-white">{ing.name}</h4>
-                      <p className="text-2xl text-zinc-400 mt-1 leading-snug">{ing.reason}</p>
+                      <h4 style={{ fontSize: "26px", fontWeight: "bold", color: "#ffffff", margin: 0 }}>{ing.name}</h4>
+                      <p style={{ fontSize: "20px", color: "#a1a1aa", marginTop: "4px", lineHeight: 1.35, margin: 0 }}>{ing.reason}</p>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
+          ) : (
+            <div style={{ backgroundColor: "rgba(6,78,59,0.2)", borderLeft: "8px solid #10b981", borderRadius: "0 24px 24px 0", padding: "32px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "12px" }}>
+                <ShieldCheck style={{ width: "36px", height: "36px", color: "#10b981" }} />
+                <h3 style={{ fontSize: "32px", fontWeight: 900, color: "#34d399", margin: 0 }}>CLEAN INGREDIENTS PROFILE</h3>
+              </div>
+              <p style={{ fontSize: "22px", color: "#a7f3d0", margin: 0 }}>Contains minimally processed whole foods with no alarming synthetic additives.</p>
+            </div>
           )}
 
           {alternatives.length > 0 && (
-             <div className="bg-emerald-950/20 border-l-8 border-emerald-500 rounded-r-3xl p-8 shadow-2xl backdrop-blur-md">
-              <div className="flex items-center gap-4 mb-6">
-                <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-                <h3 className="text-4xl font-black text-emerald-400">SAFER ALTERNATIVES:</h3>
+             <div style={{ backgroundColor: "rgba(6,78,59,0.18)", borderLeft: "8px solid #10b981", borderRadius: "0 24px 24px 0", padding: "32px", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "20px" }}>
+                <CheckCircle2 style={{ width: "36px", height: "36px", color: "#10b981" }} />
+                <h3 style={{ fontSize: "32px", fontWeight: 900, color: "#34d399", margin: 0 }}>NUTRITIONALLY SUPERIOR SWAPS:</h3>
               </div>
               
-              <div className="flex flex-col gap-5">
+              <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                 {alternatives.map((alt, i) => (
-                  <div key={i} className="flex gap-4 items-start">
-                    <div className="mt-1 flex-shrink-0">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                  <div key={i} style={{ display: "flex", gap: "14px", alignItems: "flex-start" }}>
+                    <div style={{ marginTop: "4px", flexShrink: 0 }}>
+                      <CheckCircle2 style={{ width: "26px", height: "26px", color: "#10b981" }} />
                     </div>
                     <div>
-                      <h4 className="text-3xl font-bold text-white">{alt.name} <span className="text-zinc-500 font-medium">by {alt.brand}</span></h4>
-                      <p className="text-2xl text-emerald-200/80 mt-1 leading-snug">{alt.reason}</p>
+                      <h4 style={{ fontSize: "26px", fontWeight: "bold", color: "#ffffff", margin: 0 }}>{alt.name} <span style={{ color: "#71717a", fontWeight: "normal" }}>by {alt.brand}</span></h4>
+                      <p style={{ fontSize: "20px", color: "#a7f3d0", marginTop: "4px", lineHeight: 1.35, margin: 0 }}>{alt.reason}</p>
                     </div>
                   </div>
                 ))}
@@ -92,19 +143,21 @@ export const ExposePoster = forwardRef<HTMLDivElement, ExposePosterProps>(({ res
         </div>
 
         {/* Footer */}
-        <div className="relative z-10 flex items-center justify-between pt-6 border-t border-zinc-800">
-          <p className="text-2xl text-zinc-500 font-bold uppercase tracking-widest">Check your pantry. Stay safe.</p>
-          <div className="flex items-center gap-4 bg-zinc-900 px-8 py-4 rounded-full border border-zinc-800">
-            <Zap className="w-8 h-8 text-emerald-400" />
-            <div className="text-right">
-              <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Scanned With</p>
-              <p className="text-3xl font-black text-white tracking-wide">ScanSafe <span className="text-emerald-400">Ultra</span></p>
+        <div style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "24px", borderTop: "1px solid #27272a" }}>
+          <p style={{ fontSize: "22px", color: "#71717a", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.1em", margin: 0 }}>
+            Know your food. Shop healthier.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", backgroundColor: "#18181b", padding: "16px 32px", borderRadius: "9999px", border: "1px solid #27272a" }}>
+            <Zap style={{ width: "32px", height: "32px", color: "#10b981" }} />
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontSize: "12px", fontWeight: "bold", color: "#a1a1aa", textTransform: "uppercase", letterSpacing: "0.1em", margin: 0 }}>Analyzed With</p>
+              <p style={{ fontSize: "26px", fontWeight: 900, color: "#ffffff", letterSpacing: "0.025em", margin: 0 }}>ScanSafe <span style={{ color: "#10b981" }}>Food Intelligence</span></p>
             </div>
           </div>
         </div>
       </div>
     </div>
-  )
-})
+  );
+});
 
-ExposePoster.displayName = 'ExposePoster'
+ExposePoster.displayName = "ExposePoster";

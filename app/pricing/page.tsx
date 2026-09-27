@@ -45,16 +45,30 @@ export default function PricingPage() {
       console.error('Error detecting timezone', e)
     }
 
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      setUser(user)
-      if (user) {
-        // Ensure profile exists
+    // 1. Check active session (retrieves cached session and handles background refreshes)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      if (currentUser) {
         await fetch('/api/profile/ensure', { method: 'POST' })
-        fetchUserProfile(user.id)
+        fetchUserProfile(currentUser.id)
       } else {
         setLoading(false)
       }
     })
+
+    // 2. Listen for auth changes (token refreshes, sign ins, sign outs)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      if (currentUser) {
+        fetchUserProfile(currentUser.id)
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
   }, [])
 
   const fetchUserProfile = async (userId: string) => {

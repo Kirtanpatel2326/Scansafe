@@ -24,3 +24,24 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Google Translate styling overrides to maintain native premium UX */
+.goog-te-banner-frame, 
+.goog-te-banner, 
+iframe.translation-stats-frame,
+.goog-te-balloon-frame { 
+  display: none !important; 
+}
+body { 
+  top: 0px !important; 
+  position: static !important; 
+}
+#goog-gt-tt, 
+.goog-gt-tt, 
+.goog-te-balloon-wrapper, 
+.goog-tooltip, 
+.goog-tooltip:hover, 
+.goog-text-highlight { 
+  display: none !important; 
+  visibility: hidden !important; 
+}

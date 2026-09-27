@@ -1,457 +1,535 @@
-import axios from 'axios'
+import axios from "axios";
+import https from "https";
+import { z } from "zod";
+
+const keepAliveAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 50,
+  keepAliveMsecs: 1000,
+});
+
+export const NutritionValuesSchema = z.object({
+  calories: z.number().nullable().optional(),
+  fat_g: z.number().nullable().optional(),
+  saturated_fat_g: z.number().nullable().optional(),
+  trans_fat_g: z.number().nullable().optional(),
+  cholesterol_mg: z.number().nullable().optional(),
+  sodium_mg: z.number().nullable().optional(),
+  carbs_g: z.number().nullable().optional(),
+  fiber_g: z.number().nullable().optional(),
+  sugar_g: z.number().nullable().optional(),
+  added_sugar_g: z.number().nullable().optional(),
+  protein_g: z.number().nullable().optional(),
+});
+
+export const NutritionFactsSchema = z.object({
+  panel_status: z.enum(["extracted", "unreadable", "missing"]).default("extracted"),
+  unreadable_reason: z.string().nullable().optional(),
+  serving_size: z.string().nullable().optional(),
+  per_serving: NutritionValuesSchema.optional(),
+  per_100g: NutritionValuesSchema.optional(),
+  calories: z.number().nullable().optional(),
+  calories_100g: z.number().nullable().optional(),
+  fat: z.string().nullable().optional(),
+  fat_100g: z.string().nullable().optional(),
+  saturated_fat: z.string().nullable().optional(),
+  saturated_fat_100g: z.string().nullable().optional(),
+  trans_fat: z.string().nullable().optional(),
+  trans_fat_100g: z.string().nullable().optional(),
+  cholesterol: z.string().nullable().optional(),
+  cholesterol_100g: z.string().nullable().optional(),
+  sodium: z.string().nullable().optional(),
+  sodium_100g: z.string().nullable().optional(),
+  carbs: z.string().nullable().optional(),
+  carbs_100g: z.string().nullable().optional(),
+  fiber: z.string().nullable().optional(),
+  fiber_100g: z.string().nullable().optional(),
+  sugar: z.string().nullable().optional(),
+  sugar_100g: z.string().nullable().optional(),
+  protein: z.string().nullable().optional(),
+  protein_100g: z.string().nullable().optional(),
+});
+
+export const IngredientItemSchema = z.object({
+  name: z.string(),
+  status: z.enum(["safe", "caution", "avoid"]),
+  reason: z.string(),
+});
+
+export const AdditiveItemSchema = z.object({
+  name: z.string(),
+  code: z.string().nullable().optional(),
+  risk: z.enum(["low", "medium", "high"]),
+  description: z.string(),
+  source: z.string().nullable().optional(),
+});
+
+export const AlternativeItemSchema = z.object({
+  name: z.string(),
+  brand: z.string(),
+  reason: z.string(),
+  estimated_price_inr: z.number().nullable().optional(),
+  buy_url_blinkit: z.string().nullable().optional(),
+  buy_url_bigbasket: z.string().nullable().optional(),
+});
+
+export const DietaryCompatibilitySchema = z.object({
+  is_compatible: z.boolean(),
+  matched_preferences: z.array(z.string()),
+  violations: z.array(
+    z.object({
+      preference: z.string(),
+      ingredient: z.string(),
+      reason: z.string(),
+    })
+  ),
+  allergen_warnings: z.array(z.string()),
+});
+
+export const RawProductFactsSchema = z.object({
+  product_name: z.string(),
+  brand: z.string(),
+  panel_status: z.enum(["extracted", "unreadable", "missing"]).default("extracted"),
+  ingredients: z.array(IngredientItemSchema),
+  additives: z.array(AdditiveItemSchema),
+  allergens_declared: z.array(z.string()),
+  nutrition_facts: NutritionFactsSchema,
+  upf_score: z.number().min(1).max(4).default(3),
+  upf_reason: z.string().optional(),
+  glycemic_index_estimate: z.enum(["low", "medium", "high"]).default("medium"),
+  glycemic_reason: z.string().optional(),
+  recommendations: z.array(z.string()).default([]),
+  alternatives_detailed: z.array(AlternativeItemSchema).default([]),
+});
+
+export type RawProductFacts = z.infer<typeof RawProductFactsSchema>;
+export type DietaryCompatibility = z.infer<typeof DietaryCompatibilitySchema>;
 
 export interface IngredientAnalysis {
-  product_name: string
-  brand: string
-  health_score: number // 0 to 100
-  health_score_reason: string
-  safety_level: 'safe' | 'moderate' | 'danger'
-  description: string
+  id?: string;
+  product_name: string;
+  brand: string;
+  health_score: number;
+  health_score_reason: string;
+  safety_level: "safe" | "moderate" | "danger";
+  description: string;
+  panel_status?: "extracted" | "unreadable" | "missing";
+  unreadable_instructions?: string;
   ingredients: Array<{
-    name: string
-    status: 'safe' | 'caution' | 'avoid'
-    reason: string
-  }>
+    name: string;
+    status: "safe" | "caution" | "avoid";
+    reason: string;
+  }>;
   additives: Array<{
-    name: string
-    code?: string
-    risk: 'low' | 'medium' | 'high'
-    description: string
-    source?: string // Scientific source/citation (e.g. EFSA, WHO, FDA)
-  }>
-  allergens: string[]
-  nutrition_facts: {
-    serving_size?: string
-    calories?: number
-    calories_100g?: number
-    fat?: string
-    fat_100g?: string
-    saturated_fat?: string
-    saturated_fat_100g?: string
-    trans_fat?: string
-    trans_fat_100g?: string
-    cholesterol?: string
-    cholesterol_100g?: string
-    sodium?: string
-    sodium_100g?: string
-    carbs?: string
-    carbs_100g?: string
-    fiber?: string
-    fiber_100g?: string
-    sugar?: string
-    sugar_100g?: string
-    protein?: string
-    protein_100g?: string
-  }
-  recommendations: string[]
+    name: string;
+    code?: string;
+    risk: "low" | "medium" | "high";
+    description: string;
+    source?: string;
+  }>;
+  allergens: string[];
+  allergens_declared?: string[];
+  nutrition_facts: z.infer<typeof NutritionFactsSchema>;
+  recommendations: string[];
   alternatives_detailed?: Array<{
-    name: string
-    brand: string
-    reason: string
-    estimated_price_inr?: number
-    buy_url_blinkit?: string
-    buy_url_bigbasket?: string
-  }>
-  upf_score?: number // 1 to 4 (NOVA Group)
-  microplastics_risk?: 'low' | 'medium' | 'high'
-  microplastics_reason?: string
-  sustainability_grade?: 'A' | 'B' | 'C' | 'D' | 'E'
-  sustainability_reason?: string
-  glycemic_index_estimate?: 'low' | 'medium' | 'high'
-  glycemic_reason?: string
-  health_risk_breakdown?: {
-    heart?: 'low' | 'medium' | 'high'
-    diabetes?: 'low' | 'medium' | 'high'
-    inflammation?: 'low' | 'medium' | 'high'
-    gut_health?: 'low' | 'medium' | 'high'
-  }
+    name: string;
+    brand: string;
+    reason: string;
+    estimated_price_inr?: number;
+    buy_url_blinkit?: string;
+    buy_url_bigbasket?: string;
+  }>;
+  upf_score?: number;
+  upf_reason?: string;
+  glycemic_index_estimate?: "low" | "medium" | "high";
+  glycemic_reason?: string;
+  dietary_compatibility?: DietaryCompatibility;
+  image_url?: string;
+  is_sample?: boolean;
 }
 
-export const MOCK_PRODUCTS: IngredientAnalysis[] = [
-  {
-    product_name: "Lotte Choco Pie",
-    brand: "Lotte",
-    health_score: 22,
-    health_score_reason: "Severely penalized due to high concentration of trans fats, refined sugars, and synthetic additives.",
-    safety_level: "danger",
-    description: "Lotte Choco Pie is a highly processed sweet snack consisting of cake, marshmallow filling, and a chocolate coating. It contains high amounts of refined sugar, hydrogenated vegetable fats, and synthetic additives.",
-    ingredients: [
-      { name: "Sugar", status: "avoid", reason: "High added sugar content contributing to weight gain and blood sugar spikes." },
-      { name: "Wheat Flour", status: "caution", reason: "Refined grain stripped of natural fiber and nutrients." },
-      { name: "Corn Syrup", status: "avoid", reason: "Highly processed corn-based sweetener linked to obesity and metabolic risks." },
-      { name: "Hydrogenated Vegetable Fat (Palm/Kernel Oil)", status: "avoid", reason: "Contains trans fats and saturated fats that raise bad cholesterol (LDL) and increase heart disease risk." },
-      { name: "Cocoa Powder", status: "safe", reason: "Natural cocoa solids providing flavor." },
-      { name: "Gelatin (Beef)", status: "caution", reason: "Animal-derived gelling agent. Not suitable for vegetarians/vegans." },
-      { name: "Milk Solids", status: "safe", reason: "Standard dairy ingredient." }
-    ],
-    additives: [
-      { name: "Soy Lecithin", code: "E322", risk: "low", description: "Standard emulsifier. Generally safe, but contains soy.", source: "EFSA (European Food Safety Authority)" },
-      { name: "Sodium Bicarbonate", code: "E500", risk: "low", description: "Raising agent (baking soda). Safe for consumption.", source: "FDA GRAS" },
-      { name: "Ammonium Bicarbonate", code: "E503", risk: "low", description: "Raising agent. Safe for baked goods.", source: "FDA GRAS" },
-      { name: "Sorbitan Monostearate", code: "E491", risk: "medium", description: "Synthetic emulsifier. May cause mild digestive upset in very large amounts.", source: "EFSA Food Additives Review" }
-    ],
-    allergens: ["Gluten", "Wheat", "Milk", "Soy"],
-    nutrition_facts: {
-      serving_size: "30g",
-      calories: 130,
-      calories_100g: 433,
-      fat: "5g",
-      fat_100g: "16.7g",
-      saturated_fat: "3.5g",
-      saturated_fat_100g: "11.7g",
-      trans_fat: "0.2g",
-      trans_fat_100g: "0.7g",
-      cholesterol: "0mg",
-      cholesterol_100g: "0mg",
-      sodium: "55mg",
-      sodium_100g: "183mg",
-      carbs: "20g",
-      carbs_100g: "66.7g",
-      fiber: "0.5g",
-      fiber_100g: "1.7g",
-      sugar: "12g",
-      sugar_100g: "40g",
-      protein: "1g",
-      protein_100g: "3.3g"
-    },
-    recommendations: [
-      "Heavenly Organics Chocolate Honey Patties",
-      "Simple Mills Cocoa Cashew Sweet Thins",
-      "Dark Chocolate (70%+ cocoa) paired with almonds"
-    ],
-    alternatives_detailed: [
-      {
-        name: "Dark Chocolate (70%+ Cocoa)",
-        brand: "Amul",
-        reason: "Rich in antioxidants, lower added sugar, no hydrogenated fats.",
-        estimated_price_inr: 120,
-        buy_url_blinkit: "https://blinkit.com/s/?q=amul+dark+chocolate+70",
-        buy_url_bigbasket: "https://www.bigbasket.com/ps/?q=amul+dark+chocolate+70"
-      },
-      {
-        name: "Organic Sweet Thins",
-        brand: "Simple Mills",
-        reason: "Grain-free, lower sugar, clean oils, almond-based flour.",
-        estimated_price_inr: 450,
-        buy_url_blinkit: "https://blinkit.com/s/?q=cookies",
-        buy_url_bigbasket: "https://www.bigbasket.com/ps/?q=cookies"
-      }
-    ],
-    upf_score: 4,
-    microplastics_risk: "high",
-    microplastics_reason: "Product is wrapped individually in multilayer aluminum-plastic composite wrappers, which can release particles under heat.",
-    sustainability_grade: "D",
-    sustainability_reason: "High palm oil content associated with deforestation and individually wrapped plastic packs contribute to landfill waste.",
-    glycemic_index_estimate: "high",
-    glycemic_reason: "Contains high amounts of sugar and high-fructose corn syrup, causing sharp blood sugar spikes.",
-    health_risk_breakdown: {
-      heart: "high",
-      diabetes: "high",
-      inflammation: "high",
-      gut_health: "medium"
+const GLUTEN_GRAINS = [
+  "wheat", "barley", "rye", "spelt", "kamut", "triticale", "semolina", 
+  "durum", "maida", "atta", "farina", "graham", "malt extract", "malt syrup", "vital wheat gluten"
+];
+
+const GLUTEN_FREE_EXCLUSIONS = [
+  "rice flour", "brown rice flour", "white rice flour", "almond flour", 
+  "coconut flour", "tapioca flour", "tapioca starch", "corn flour", 
+  "corn starch", "cornstarch", "besan", "gram flour", "potato starch", 
+  "potato flour", "buckwheat", "chickpea flour", "oat flour (certified gluten-free)", 
+  "gluten-free oat", "sorghum", "millet", "quinoa"
+];
+
+const DAIRY_ITEMS = [
+  "milk", "dairy butter", "butter fat", "anhydrous milk fat", "ghee", 
+  "cream", "cheese", "paneer", "curd", "yogurt", "whey", "casein", 
+  "sodium caseinate", "calcium caseinate", "milk solids", "skimmed milk powder", 
+  "whole milk powder", "lactose", "condensed milk", "milk fat"
+];
+
+const DAIRY_FREE_EXCLUSIONS = [
+  "cocoa butter", "cacao butter", "peanut butter", "almond butter", 
+  "sunflower butter", "shea butter", "apple butter", "fruit butter", 
+  "mango butter", "kokum butter", "coconut butter", "cashew butter"
+];
+
+const TREE_NUTS = [
+  "almond", "walnut", "cashew", "hazelnut", "pecan", "pistachio", 
+  "macadamia", "brazil nut", "pine nut", "chestnut"
+];
+
+const SEED_EXCLUSIONS = [
+  "sunflower seed", "chia seed", "flax seed", "pumpkin seed", 
+  "sesame seed", "tahini", "poppy seed", "hemp seed"
+];
+
+const JAIN_RESTRICTED_ROOTS = [
+  "onion", "garlic", "potato", "carrot", "radish", "ginger", 
+  "beetroot", "turnip", "sweet potato", "tapioca root", "yam", "shallot"
+];
+
+const ANIMAL_DERIVED_ITEMS = [
+  "meat", "beef", "chicken", "pork", "lamb", "mutton", "fish", 
+  "gelatin", "lard", "tallow", "carmine", "cochineal", "rennet", "egg", "egg yolk", "egg white"
+];
+
+const HIGH_GLYCEMIC_SWEETENERS = [
+  "sugar", "cane sugar", "high fructose corn syrup", "corn syrup", 
+  "glucose syrup", "maltodextrin", "dextrose", "sucrose", "invert sugar syrup"
+];
+
+export function calculateHealthScore(facts: Partial<RawProductFacts>): { score: number; reason: string; safetyLevel: "safe" | "moderate" | "danger" } {
+  let score = 100;
+  const penalties: string[] = [];
+  const bonuses: string[] = [];
+
+  const upf = facts.upf_score || 3;
+  if (upf === 4) {
+    score -= 25;
+    penalties.push("ultra-processed NOVA 4 formulation");
+  } else if (upf === 3) {
+    score -= 10;
+    penalties.push("processed matrix (NOVA 3)");
+  }
+
+  const additives = facts.additives || [];
+  let highRiskAdditives = 0;
+  let medRiskAdditives = 0;
+  additives.forEach(add => {
+    if (add.risk === "high") {
+      score -= 12;
+      highRiskAdditives++;
+    } else if (add.risk === "medium") {
+      score -= 5;
+      medRiskAdditives++;
     }
-  },
-  {
-    product_name: "Oreo Original Sandwich Cookies",
-    brand: "Nabisco",
-    health_score: 28,
-    health_score_reason: "Penalized for high levels of High Fructose Corn Syrup and saturated palm oils.",
-    safety_level: "danger",
-    description: "Oreo cookies are a highly processed sweet snack high in refined sugars, saturated fats, and processed wheat flour. Frequent consumption is linked to metabolic issues.",
-    ingredients: [
-      { name: "Sugar", status: "avoid", reason: "High added sugar content contributing to weight gain and blood sugar spikes." },
-      { name: "Unbleached Enriched Flour", status: "caution", reason: "Refined grain stripped of natural fiber and nutrients." },
-      { name: "Palm Oil", status: "caution", reason: "High in saturated fat and associated with negative environmental impacts." },
-      { name: "Soybean Oil", status: "caution", reason: "Highly refined vegetable oil high in omega-6 fatty acids." },
-      { name: "High Fructose Corn Syrup", status: "avoid", reason: "Highly processed fructose-based sweetener linked to fatty liver disease and insulin resistance." },
-      { name: "Soy Lecithin", status: "safe", reason: "Standard emulsifier used to maintain texture." }
-    ],
-    additives: [
-      { name: "Soy Lecithin", code: "E322", risk: "low", description: "Natural emulsifier extracted from soybeans. Safe for most consumers.", source: "FDA GRAS" },
-      { name: "Vanillin (Artificial Flavor)", risk: "medium", description: "Synthetic flavor agent mimicking vanilla. Generally safe, but some sensitive individuals may experience mild sensitivities.", source: "WHO Joint Expert Committee on Food Additives" }
-    ],
-    allergens: ["Gluten", "Wheat", "Soy"],
-    nutrition_facts: {
-      serving_size: "29.4g",
-      calories: 140,
-      calories_100g: 476,
-      fat: "7g",
-      fat_100g: "23.8g",
-      saturated_fat: "2g",
-      saturated_fat_100g: "6.8g",
-      trans_fat: "0g",
-      trans_fat_100g: "0g",
-      cholesterol: "0mg",
-      cholesterol_100g: "0mg",
-      sodium: "90mg",
-      sodium_100g: "306mg",
-      carbs: "21g",
-      carbs_100g: "71.4g",
-      fiber: "1g",
-      fiber_100g: "3.4g",
-      sugar: "13g",
-      sugar_100g: "44.2g",
-      protein: "1g",
-      protein_100g: "3.4g"
-    },
-    recommendations: [
-      "Simple Mills Double Chocolate Crunchy Cookies",
-      "Hu Chocolate Chip Cookies",
-      "Dark Chocolate (70%+ cocoa) paired with raw almonds"
-    ],
-    alternatives_detailed: [
-      {
-        name: "Chocolate Chip Cookies",
-        brand: "Hu Kitchen",
-        reason: "No refined sugar, organic cocoa, paleo/vegan ingredients.",
-        estimated_price_inr: 499,
-        buy_url_blinkit: "https://blinkit.com/s/?q=hu+cookies",
-        buy_url_bigbasket: "https://www.bigbasket.com/ps/?q=cookies"
+  });
+  if (highRiskAdditives > 0) penalties.push(`${highRiskAdditives} high-risk additive(s)`);
+  if (medRiskAdditives > 0) penalties.push(`${medRiskAdditives} moderate-risk additive(s)`);
+
+  const ingredients = facts.ingredients || [];
+  const avoidCount = ingredients.filter(i => i.status === "avoid").length;
+  if (avoidCount > 0) {
+    score -= Math.min(25, avoidCount * 6);
+    penalties.push(`${avoidCount} restricted ingredient(s)`);
+  }
+
+  const nf = facts.nutrition_facts;
+  const p100 = nf?.per_100g || {};
+  const sugar100g = p100.sugar_g ?? (nf?.sugar_100g ? parseFloat(nf.sugar_100g) : undefined);
+  const sodium100g = p100.sodium_mg ?? (nf?.sodium_100g ? parseFloat(nf.sodium_100g) : undefined);
+  const trans100g = p100.trans_fat_g ?? (nf?.trans_fat_100g ? parseFloat(nf.trans_fat_100g) : undefined);
+  const satFat100g = p100.saturated_fat_g ?? (nf?.saturated_fat_100g ? parseFloat(nf.saturated_fat_100g) : undefined);
+  const fiber100g = p100.fiber_g ?? (nf?.fiber_100g ? parseFloat(nf.fiber_100g) : undefined);
+  const protein100g = p100.protein_g ?? (nf?.protein_100g ? parseFloat(nf.protein_100g) : undefined);
+
+  if (trans100g && trans100g > 0.1) {
+    score -= 20;
+    penalties.push("trans fats detected");
+  }
+  if (sugar100g && sugar100g > 15) {
+    score -= 15;
+    penalties.push(`high sugar (${sugar100g}g/100g)`);
+  } else if (sugar100g && sugar100g > 8) {
+    score -= 6;
+  }
+
+  if (sodium100g && sodium100g > 600) {
+    score -= 12;
+    penalties.push(`high sodium (${sodium100g}mg/100g)`);
+  }
+
+  if (satFat100g && satFat100g > 5) {
+    score -= 8;
+    penalties.push("elevated saturated fat");
+  }
+
+  if (fiber100g && fiber100g >= 3) {
+    score = Math.min(100, score + 5);
+    bonuses.push("beneficial fiber");
+  }
+  if (protein100g && protein100g >= 10) {
+    score = Math.min(100, score + 5);
+    bonuses.push("good protein");
+  }
+
+  const finalScore = Math.max(0, Math.min(100, Math.round(score)));
+
+  let safetyLevel: "safe" | "moderate" | "danger" = "safe";
+  if (finalScore < 40 || highRiskAdditives > 0 || (trans100g && trans100g > 0.5)) {
+    safetyLevel = "danger";
+  } else if (finalScore < 70) {
+    safetyLevel = "moderate";
+  }
+
+  let reason = "";
+  if (penalties.length > 0) {
+    reason = `Score calculated based on ${penalties.slice(0, 3).join(", ")}.`;
+  } else {
+    reason = "Formulated with clean, minimally processed ingredients and a balanced nutrition profile.";
+  }
+
+  return { score: finalScore, reason, safetyLevel };
+}
+
+export function applyPreferences(
+  product: IngredientAnalysis,
+  userPreferences: string[] = []
+): IngredientAnalysis {
+  const cloned: IngredientAnalysis = JSON.parse(JSON.stringify(product));
+
+  if (!userPreferences || userPreferences.length === 0) {
+    cloned.dietary_compatibility = {
+      is_compatible: true,
+      matched_preferences: [],
+      violations: [],
+      allergen_warnings: [],
+    };
+    return cloned;
+  }
+
+  const violations: Array<{ preference: string; ingredient: string; reason: string }> = [];
+  const allergenWarnings: string[] = [];
+  const normalizedPrefs = userPreferences.map(p => p.toLowerCase().trim());
+
+  cloned.ingredients = cloned.ingredients.map(ing => {
+    const rawName = ing.name;
+    const nameLower = rawName.toLowerCase();
+    let status = ing.status;
+    let reason = ing.reason;
+
+    const matchesToken = (tokens: string[], exclusions: string[]): boolean => {
+      const isExcluded = exclusions.some(ex => nameLower.includes(ex));
+      if (isExcluded) return false;
+      return tokens.some(token => {
+        const regex = new RegExp(`\\b${token}\\b`, "i");
+        return regex.test(nameLower) || nameLower.includes(token);
+      });
+    };
+
+    if (normalizedPrefs.some(p => p.includes("gluten") || p === "celiac")) {
+      if (matchesToken(GLUTEN_GRAINS, GLUTEN_FREE_EXCLUSIONS)) {
+        violations.push({
+          preference: "Gluten-Free",
+          ingredient: rawName,
+          reason: `${rawName} contains gluten grains.`,
+        });
+        status = "avoid";
+        reason = `${rawName} contains gluten, violating your Gluten-Free preference.`;
       }
-    ],
-    upf_score: 4,
-    microplastics_risk: "medium",
-    microplastics_reason: "Packaged in standard polypropylene outer plastic sleeves.",
-    sustainability_grade: "D",
-    sustainability_reason: "High palm oil sourcing with moderate sustainability verification certificates.",
-    glycemic_index_estimate: "high",
-    glycemic_reason: "High white sugar and flour concentration promotes swift glycemic spikes.",
-    health_risk_breakdown: {
-      heart: "high",
-      diabetes: "high",
-      inflammation: "high",
-      gut_health: "medium"
     }
-  },
-  {
-    product_name: "Coca-Cola Classic",
-    brand: "The Coca-Cola Company",
-    health_score: 12,
-    health_score_reason: "Dangerously low score due to extreme liquid sugar concentration and bone-thinning phosphoric acid.",
-    safety_level: "danger",
-    description: "Classic Coca-Cola is a carbonated beverage containing exceptionally high levels of High Fructose Corn Syrup and Phosphoric Acid. It has zero nutritional value and promotes dental decay and insulin resistance.",
-    ingredients: [
-      { name: "Carbonated Water", status: "safe", reason: "Pure carbonated water used as the beverage base." },
-      { name: "High Fructose Corn Syrup", status: "avoid", reason: "Extreme added sugar content (39g per can) leading to insulin spikes, weight gain, and increased disease risk." },
-      { name: "Caramel Color", status: "caution", reason: "Synthetic colorant that may contain chemical byproducts like 4-MEI depending on manufacturing." },
-      { name: "Phosphoric Acid", status: "avoid", reason: "Strong acidifier associated with dental enamel erosion and bone mineral loss." },
-      { name: "Caffeine", status: "caution", reason: "Mild stimulant that can lead to dependency and sleep disruption if consumed in excess." }
-    ],
-    additives: [
-      { name: "Caramel Color", code: "E150d", risk: "medium", description: "Class IV caramel color. Contains trace levels of 4-MEI, which is classified as a potential carcinogen by some health bodies.", source: "IARC (International Agency for Research on Cancer)" },
-      { name: "Phosphoric Acid", code: "E338", risk: "high", description: "Acidifier used to give sodas their tangy bite. Linked to kidney issues and bone thinning in excess.", source: "National Institutes of Health (NIH)" },
-      { name: "Caffeine", risk: "low", description: "Natural stimulant. Safe in moderation but can cause restlessness or anxiety.", source: "FDA Guidance" }
-    ],
-    allergens: [],
-    nutrition_facts: {
-      serving_size: "355ml",
-      calories: 140,
-      calories_100g: 39,
-      fat: "0g",
-      fat_100g: "0g",
-      saturated_fat: "0g",
-      saturated_fat_100g: "0g",
-      trans_fat: "0g",
-      trans_fat_100g: "0g",
-      cholesterol: "0mg",
-      cholesterol_100g: "0mg",
-      sodium: "45mg",
-      sodium_100g: "13mg",
-      carbs: "39g",
-      carbs_100g: "11g",
-      fiber: "0g",
-      fiber_100g: "0g",
-      sugar: "39g",
-      sugar_100g: "11g",
-      protein: "0g",
-      protein_100g: "0g"
-    },
-    recommendations: [
-      "Olipop Vintage Cola",
-      "Sparkling water infused with fresh lime or lemon slices",
-      "Kombucha (low sugar, high probiotics)"
-    ],
-    alternatives_detailed: [
-      {
-        name: "Lemon Sparkling Water",
-        brand: "Perrier",
-        reason: "Zero sugar, natural carbonation, hydration without acids.",
-        estimated_price_inr: 150,
-        buy_url_blinkit: "https://blinkit.com/s/?q=perrier",
-        buy_url_bigbasket: "https://www.bigbasket.com/ps/?q=perrier"
+
+    if (normalizedPrefs.some(p => p.includes("dairy") || p.includes("milk"))) {
+      if (matchesToken(DAIRY_ITEMS, DAIRY_FREE_EXCLUSIONS)) {
+        violations.push({
+          preference: "Dairy-Free",
+          ingredient: rawName,
+          reason: `${rawName} is a dairy-derived ingredient or milk protein.`,
+        });
+        status = "avoid";
+        reason = `${rawName} contains dairy, violating your Dairy-Free profile.`;
       }
-    ],
-    upf_score: 4,
-    microplastics_risk: "low",
-    microplastics_reason: "If in aluminum can or glass bottle, microplastics risk is low. Plastic PET bottles pose a higher risk.",
-    sustainability_grade: "E",
-    sustainability_reason: "High water consumption footprint and significant plastic bottle waste footprint globally.",
-    glycemic_index_estimate: "high",
-    glycemic_reason: "Pure liquid sugar (39g of HFCS) absorbed directly into the bloodstream instantly, spiking blood glucose.",
-    health_risk_breakdown: {
-      heart: "high",
-      diabetes: "high",
-      inflammation: "high",
-      gut_health: "high"
     }
-  },
-  {
-    product_name: "Lay's Classic Potato Chips",
-    brand: "Frito-Lay",
-    health_score: 45,
-    health_score_reason: "High calorie density and sodium, though lacks complex synthetic additives.",
-    safety_level: "moderate",
-    description: "Lay's Classic Potato Chips are made from potatoes fried in vegetable oils and salted. They are calorie-dense, high in refined sodium, and contain acrylamides from high-heat frying.",
-    ingredients: [
-      { name: "Potatoes", status: "safe", reason: "Whole sliced potatoes." },
-      { name: "Canola Oil / Corn Oil / Sunflower Oil", status: "caution", reason: "Refined vegetable oils high in omega-6 fatty acids which can promote inflammation when consumed in excess." },
-      { name: "Salt", status: "caution", reason: "Refined table salt. Promotes high blood pressure in sodium-sensitive individuals." }
-    ],
-    additives: [],
-    allergens: [],
-    nutrition_facts: {
-      serving_size: "28g",
-      calories: 160,
-      calories_100g: 571,
-      fat: "10g",
-      fat_100g: "35.7g",
-      saturated_fat: "1.5g",
-      saturated_fat_100g: "5.4g",
-      trans_fat: "0g",
-      trans_fat_100g: "0g",
-      cholesterol: "0mg",
-      cholesterol_100g: "0mg",
-      sodium: "170mg",
-      sodium_100g: "607mg",
-      carbs: "15g",
-      carbs_100g: "53.6g",
-      fiber: "1g",
-      fiber_100g: "3.6g",
-      sugar: "0g",
-      sugar_100g: "0g",
-      protein: "2g",
-      protein_100g: "7.1g"
-    },
-    recommendations: [
-      "Kettle Brand Air-Popped Sea Salt Chips",
-      "Jackson's Honest Sweet Potato Chips",
-      "Roasted chickpeas or home-baked kale chips with sea salt"
-    ],
-    alternatives_detailed: [
-      {
-        name: "Avocado Oil Potato Chips",
-        brand: "Kettle Brand",
-        reason: "Fried in monounsaturated avocado oil, lowering inflammatory omega-6 intake.",
-        estimated_price_inr: 299,
-        buy_url_blinkit: "https://blinkit.com/s/?q=kettle+chips",
-        buy_url_bigbasket: "https://www.bigbasket.com/ps/?q=kettle+chips"
+
+    if (normalizedPrefs.some(p => p.includes("lactose"))) {
+      const isLactoseFreeDeclared = nameLower.includes("lactose-free") || nameLower.includes("lactase");
+      if (!isLactoseFreeDeclared && matchesToken(["milk", "whey", "lactose", "cream", "curd", "paneer"], DAIRY_FREE_EXCLUSIONS)) {
+        violations.push({
+          preference: "Lactose Intolerant",
+          ingredient: rawName,
+          reason: `${rawName} contains lactose.`,
+        });
+        status = "avoid";
+        reason = `${rawName} contains lactose, which may cause digestive distress.`;
       }
-    ],
-    upf_score: 3,
-    microplastics_risk: "medium",
-    microplastics_reason: "Packaged in air-filled plastic-lined foil bags.",
-    sustainability_grade: "C",
-    sustainability_reason: "Local potato farming reduces transport footprint, but high energy frying methods are used.",
-    glycemic_index_estimate: "high",
-    glycemic_reason: "High carbohydrate content from fried starches translates to elevated glycemic load.",
-    health_risk_breakdown: {
-      heart: "medium",
-      diabetes: "medium",
-      inflammation: "high",
-      gut_health: "low"
     }
-  },
-  {
-    product_name: "Heinz Tomato Ketchup",
-    brand: "Heinz",
-    health_score: 40,
-    health_score_reason: "Contains significant amounts of high fructose corn syrup and sodium.",
-    safety_level: "moderate",
-    description: "Heinz Tomato Ketchup is a popular condiment primarily consisting of tomato concentrate, vinegars, and sweeteners. It contains significant sugars per serving.",
-    ingredients: [
-      { name: "Tomato Concentrate from Red Ripe Tomatoes", status: "safe", reason: "Rich source of lycopene, a powerful antioxidant." },
-      { name: "Distilled Vinegar", status: "safe", reason: "Natural acidifier and preservative." },
-      { name: "High Fructose Corn Syrup", status: "avoid", reason: "Highly refined sweetener contributing to excessive sugar intake in small servings." },
-      { name: "Corn Syrup", status: "avoid", reason: "Additional refined sugar syrup." },
-      { name: "Salt", status: "caution", reason: "Contributes to sodium intake." },
-      { name: "Spice", status: "safe", reason: "Natural herbs and spice extracts." },
-      { name: "Onion Powder", status: "safe", reason: "Dehydrated onion seasoning." },
-      { name: "Natural Flavoring", status: "safe", reason: "Standard flavor extracts." }
-    ],
-    additives: [],
-    allergens: [],
-    nutrition_facts: {
-      serving_size: "17g",
-      calories: 20,
-      calories_100g: 118,
-      fat: "0g",
-      fat_100g: "0g",
-      saturated_fat: "0g",
-      saturated_fat_100g: "0g",
-      trans_fat: "0g",
-      trans_fat_100g: "0g",
-      cholesterol: "0mg",
-      cholesterol_100g: "0mg",
-      sodium: "180mg",
-      sodium_100g: "1058mg",
-      carbs: "5g",
-      carbs_100g: "29.4g",
-      fiber: "0g",
-      fiber_100g: "0g",
-      sugar: "4g",
-      sugar_100g: "23.5g",
-      protein: "0g",
-      protein_100g: "0g"
-    },
-    recommendations: [
-      "Primal Kitchen Tomato Ketchup (unsweetened, organic)",
-      "Sir Kensington's Classic Ketchup (lower sugar)",
-      "Fresh homemade tomato salsa or paste with spices"
-    ],
-    alternatives_detailed: [
-      {
-        name: "Unsweetened Organic Ketchup",
-        brand: "Primal Kitchen",
-        reason: "Sweetened only with organic balsamic vinegar, zero added cane sugar or HFCS.",
-        estimated_price_inr: 450,
-        buy_url_blinkit: "https://blinkit.com/s/?q=organic+ketchup",
-        buy_url_bigbasket: "https://www.bigbasket.com/ps/?q=organic+ketchup"
+
+    if (normalizedPrefs.some(p => p.includes("nut"))) {
+      const hasPeanut = nameLower.includes("peanut") || nameLower.includes("groundnut");
+      const hasTreeNut = matchesToken(TREE_NUTS, SEED_EXCLUSIONS);
+      if (hasPeanut || hasTreeNut) {
+        violations.push({
+          preference: "Nut-Free",
+          ingredient: rawName,
+          reason: `${rawName} contains peanuts or tree nuts.`,
+        });
+        status = "avoid";
+        reason = `${rawName} contains nuts, violating your Nut-Free allergy profile.`;
       }
-    ],
-    upf_score: 4,
-    microplastics_risk: "medium",
-    microplastics_reason: "Standard packaging is a squeezable polyethylene plastic bottle.",
-    sustainability_grade: "C",
-    sustainability_reason: "Concentration and global distribution of tomatoes involve high transport emissions.",
-    glycemic_index_estimate: "medium",
-    glycemic_reason: "Contains added HFCS which raises blood sugar, though serving sizes are typically small.",
-    health_risk_breakdown: {
-      heart: "low",
-      diabetes: "medium",
-      inflammation: "medium",
-      gut_health: "low"
     }
-  },
-  {
-    product_name: "Quaker Old Fashioned Oats",
+
+    if (normalizedPrefs.includes("vegan")) {
+      const isAnimalDerived = matchesToken(ANIMAL_DERIVED_ITEMS, []) || matchesToken(DAIRY_ITEMS, DAIRY_FREE_EXCLUSIONS) || nameLower.includes("honey");
+      if (isAnimalDerived) {
+        violations.push({
+          preference: "Vegan",
+          ingredient: rawName,
+          reason: `${rawName} is an animal-derived product.`,
+        });
+        status = "avoid";
+        reason = `${rawName} is animal-derived, violating your Vegan preference.`;
+      }
+    }
+
+    if (normalizedPrefs.includes("vegetarian")) {
+      if (matchesToken(ANIMAL_DERIVED_ITEMS, [])) {
+        violations.push({
+          preference: "Vegetarian",
+          ingredient: rawName,
+          reason: `${rawName} contains meat or animal byproducts.`,
+        });
+        status = "avoid";
+        reason = `${rawName} contains non-vegetarian ingredients.`;
+      }
+    }
+
+    if (normalizedPrefs.includes("jain")) {
+      const isRoot = matchesToken(JAIN_RESTRICTED_ROOTS, []);
+      const isAnimal = matchesToken(ANIMAL_DERIVED_ITEMS, []);
+      if (isRoot || isAnimal) {
+        violations.push({
+          preference: "Jain",
+          ingredient: rawName,
+          reason: `${rawName} is a root vegetable or animal byproduct restricted in Jain diet.`,
+        });
+        status = "avoid";
+        reason = `${rawName} is restricted in Jain dietary rules.`;
+      }
+    }
+
+    if (normalizedPrefs.some(p => p.includes("diabet") || p.includes("sugar"))) {
+      if (matchesToken(HIGH_GLYCEMIC_SWEETENERS, [])) {
+        violations.push({
+          preference: "Diabetic / Low Sugar",
+          ingredient: rawName,
+          reason: `${rawName} is a high glycemic sweetener.`,
+        });
+        status = "avoid";
+        reason = `${rawName} is a high-glycemic added sugar.`;
+      }
+    }
+
+    if (normalizedPrefs.some(p => p.includes("hypertens") || p.includes("salt") || p.includes("blood pressure"))) {
+      if (nameLower.includes("salt") || nameLower.includes("sodium") || nameLower.includes("msg") || nameLower.includes("monosodium glutamate")) {
+        violations.push({
+          preference: "Hypertension / Low Sodium",
+          ingredient: rawName,
+          reason: `${rawName} contributes to elevated sodium intake.`,
+        });
+        if (ing.status === "safe") status = "caution";
+      }
+    }
+
+    if (normalizedPrefs.includes("pregnancy")) {
+      if (nameLower.includes("caffeine") || nameLower.includes("saccharin") || nameLower.includes("bha") || nameLower.includes("bht") || nameLower.includes("nitrite") || nameLower.includes("nitrate")) {
+        violations.push({
+          preference: "Pregnancy Safe",
+          ingredient: rawName,
+          reason: `${rawName} is advised against during pregnancy.`,
+        });
+        status = "avoid";
+        reason = `${rawName} has safety advisories during pregnancy.`;
+      }
+    }
+
+    return { ...ing, status, reason };
+  });
+
+  const declared = cloned.allergens_declared || cloned.allergens || [];
+  declared.forEach(all => {
+    const allLower = all.toLowerCase();
+    if (normalizedPrefs.some(p => p.includes("gluten")) && allLower.includes("gluten")) {
+      allergenWarnings.push("Declared Allergen: Contains Gluten");
+    }
+    if (normalizedPrefs.some(p => p.includes("dairy") || p.includes("milk")) && (allLower.includes("milk") || allLower.includes("dairy"))) {
+      allergenWarnings.push("Declared Allergen: Contains Milk / Dairy");
+    }
+    if (normalizedPrefs.some(p => p.includes("nut")) && (allLower.includes("nut") || allLower.includes("peanut"))) {
+      allergenWarnings.push("Declared Allergen: Contains Peanuts / Tree Nuts");
+    }
+  });
+
+  cloned.dietary_compatibility = {
+    is_compatible: violations.length === 0,
+    matched_preferences: userPreferences,
+    violations,
+    allergen_warnings: Array.from(new Set(allergenWarnings)),
+  };
+
+  return cloned;
+}
+
+export const SAMPLE_PRODUCTS: Record<string, IngredientAnalysis> = {
+  sample_oats: {
+    product_name: "Quaker Rolled Oats 100% Whole Grain",
     brand: "Quaker",
     health_score: 95,
-    health_score_reason: "Single ingredient whole grain with excellent fiber profile.",
+    health_score_reason: "Single ingredient 100% whole grain oat groats. High beta-glucan soluble fiber with zero added sugars or preservatives.",
     safety_level: "safe",
-    description: "Quaker Old Fashioned Oats are 100% whole grain rolled oats with no added sugar, artificial preservatives, or additives. Excellent source of beta-glucan soluble fiber, promoting heart and digestive health.",
+    description: "Quaker Rolled Oats are 100% whole grain oats with no added sugar, artificial preservatives, or synthetic additives. Excellent source of beta-glucan soluble fiber.",
+    panel_status: "extracted",
     ingredients: [
       { name: "100% Whole Grain Rolled Oats", status: "safe", reason: "Nutritious, fiber-rich, unrefined whole grains." }
     ],
     additives: [],
-    allergens: ["Gluten"],
+    allergens: ["May contain trace wheat"],
+    allergens_declared: ["May contain trace wheat"],
     nutrition_facts: {
+      panel_status: "extracted",
       serving_size: "40g",
+      per_serving: {
+        calories: 150,
+        fat_g: 3,
+        saturated_fat_g: 0.5,
+        trans_fat_g: 0,
+        cholesterol_mg: 0,
+        sodium_mg: 0,
+        carbs_g: 27,
+        fiber_g: 4,
+        sugar_g: 1,
+        added_sugar_g: 0,
+        protein_g: 5
+      },
+      per_100g: {
+        calories: 375,
+        fat_g: 7.5,
+        saturated_fat_g: 1.25,
+        trans_fat_g: 0,
+        cholesterol_mg: 0,
+        sodium_mg: 0,
+        carbs_g: 67.5,
+        fiber_g: 10,
+        sugar_g: 2.5,
+        added_sugar_g: 0,
+        protein_g: 12.5
+      },
       calories: 150,
       calories_100g: 375,
       fat: "3g",
       fat_100g: "7.5g",
       saturated_fat: "0.5g",
-      saturated_fat_100g: "1.3g",
+      saturated_fat_100g: "1.25g",
       trans_fat: "0g",
       trans_fat_100g: "0g",
       cholesterol: "0mg",
@@ -467,453 +545,185 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
       protein: "5g",
       protein_100g: "12.5g"
     },
-    recommendations: [
-      "Organic rolled oats with fresh berries, nuts, and raw honey",
-      "Steel-cut oats (slightly higher fiber and lower glycemic index)",
-      "Add flaxseeds or chia seeds for an extra boost of omega-3 fats"
-    ],
+    recommendations: ["Pair with fresh chia seeds, raw walnuts, and blueberries"],
     alternatives_detailed: [],
     upf_score: 1,
-    microplastics_risk: "low",
-    microplastics_reason: "Packaged in cardboard drums with paper lid inserts.",
-    sustainability_grade: "B",
-    sustainability_reason: "Minimal processing and cardboard packaging limit environmental impact.",
+    upf_reason: "NOVA Group 1 - Unprocessed or minimally processed whole grain.",
     glycemic_index_estimate: "low",
-    glycemic_reason: "Rich in beta-glucan soluble fibers, which slow carb digestion and blunt glucose spikes.",
-    health_risk_breakdown: {
-      heart: "low",
-      diabetes: "low",
-      inflammation: "low",
-      gut_health: "low"
-    }
+    glycemic_reason: "Intact soluble fiber slows carbohydrate digestion.",
+    is_sample: true
   },
-  {
-    product_name: "Chobani Plain Greek Yogurt",
-    brand: "Chobani",
-    health_score: 92,
-    health_score_reason: "High protein, minimal processing, and live active cultures.",
-    safety_level: "safe",
-    description: "Chobani Plain Greek Yogurt is a strained, protein-rich dairy product made from milk and live cultures. It contains no added sugars or thickeners, providing calcium and gut-friendly probiotics.",
+  sample_cookies: {
+    product_name: "Lotte Choco Pie",
+    brand: "Lotte",
+    health_score: 24,
+    health_score_reason: "Severely penalized due to ultra-processed formulation, high added sugars (40g/100g), and hydrogenated vegetable fats.",
+    safety_level: "danger",
+    description: "Lotte Choco Pie is an ultra-processed sweet confectionery snack consisting of cake, marshmallow filling, and a compound chocolate coating with high refined sugars and synthetic additives.",
+    panel_status: "extracted",
     ingredients: [
-      { name: "Cultured Pasteurized Nonfat Milk", status: "safe", reason: "High source of complete protein and bone-supporting calcium." },
-      { name: "Live and Active Cultures", status: "safe", reason: "Probiotic strains (S. Thermophilus, L. Bulgaricus, L. Acidophilus, Bifidus, L. Casei) that support gut health." }
+      { name: "Sugar", status: "avoid", reason: "Refined sugar contributing to rapid glycemic spikes." },
+      { name: "Wheat Flour (Maida)", status: "caution", reason: "Refined wheat flour stripped of fiber and nutrients." },
+      { name: "Corn Syrup", status: "avoid", reason: "High glycemic liquid corn sweetener." },
+      { name: "Hydrogenated Vegetable Fat (Palm Kernel Oil)", status: "avoid", reason: "Contains saturated and trans fatty acid structures linked to cardiovascular risk." },
+      { name: "Cocoa Powder", status: "safe", reason: "Natural cocoa solids for chocolate flavor." },
+      { name: "Milk Solids", status: "safe", reason: "Standard dairy ingredient." }
     ],
-    additives: [],
-    allergens: ["Dairy", "Milk"],
+    additives: [
+      { name: "Soy Lecithin", code: "E322", risk: "low", description: "Natural emulsifier extracted from soy.", source: "EFSA" },
+      { name: "Sodium Bicarbonate", code: "E500", risk: "low", description: "Baking soda leavening agent.", source: "FDA GRAS" },
+      { name: "Sorbitan Monostearate", code: "E491", risk: "medium", description: "Synthetic emulsifier. Excessive consumption may cause mild digestive discomfort.", source: "EFSA Food Additives Panel" }
+    ],
+    allergens: ["Gluten", "Wheat", "Milk", "Soy"],
+    allergens_declared: ["Gluten", "Wheat", "Milk", "Soy"],
     nutrition_facts: {
-      serving_size: "150g",
-      calories: 80,
-      calories_100g: 53,
-      fat: "0g",
-      fat_100g: "0g",
-      saturated_fat: "0g",
-      saturated_fat_100g: "0g",
-      trans_fat: "0g",
-      trans_fat_100g: "0g",
-      cholesterol: "5mg",
-      cholesterol_100g: "3.3mg",
+      panel_status: "extracted",
+      serving_size: "30g",
+      per_serving: {
+        calories: 130,
+        fat_g: 5,
+        saturated_fat_g: 3.5,
+        trans_fat_g: 0.1,
+        cholesterol_mg: 0,
+        sodium_mg: 55,
+        carbs_g: 20,
+        fiber_g: 0.5,
+        sugar_g: 12,
+        added_sugar_g: 11,
+        protein_g: 1
+      },
+      per_100g: {
+        calories: 433,
+        fat_g: 16.7,
+        saturated_fat_g: 11.7,
+        trans_fat_g: 0.3,
+        cholesterol_mg: 0,
+        sodium_mg: 183,
+        carbs_g: 66.7,
+        fiber_g: 1.7,
+        sugar_g: 40,
+        added_sugar_g: 36.7,
+        protein_g: 3.3
+      },
+      calories: 130,
+      calories_100g: 433,
+      fat: "5g",
+      fat_100g: "16.7g",
+      saturated_fat: "3.5g",
+      saturated_fat_100g: "11.7g",
+      trans_fat: "0.1g",
+      trans_fat_100g: "0.3g",
+      cholesterol: "0mg",
+      cholesterol_100g: "0mg",
       sodium: "55mg",
-      sodium_100g: "37mg",
-      carbs: "6g",
-      carbs_100g: "4g",
-      fiber: "0g",
-      fiber_100g: "0g",
-      sugar: "4g",
-      sugar_100g: "2.7g",
-      protein: "15g",
-      protein_100g: "10g"
+      sodium_100g: "183mg",
+      carbs: "20g",
+      carbs_100g: "66.7g",
+      fiber: "0.5g",
+      fiber_100g: "1.7g",
+      sugar: "12g",
+      sugar_100g: "40g",
+      protein: "1g",
+      protein_100g: "3.3g"
     },
     recommendations: [
-      "Top with fresh organic berries, walnuts, and a drizzle of raw honey",
-      "Mix in ground chia seeds or hemp seeds for extra fiber and healthy fats",
-      "Use as a high-protein substitute for sour cream in savory recipes"
+      "Amul 70% Dark Chocolate with almonds",
+      "Organic Whole Cacao Dates"
     ],
-    alternatives_detailed: [],
-    upf_score: 2,
-    microplastics_risk: "medium",
-    microplastics_reason: "Packed in polystyrene plastic cups.",
-    sustainability_grade: "C",
-    sustainability_reason: "Dairy products carry a higher methane footprint, though local sourcing offsets some transport emissions.",
-    glycemic_index_estimate: "low",
-    glycemic_reason: "High protein and lack of added sugars result in a very low glycemic load.",
-    health_risk_breakdown: {
-      heart: "low",
-      diabetes: "low",
-      inflammation: "low",
-      gut_health: "low"
-    }
-  }
-]
-
-function getDeterministicMockProduct(base64Image: string, searchName: string = ''): IngredientAnalysis {
-  const nameLower = searchName.toLowerCase()
-  if (nameLower.includes('choco') || nameLower.includes('pie') || nameLower.includes('lotte')) {
-    const match = MOCK_PRODUCTS.find(p => p.product_name.toLowerCase().includes('choco') || p.product_name.toLowerCase().includes('lotte'))
-    if (match) return match
-  }
-  if (nameLower.includes('oreo')) {
-    const match = MOCK_PRODUCTS.find(p => p.product_name.toLowerCase().includes('oreo'))
-    if (match) return match
-  }
-  if (nameLower.includes('cola') || nameLower.includes('coke')) {
-    const match = MOCK_PRODUCTS.find(p => p.product_name.toLowerCase().includes('coca-cola') || p.product_name.toLowerCase().includes('coke'))
-    if (match) return match
-  }
-  if (nameLower.includes('chip') || nameLower.includes('lays') || nameLower.includes('potato')) {
-    const match = MOCK_PRODUCTS.find(p => p.product_name.toLowerCase().includes('lays') || p.product_name.toLowerCase().includes('potato'))
-    if (match) return match
-  }
-  if (nameLower.includes('ketchup') || nameLower.includes('heinz')) {
-    const match = MOCK_PRODUCTS.find(p => p.product_name.toLowerCase().includes('ketchup') || p.product_name.toLowerCase().includes('heinz'))
-    if (match) return match
-  }
-  if (nameLower.includes('oat') || nameLower.includes('quaker')) {
-    const match = MOCK_PRODUCTS.find(p => p.product_name.toLowerCase().includes('oat') || p.product_name.toLowerCase().includes('quaker'))
-    if (match) return match
-  }
-  if (nameLower.includes('yogurt') || nameLower.includes('chobani')) {
-    const match = MOCK_PRODUCTS.find(p => p.product_name.toLowerCase().includes('yogurt') || p.product_name.toLowerCase().includes('chobani'))
-    if (match) return match
-  }
-
-  // Fallback dynamic generation based on filename / searchName
-  return generateDynamicMockProduct(searchName)
-}
-
-function generateDynamicMockProduct(searchName: string): IngredientAnalysis {
-  let cleanName = searchName || 'Food Product';
-  // Strip extension
-  cleanName = cleanName.replace(/\.[^/.]+$/, "");
-  // Replace underscores/dashes with spaces
-  cleanName = cleanName.replace(/[_-]/g, " ");
-  // Capitalize words
-  cleanName = cleanName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-
-  // Guess category and ingredients
-  const lower = cleanName.toLowerCase();
-  let ingredients = [
-    { name: 'Water', status: 'safe', reason: 'Essential hydration.' },
-    { name: 'Natural Flavoring', status: 'safe', reason: 'Plant-derived organic flavor extract.' }
-  ];
-  let healthScore = 80;
-  let safetyLevel: 'safe' | 'moderate' | 'danger' = 'safe';
-  let upfScore = 1;
-  let description = `A standard formulation of ${cleanName}. Composed of clean ingredients with minimal processed additives.`;
-  let additives: any[] = [];
-  let allergens: string[] = [];
-
-  if (lower.includes('juice') || lower.includes('drink') || lower.includes('beverage') || lower.includes('water')) {
-    ingredients = [
-      { name: 'Water', status: 'safe', reason: 'Essential hydration.' },
-      { name: 'Fruit Juice Concentrate', status: 'safe', reason: 'Natural sweetness and vitamins.' },
-      { name: 'Citric Acid', status: 'safe', reason: 'Natural acidifier and preservative.' },
-      { name: 'Vitamin C (Ascorbic Acid)', status: 'safe', reason: 'Essential nutrient and antioxidant.' }
-    ];
-    healthScore = 85;
-    upfScore = 2;
-  } else if (lower.includes('biscuit') || lower.includes('cookie') || lower.includes('cake') || lower.includes('bread') || lower.includes('flour')) {
-    ingredients = [
-      { name: 'Whole Wheat Flour', status: 'safe', reason: 'Complex carbohydrates and dietary fiber.' },
-      { name: 'Water', status: 'safe', reason: 'Pure hydration.' },
-      { name: 'Cane Sugar', status: 'caution', reason: 'Added sweetener. Consume in moderation.' },
-      { name: 'Vegetable Oil', status: 'caution', reason: 'Saturated fat source.' },
-      { name: 'Yeast', status: 'safe', reason: 'Natural raising agent.' }
-    ];
-    healthScore = 65;
-    safetyLevel = 'moderate';
-    upfScore = 3;
-    allergens = ['Gluten'];
-  } else if (lower.includes('noodle') || lower.includes('pasta') || lower.includes('ramen')) {
-    ingredients = [
-      { name: 'Wheat Flour', status: 'safe', reason: 'Energy source.' },
-      { name: 'Water', status: 'safe', reason: 'Pure hydration.' },
-      { name: 'Salt', status: 'caution', reason: 'Sodium content. Limit daily intake.' },
-      { name: 'Spices & Condiments', status: 'safe', reason: 'Natural seasonings.' }
-    ];
-    healthScore = 70;
-    safetyLevel = 'moderate';
-    upfScore = 3;
-    allergens = ['Gluten'];
-  } else if (lower.includes('milk') || lower.includes('cheese') || lower.includes('yogurt') || lower.includes('butter') || lower.includes('dairy')) {
-    ingredients = [
-      { name: 'Fresh Milk', status: 'safe', reason: 'Rich in calcium and natural proteins.' },
-      { name: 'Active Bacterial Cultures', status: 'safe', reason: 'Supports gut microbiome.' }
-    ];
-    healthScore = 90;
-    upfScore = 1;
-    allergens = ['Dairy'];
-  }
-
-  return {
-    product_name: cleanName,
-    brand: 'ScanSafe Choice',
-    health_score: healthScore,
-    health_score_reason: 'Generic score based on product category detection.',
-    safety_level: safetyLevel,
-    description: description,
-    ingredients: ingredients as any,
-    additives: additives,
-    allergens: allergens,
-    nutrition_facts: {
-      serving_size: '100g',
-      calories: healthScore > 75 ? 120 : 350,
-      calories_100g: healthScore > 75 ? 120 : 350,
-      fat: '2g',
-      fat_100g: '2g',
-      saturated_fat: '0.5g',
-      saturated_fat_100g: '0.5g',
-      trans_fat: '0g',
-      trans_fat_100g: '0g',
-      cholesterol: '0mg',
-      cholesterol_100g: '0mg',
-      sodium: '150mg',
-      sodium_100g: '150mg',
-      carbs: '22g',
-      carbs_100g: '22g',
-      fiber: '3g',
-      fiber_100g: '3g',
-      sugar: '5g',
-      sugar_100g: '5g',
-      protein: '4g',
-      protein_100g: '4g'
-    },
-    recommendations: [],
-    alternatives_detailed: [],
-    upf_score: upfScore as any,
-    microplastics_risk: 'low',
-    microplastics_reason: 'Simple packaging yields low microplastics exposure.',
-    sustainability_grade: 'A',
-    sustainability_reason: 'Produced using locally sourced ingredients, minimizing carbon mileage.',
-    glycemic_index_estimate: healthScore > 75 ? 'low' : 'medium',
-    glycemic_reason: 'Balanced macromolecule breakdown prevents insulin spikes.',
-    health_risk_breakdown: {
-      heart: 'low',
-      diabetes: 'low',
-      inflammation: 'low',
-      gut_health: 'low'
-    }
-  };
-}
-
-export function applyPreferences(product: IngredientAnalysis, userPreferences: string[]): IngredientAnalysis {
-  // Deep clone
-  const cloned: IngredientAnalysis = JSON.parse(JSON.stringify(product))
-  
-  if (!userPreferences || userPreferences.length === 0) return cloned
-  
-  cloned.ingredients = cloned.ingredients.map(ing => {
-    const nameLower = ing.name.toLowerCase()
-    
-    // 1. Gluten-Free
-    if (userPreferences.includes('gluten-free')) {
-      if (nameLower.includes('wheat') || nameLower.includes('gluten') || nameLower.includes('flour') || nameLower.includes('barley') || nameLower.includes('rye')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} contains gluten, violating your Gluten-Free preference.` }
+    alternatives_detailed: [
+      {
+        name: "Dark Chocolate (70%+ Cacao)",
+        brand: "Amul",
+        reason: "Rich in antioxidants, lower added sugar, no hydrogenated fats.",
+        estimated_price_inr: 120,
+        buy_url_blinkit: "https://blinkit.com/s/?q=amul+dark+chocolate+70",
+        buy_url_bigbasket: "https://www.bigbasket.com/ps/?q=amul+dark+chocolate+70"
       }
-    }
-    
-    // 2. Dairy-Free
-    if (userPreferences.includes('dairy-free')) {
-      if (nameLower.includes('milk') || nameLower.includes('dairy') || nameLower.includes('butter') || nameLower.includes('whey') || nameLower.includes('lactose') || nameLower.includes('cheese') || nameLower.includes('yogurt')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} contains dairy, violating your Dairy-Free preference.` }
-      }
-    }
-    
-    // 3. Nut-Free
-    if (userPreferences.includes('nut-free')) {
-      if (nameLower.includes('peanut') || nameLower.includes('almond') || nameLower.includes('walnut') || nameLower.includes('cashew') || nameLower.includes('pecan') || nameLower.includes('nut')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} contains nuts, violating your Nut-Free preference.` }
-      }
-    }
-    
-    // 4. Vegan
-    if (userPreferences.includes('vegan')) {
-      if (nameLower.includes('milk') || nameLower.includes('yogurt') || nameLower.includes('cheese') || nameLower.includes('honey') || nameLower.includes('gelatin') || nameLower.includes('egg') || nameLower.includes('beef') || nameLower.includes('chicken') || nameLower.includes('pork') || nameLower.includes('butter')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} is an animal-derived product, violating your Vegan preference.` }
-      }
-    }
-    
-    // 5. Vegetarian
-    if (userPreferences.includes('vegetarian')) {
-      if (nameLower.includes('gelatin') || nameLower.includes('beef') || nameLower.includes('chicken') || nameLower.includes('pork') || nameLower.includes('meat') || nameLower.includes('fish')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} contains meat or meat byproducts, violating your Vegetarian preference.` }
-      }
-    }
-    
-    // 6. Jain Diet
-    if (userPreferences.includes('jain')) {
-      if (
-        nameLower.includes('onion') || nameLower.includes('garlic') || nameLower.includes('potato') || 
-        nameLower.includes('carrot') || nameLower.includes('beetroot') || nameLower.includes('ginger') || 
-        nameLower.includes('radish') || nameLower.includes('turnip') || nameLower.includes('egg') || 
-        nameLower.includes('meat') || nameLower.includes('chicken') || nameLower.includes('gelatin')
-      ) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} violates Jain diet rules (contains root vegetable or animal byproduct).` }
-      }
-    }
-
-    // 7. Diabetic
-    if (userPreferences.includes('diabetic')) {
-      if (
-        nameLower.includes('sugar') || nameLower.includes('corn syrup') || nameLower.includes('fructose') || 
-        nameLower.includes('dextrose') || nameLower.includes('sucrose') || nameLower.includes('maltodextrin')
-      ) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} is a high glycemic sweetener, violating your diabetic health profile.` }
-      }
-    }
-
-    // 8. Hypertension (Salt-Conscious)
-    if (userPreferences.includes('hypertension')) {
-      if (nameLower.includes('salt') || nameLower.includes('sodium') || nameLower.includes('msg') || nameLower.includes('monosodium glutamate')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} is high in sodium, violating your hypertension health profile.` }
-      }
-    }
-
-    // 9. Pregnancy Safe
-    if (userPreferences.includes('pregnancy')) {
-      if (nameLower.includes('caffeine') || nameLower.includes('bha') || nameLower.includes('bht') || nameLower.includes('nitrite') || nameLower.includes('nitrate')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} is advised against during pregnancy (caffeine/preservative warning).` }
-      }
-    }
-
-    // 10. Cardiovascular (Heart-Conscious)
-    if (userPreferences.includes('cardiovascular')) {
-      if (nameLower.includes('hydrogenated') || nameLower.includes('trans fat') || nameLower.includes('palm kernel') || nameLower.includes('margarine')) {
-        return { ...ing, status: 'avoid', reason: `${ing.name} contains trans fats or highly saturated hydrogenated fats, violating your cardiovascular profile.` }
-      }
-    }
-
-    return ing
-  })
-
-  // Recalculate safety level and adjust health score
-  const hasAvoid = cloned.ingredients.some(ing => ing.status === 'avoid')
-  if (hasAvoid) {
-    cloned.safety_level = 'danger'
-    cloned.health_score = Math.max(0, cloned.health_score - 20)
+    ],
+    upf_score: 4,
+    upf_reason: "NOVA Group 4 - Ultra-processed confectionery with hydrogenated fats and artificial emulsifiers.",
+    glycemic_index_estimate: "high",
+    glycemic_reason: "High concentration of refined sugars and syrups causes immediate blood glucose surge.",
+    is_sample: true
   }
-  
-  return cloned
-}
+};
 
 async function analyzeLabelWithGemini(
   base64Image: string,
-  userPreferences: string[] = []
+  userPreferences: string[] = [],
+  preferredLanguage: string = "en"
 ): Promise<IngredientAnalysis> {
-  const apiKey = process.env.GEMINI_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not defined in environment variables.')
+    throw new Error("GEMINI_API_KEY is not defined in environment variables.");
   }
 
-  let mediaType = 'image/jpeg'
-  let base64Data = base64Image
+  let mediaType = "image/jpeg";
+  let base64Data = base64Image;
 
-  if (base64Image.startsWith('data:')) {
-    const match = base64Image.match(/^data:([^;]+);base64,(.+)$/)
+  if (base64Image.startsWith("data:")) {
+    const match = base64Image.match(/^data:([^;]+);base64,(.+)$/);
     if (match) {
-      mediaType = match[1]
-      base64Data = match[2]
+      mediaType = match[1];
+      base64Data = match[2];
     }
   }
 
-  const prefsPrompt = userPreferences.length > 0 
-    ? `\nCRITICAL USER PROFILE: The user has the following dietary & health preferences: [${userPreferences.join(', ')}]. You MUST specifically analyze the product against these profiles. In the "description" field, you MUST explicitly mention their profile (e.g. "For a Vegan/Diabetic profile...") and explain in 2-3 sentences exactly why this product is suitable or dangerous for them specifically. If an ingredient violates their profile, mark its status as 'avoid' and clearly explain why in the reason field. Adjust the health_score and safety_level down if it severely violates their profile.`
-    : ''
+  const langPrompt = preferredLanguage && preferredLanguage !== "en"
+    ? "\nCRITICAL LANGUAGE REQUIREMENT: All user-facing explanations and rationale text fields in the output JSON (health_score_reason, description, ingredients reasons, additives descriptions, recommendations, alternatives reasons, upf_reason, glycemic_reason, unreadable_instructions) MUST be written in the language: " + preferredLanguage + ". Write clear, natural conversational sentences."
+    : "";
 
-  const promptText = `
-You are ScanSafe ULTRA, an advanced product intelligence scanner, food scientist, and toxicology expert.
-Analyze the provided image of a food product. Reconstruct and estimate the ingredients list, nutrition facts, additives, allergens, and overall health index. ${prefsPrompt}
-
-You must return a single JSON object. Ensure it matches the JSON specification below:
-{
-  "product_name": "Name of product (estimate if not clear)",
-  "brand": "Brand name (estimate if not clear)",
-  "health_score": 0 to 100 integer (100 = whole foods, 0 = ultra-processed or dangerous),
-  "health_score_reason": "Punchy 1-2 sentence explanation explicitly justifying the numeric health score and what caused it",
-  "safety_level": "safe" | "moderate" | "danger",
-  "description": "2-3 sentences overview of the product's health and toxicological impact",
-  "ingredients": [
-    {
-      "name": "ingredient name",
-      "status": "safe" | "caution" | "avoid",
-      "reason": "short explanation of this rating"
-    }
-  ],
-  "additives": [
-    {
-      "name": "additive name (e.g. MSG, Aspartame)",
-      "code": "E-number (e.g. E621, E951) if applicable",
-      "risk": "low" | "medium" | "high",
-      "description": "safety warning and risk explanation",
-      "source": "scientific review body citing (e.g. EFSA, FDA, WHO)"
-    }
-  ],
-  "allergens": ["Gluten", "Dairy", etc. lists],
-  "nutrition_facts": {
-    "serving_size": "serving size weight e.g. 30g or 355ml",
-    "calories": number,
-    "calories_100g": number,
-    "fat": "weight per serving in grams",
-    "fat_100g": "weight per 100g in grams",
-    "saturated_fat": "weight per serving in grams",
-    "saturated_fat_100g": "weight per 100g in grams",
-    "trans_fat": "weight per serving in grams",
-    "trans_fat_100g": "weight per 100g in grams",
-    "cholesterol": "weight per serving in mg",
-    "cholesterol_100g": "weight per 100g in mg",
-    "sodium": "weight per serving in mg",
-    "sodium_100g": "weight per 100g in mg",
-    "carbs": "weight per serving in grams",
-    "carbs_100g": "weight per 100g in grams",
-    "fiber": "weight per serving in grams",
-    "fiber_100g": "weight per 100g in grams",
-    "sugar": "weight per serving in grams",
-    "sugar_100g": "weight per 100g in grams",
-    "protein": "weight per serving in grams",
-    "protein_100g": "weight per 100g in grams"
+  const systemPrompt = "You are ScanSafe EVIDENCE-BASED FOOD OCR, a rigorous food intelligence auditor and food scientist.\n" +
+"Analyze the provided product image strictly following EVIDENCE-BASED rules:\n" +
+"1. ONLY extract information that is clearly visible in the image.\n" +
+"2. If the nutrition facts panel or ingredients list is blurred, cropped, obscured, or missing:\n" +
+"   - Set panel_status to unreadable or missing.\n" +
+"   - DO NOT hallucinate, guess, or invent numbers or ingredients.\n" +
+"   - In unreadable_instructions, provide camera guidance.\n" +
+"3. Always distinguish between per-serving and per-100g values if both are printed.\n" +
+"4. NOVA classification (1 to 4): 1-unprocessed, 2-culinary, 3-processed, 4-ultraprocessed.\n" +
+"5. DO NOT include fake microplastics, heavy metals, organ damage triage, or carbon footprints.\n\n" +
+"Return a single JSON object matching the specification:\n" +
+JSON.stringify({
+  product_name: "Product Name from packaging (or Unknown Product)",
+  brand: "Brand Name from packaging (or Unknown Brand)",
+  panel_status: "extracted",
+  unreadable_instructions: "Camera instructions if unreadable",
+  description: "Factual 2-3 sentence overview",
+  ingredients: [{ name: "ingredient", status: "safe", reason: "reason" }],
+  additives: [{ name: "additive", code: "code", risk: "low", description: "desc", source: "citation" }],
+  allergens_declared: ["Gluten"],
+  nutrition_facts: {
+    panel_status: "extracted",
+    serving_size: "30g",
+    per_serving: { calories: 100, fat_g: 2, saturated_fat_g: 0.5, trans_fat_g: 0, cholesterol_mg: 0, sodium_mg: 50, carbs_g: 15, fiber_g: 1, sugar_g: 5, added_sugar_g: 4, protein_g: 2 },
+    per_100g: { calories: 333, fat_g: 6.7, saturated_fat_g: 1.7, trans_fat_g: 0, cholesterol_mg: 0, sodium_mg: 167, carbs_g: 50, fiber_g: 3.3, sugar_g: 16.7, added_sugar_g: 13.3, protein_g: 6.7 }
   },
-  "recommendations": ["healthy alternatives names"],
-  "alternatives_detailed": [
-    {
-      "name": "Detailed clean alternative name",
-      "brand": "Brand",
-      "reason": "Why this alternative is better",
-      "estimated_price_inr": number,
-      "buy_url_blinkit": "search link e.g. https://blinkit.com/s/?q=product",
-      "buy_url_bigbasket": "search link e.g. https://www.bigbasket.com/ps/?q=product"
-    }
-  ],
-  "upf_score": 1 to 4 (NOVA food processing group index: 1-raw, 2-culinary, 3-processed, 4-ultraprocessed),
-  "microplastics_risk": "low" | "medium" | "high",
-  "microplastics_reason": "evaluation of packaging (PET bottles, individual wraps have higher risk)",
-  "sustainability_grade": "A" | "B" | "C" | "D" | "E",
-  "sustainability_reason": "estimated carbon footprint and carbon impact summary",
-  "glycemic_index_estimate": "low" | "medium" | "high",
-  "glycemic_reason": "glycemic impact and sugar absorption analysis",
-  "health_risk_breakdown": {
-    "heart": "low" | "medium" | "high",
-    "diabetes": "low" | "medium" | "high",
-    "inflammation": "low" | "medium" | "high",
-    "gut_health": "low" | "medium" | "high"
-  }
-}
+  upf_score: 3,
+  upf_reason: "NOVA rating explanation",
+  glycemic_index_estimate: "medium",
+  glycemic_reason: "Glycemic load rationale",
+  recommendations: ["Healthy alternative ideas"],
+  alternatives_detailed: [{ name: "Alternative Name", brand: "Brand", reason: "Why better", estimated_price_inr: 100, buy_url_blinkit: "url", buy_url_bigbasket: "url" }]
+}, null, 2) + "\n\nReturn ONLY raw JSON string.";
 
-Do NOT wrap the response in markdown formatting (like \`\`\`json). Return only the raw JSON string.
-`
+  let response;
+  let retryCount = 0;
+  const maxRetries = 3;
 
-  let response
-  let retryCount = 0
-  const maxRetries = 3
-  
   while (retryCount <= maxRetries) {
     try {
       response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey,
         {
+          systemInstruction: {
+            parts: [{ text: systemPrompt }]
+          },
           contents: [
             {
               parts: [
                 { inlineData: { mimeType: mediaType, data: base64Data } },
-                { text: promptText }
+                { text: "Extract and analyze the food product facts from this label image." + langPrompt }
               ]
             }
           ],
@@ -921,194 +731,85 @@ Do NOT wrap the response in markdown formatting (like \`\`\`json). Return only t
             responseMimeType: "application/json"
           }
         },
-        { headers: { 'content-type': 'application/json' } }
-      )
-      break
+        {
+          headers: { "content-type": "application/json" },
+          httpsAgent: keepAliveAgent
+        }
+      );
+      break;
     } catch (err: any) {
-      retryCount++
-      if (retryCount > maxRetries) throw err
-      console.warn(`Gemini API failed in analyzeLabelWithGemini (attempt ${retryCount}). Retrying in 3s... Error: ${err.message}`)
-      await new Promise(resolve => setTimeout(resolve, 3000))
+      retryCount++;
+      if (retryCount > maxRetries) throw err;
+      console.warn("Gemini API attempt " + retryCount + " failed. Retrying... Error: " + err.message);
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   }
 
-  const candidate = response?.data?.candidates?.[0]
-  const responseText = candidate?.content?.parts?.[0]?.text?.trim()
+  const candidate = response && response.data && response.data.candidates && response.data.candidates[0];
+  const responseText = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text ? candidate.content.parts[0].text.trim() : null;
   if (!responseText) {
-    throw new Error('Empty response from Gemini API')
+    throw new Error("Empty response from Gemini API");
   }
 
-  let cleanedText = responseText
-  
-  // Extract JSON block if it's wrapped in markdown backticks
-  const jsonBlockMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  let cleanedText = responseText;
+  const jsonBlockMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (jsonBlockMatch) {
-    cleanedText = jsonBlockMatch[1]
+    cleanedText = jsonBlockMatch[1];
   }
 
-  try {
-    return JSON.parse(cleanedText.trim()) as IngredientAnalysis
-  } catch (e) {
-    console.error('Failed to parse Gemini response as JSON. Response was:', responseText)
-    throw new Error('Invalid JSON format returned by AI')
-  }
-}
+  const rawJson = JSON.parse(cleanedText.trim());
 
-export async function analyzeLabel(
-  base64Image: string,
-  userPreferences: string[] = [],
-  filename: string = '',
-  productName: string = ''
-): Promise<IngredientAnalysis> {
-  const searchName = productName || filename
+  const nf = rawJson.nutrition_facts || {};
+  const ps = nf.per_serving || {};
+  const p100 = nf.per_100g || {};
 
-  // 1. Try Gemini first
-  const geminiApiKey = process.env.GEMINI_API_KEY
-  if (geminiApiKey) {
-    try {
-      console.log('Attempting analysis using Google Gemini 2.5 Flash...')
-      const analysis = await analyzeLabelWithGemini(base64Image, userPreferences)
-      return applyPreferences(analysis, userPreferences)
-    } catch (error: any) {
-      console.error('Error analyzing image with Gemini API:', error.response?.data || error.message)
-      console.log('Falling back to Claude API...')
-      // We do not throw here, allowing it to fall back to Claude below
-    }
-  }
+  nf.calories = ps.calories !== undefined ? ps.calories : (nf.calories || null);
+  nf.calories_100g = p100.calories !== undefined ? p100.calories : (nf.calories_100g || null);
+  nf.fat = ps.fat_g !== undefined ? (ps.fat_g + "g") : (nf.fat || "0g");
+  nf.fat_100g = p100.fat_g !== undefined ? (p100.fat_g + "g") : (nf.fat_100g || "0g");
+  nf.saturated_fat = ps.saturated_fat_g !== undefined ? (ps.saturated_fat_g + "g") : (nf.saturated_fat || "0g");
+  nf.saturated_fat_100g = p100.saturated_fat_g !== undefined ? (p100.saturated_fat_g + "g") : (nf.saturated_fat_100g || "0g");
+  nf.trans_fat = ps.trans_fat_g !== undefined ? (ps.trans_fat_g + "g") : (nf.trans_fat || "0g");
+  nf.trans_fat_100g = p100.trans_fat_g !== undefined ? (p100.trans_fat_g + "g") : (nf.trans_fat_100g || "0g");
+  nf.cholesterol = ps.cholesterol_mg !== undefined ? (ps.cholesterol_mg + "mg") : (nf.cholesterol || "0mg");
+  nf.cholesterol_100g = p100.cholesterol_mg !== undefined ? (p100.cholesterol_mg + "mg") : (nf.cholesterol_100g || "0mg");
+  nf.sodium = ps.sodium_mg !== undefined ? (ps.sodium_mg + "mg") : (nf.sodium || "0mg");
+  nf.sodium_100g = p100.sodium_mg !== undefined ? (p100.sodium_mg + "mg") : (nf.sodium_100g || "0mg");
+  nf.carbs = ps.carbs_g !== undefined ? (ps.carbs_g + "g") : (nf.carbs || "0g");
+  nf.carbs_100g = p100.carbs_g !== undefined ? (p100.carbs_g + "g") : (nf.carbs_100g || "0g");
+  nf.fiber = ps.fiber_g !== undefined ? (ps.fiber_g + "g") : (nf.fiber || "0g");
+  nf.fiber_100g = p100.fiber_g !== undefined ? (p100.fiber_g + "g") : (nf.fiber_100g || "0g");
+  nf.sugar = ps.sugar_g !== undefined ? (ps.sugar_g + "g") : (nf.sugar || "0g");
+  nf.sugar_100g = p100.sugar_g !== undefined ? (p100.sugar_g + "g") : (nf.sugar_100g || "0g");
+  nf.protein = ps.protein_g !== undefined ? (ps.protein_g + "g") : (nf.protein || "0g");
+  nf.protein_100g = p100.protein_g !== undefined ? (p100.protein_g + "g") : (nf.protein_100g || "0g");
+  rawJson.nutrition_facts = nf;
 
-  // 2. Fallback to Claude
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    console.warn('No API keys. Throwing error.')
-    throw new Error('No AI API keys configured for ScanSafe.')
-  }
+  const { score, reason, safetyLevel } = calculateHealthScore(rawJson);
 
-  let mediaType = 'image/jpeg'
-  let base64Data = base64Image
+  const finalResult: IngredientAnalysis = {
+    product_name: rawJson.product_name || "Food Product",
+    brand: rawJson.brand || "Brand",
+    health_score: score,
+    health_score_reason: reason,
+    safety_level: safetyLevel,
+    description: rawJson.description || "Food product label analysis.",
+    panel_status: rawJson.panel_status || "extracted",
+    unreadable_instructions: rawJson.unreadable_instructions,
+    ingredients: rawJson.ingredients || [],
+    additives: rawJson.additives || [],
+    allergens: rawJson.allergens_declared || [],
+    allergens_declared: rawJson.allergens_declared || [],
+    nutrition_facts: rawJson.nutrition_facts,
+    recommendations: rawJson.recommendations || [],
+    alternatives_detailed: rawJson.alternatives_detailed || [],
+    upf_score: rawJson.upf_score || 3,
+    upf_reason: rawJson.upf_reason,
+    glycemic_index_estimate: rawJson.glycemic_index_estimate || "medium",
+    glycemic_reason: rawJson.glycemic_reason,
+  };
 
-  if (base64Image.startsWith('data:')) {
-    const match = base64Image.match(/^data:([^;]+);base64,(.+)$/)
-    if (match) {
-      mediaType = match[1]
-      base64Data = match[2]
-    }
-  }
-
-  const promptText = `
-You are ScanSafe ULTRA, an advanced food intelligence scanner, toxicologist, and ingredients specialist.
-Analyze the provided food image. Return a single JSON object matching the specification below:
-{
-  "product_name": "Name",
-  "brand": "Brand",
-  "health_score": 0 to 100 integer,
-  "health_score_reason": "Punchy 1-2 sentence explanation explicitly justifying the numeric health score and what caused it",
-  "safety_level": "safe" | "moderate" | "danger",
-  "description": "overview",
-  "ingredients": [
-    { "name": "name", "status": "safe" | "caution" | "avoid", "reason": "reason" }
-  ],
-  "additives": [
-    { "name": "name", "code": "E-number", "risk": "low" | "medium" | "high", "description": "desc", "source": "citation" }
-  ],
-  "allergens": ["Allergen"],
-  "nutrition_facts": {
-    "serving_size": "string",
-    "calories": number,
-    "calories_100g": number,
-    "fat": "string",
-    "fat_100g": "string",
-    "saturated_fat": "string",
-    "saturated_fat_100g": "string",
-    "trans_fat": "string",
-    "trans_fat_100g": "string",
-    "cholesterol": "string",
-    "cholesterol_100g": "string",
-    "sodium": "string",
-    "sodium_100g": "string",
-    "carbs": "string",
-    "carbs_100g": "string",
-    "fiber": "string",
-    "fiber_100g": "string",
-    "sugar": "string",
-    "sugar_100g": "string",
-    "protein": "string",
-    "protein_100g": "string"
-  },
-  "recommendations": ["alternatives"],
-  "alternatives_detailed": [
-    {
-      "name": "Alternative Name",
-      "brand": "Brand",
-      "reason": "Why better",
-      "estimated_price_inr": number,
-      "buy_url_blinkit": "link",
-      "buy_url_bigbasket": "link"
-    }
-  ],
-  "upf_score": 1 to 4,
-  "microplastics_risk": "low" | "medium" | "high",
-  "microplastics_reason": "packaging safety review",
-  "sustainability_grade": "A" | "B" | "C" | "D" | "E",
-  "sustainability_reason": "sustainability summary",
-  "glycemic_index_estimate": "low" | "medium" | "high",
-  "glycemic_reason": "blood sugar reasoning",
-  "health_risk_breakdown": {
-    "heart": "low" | "medium" | "high",
-    "diabetes": "low" | "medium" | "high",
-    "inflammation": "low" | "medium" | "high",
-    "gut_health": "low" | "medium" | "high"
-  }
-}
-
-Do NOT wrap the response in markdown code blocks. Return ONLY raw JSON.
-`
-
-  try {
-    const response = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 4000,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mediaType,
-                  data: base64Data,
-                },
-              },
-              {
-                type: 'text',
-                text: promptText,
-              },
-            ],
-          },
-        ],
-      },
-      {
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-      }
-    )
-
-    const responseText = response.data.content[0].text.trim()
-    let cleanedText = responseText
-    if (cleanedText.startsWith('```')) {
-      cleanedText = cleanedText.replace(/^```json\s*/i, '').replace(/```$/, '')
-    }
-    
-    return JSON.parse(cleanedText.trim()) as IngredientAnalysis
-  } catch (error: any) {
-    console.error('Error analyzing image with Claude:', error.response?.data || error.message)
-    throw error
-  }
+  return applyPreferences(finalResult, userPreferences);
 }
 
 export async function enrichIngredientsText(
@@ -1116,145 +817,136 @@ export async function enrichIngredientsText(
   productName: string,
   brand: string,
   nutriments: any = {},
-  userPreferences: string[] = []
+  userPreferences: string[] = [],
+  preferredLanguage: string = "en"
 ): Promise<IngredientAnalysis> {
-  const geminiApiKey = process.env.GEMINI_API_KEY
+  const geminiApiKey = process.env.GEMINI_API_KEY;
   if (!geminiApiKey) {
-    throw new Error('GEMINI_API_KEY is not defined in environment variables.')
+    throw new Error("GEMINI_API_KEY is not defined in environment variables.");
   }
 
-  const prefsPrompt = userPreferences.length > 0 
-    ? `\nCRITICAL USER PROFILE: The user has the following dietary & health preferences: [${userPreferences.join(', ')}]. You MUST specifically analyze the product against these profiles. In the "description" field, you MUST explicitly mention their profile (e.g. "For a Vegan/Diabetic profile...") and explain in 2-3 sentences exactly why this product is suitable or dangerous for them specifically. If an ingredient violates their profile, mark its status as 'avoid' and clearly explain why in the reason field. Adjust the health_score and safety_level down if it severely violates their profile.`
-    : ''
+  const langPrompt = preferredLanguage && preferredLanguage !== "en"
+    ? "\nCRITICAL LANGUAGE REQUIREMENT: All user-facing explanations and rationale text fields in the output JSON (health_score_reason, description, ingredient reasons, additive descriptions, recommendations, alternative reasons, upf_reason, glycemic_reason) MUST be written in the language: " + preferredLanguage + "."
+    : "";
 
-  const promptText = `
-You are ScanSafe ULTRA, an advanced product intelligence scanner, food scientist, and toxicology expert.
-Given the raw product details below, parse and analyze the ingredients, additives, nutrition facts, allergens, and overall health indexes. ${prefsPrompt}
-
-Product Name: ${productName}
-Brand: ${brand}
-Raw Ingredients Text: ${ingredientsText}
-Nutrition Facts (Raw): ${JSON.stringify(nutriments)}
-
-You must return a single JSON object. Ensure it matches the JSON specification below:
-{
-  "product_name": "${productName}",
-  "brand": "${brand}",
-  "health_score": 0 to 100 integer (100 = whole foods, 0 = ultra-processed or dangerous),
-  "health_score_reason": "Punchy 1-2 sentence explanation explicitly justifying the numeric health score and what caused it",
-  "safety_level": "safe" | "moderate" | "danger",
-  "description": "2-3 sentences overview of the product's health and toxicological impact",
-  "ingredients": [
-    {
-      "name": "ingredient name",
-      "status": "safe" | "caution" | "avoid",
-      "reason": "short explanation of this rating"
-    }
-  ],
-  "additives": [
-    {
-      "name": "additive name (e.g. MSG, Aspartame)",
-      "code": "E-number (e.g. E621, E951) if applicable",
-      "risk": "low" | "medium" | "high",
-      "description": "safety warning and risk explanation",
-      "source": "scientific review body citing (e.g. EFSA, FDA, WHO)"
-    }
-  ],
-  "allergens": ["Gluten", "Dairy", etc. lists],
-  "nutrition_facts": {
-    "serving_size": "serving size weight e.g. 30g or 355ml",
-    "calories": number,
-    "calories_100g": number,
-    "fat": "weight per serving in grams",
-    "fat_100g": "weight per 100g in grams",
-    "saturated_fat": "weight per serving in grams",
-    "saturated_fat_100g": "weight per 100g in grams",
-    "trans_fat": "weight per serving in grams",
-    "trans_fat_100g": "weight per 100g in grams",
-    "cholesterol": "weight per serving in mg",
-    "cholesterol_100g": "weight per 100g in mg",
-    "sodium": "weight per serving in mg",
-    "sodium_100g": "weight per 100g in mg",
-    "carbs": "weight per serving in grams",
-    "carbs_100g": "weight per 100g in grams",
-    "fiber": "weight per serving in grams",
-    "fiber_100g": "weight per 100g in grams",
-    "sugar": "weight per serving in grams",
-    "sugar_100g": "weight per 100g in grams",
-    "protein": "weight per serving in grams",
-    "protein_100g": "weight per 100g in grams"
+  const systemPrompt = "You are ScanSafe EVIDENCE-BASED PARSER. Given raw verified food database ingredients text and nutrients, parse into clean structured JSON.\n" +
+"Return a single JSON object matching:\n" +
+JSON.stringify({
+  product_name: productName,
+  brand: brand,
+  panel_status: "extracted",
+  description: "2-3 sentences overview of the product",
+  ingredients: [{ name: "ingredient", status: "safe", reason: "reason" }],
+  additives: [{ name: "additive", code: "INS/E-code", risk: "low", description: "desc", source: "citation" }],
+  allergens_declared: ["Gluten", "Milk"],
+  nutrition_facts: {
+    panel_status: "extracted",
+    serving_size: "100g",
+    per_100g: { calories: 300, fat_g: 5, saturated_fat_g: 1, trans_fat_g: 0, cholesterol_mg: 0, sodium_mg: 100, carbs_g: 50, fiber_g: 2, sugar_g: 10, added_sugar_g: 8, protein_g: 5 }
   },
-  "recommendations": ["healthy alternatives names"],
-  "alternatives_detailed": [
+  upf_score: 3,
+  upf_reason: "NOVA group explanation",
+  glycemic_index_estimate: "medium",
+  glycemic_reason: "glycemic impact",
+  recommendations: ["Healthier alternative names"],
+  alternatives_detailed: [{ name: "Clean Alternative", brand: "Brand", reason: "Why better", estimated_price_inr: 100, buy_url_blinkit: "url" }]
+}, null, 2) + "\nDo NOT wrap with markdown. Return ONLY raw JSON.";
+
+  const response = await axios.post(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiApiKey,
     {
-      "name": "Detailed clean alternative name",
-      "brand": "Brand",
-      "reason": "Why this alternative is better",
-      "estimated_price_inr": number,
-      "buy_url_blinkit": "search link e.g. https://blinkit.com/s/?q=product",
-      "buy_url_bigbasket": "search link e.g. https://www.bigbasket.com/ps/?q=product"
-    }
-  ],
-  "upf_score": 1 to 4 (NOVA food processing group index: 1-raw, 2-culinary, 3-processed, 4-ultraprocessed),
-  "microplastics_risk": "low" | "medium" | "high",
-  "microplastics_reason": "evaluation of packaging (PET bottles, individual wraps have higher risk)",
-  "sustainability_grade": "A" | "B" | "C" | "D" | "E",
-  "sustainability_reason": "estimated carbon footprint and carbon impact summary",
-  "glycemic_index_estimate": "low" | "medium" | "high",
-  "glycemic_reason": "glycemic impact and sugar absorption analysis",
-  "health_risk_breakdown": {
-    "heart": "low" | "medium" | "high",
-    "diabetes": "low" | "medium" | "high",
-    "inflammation": "low" | "medium" | "high",
-    "gut_health": "low" | "medium" | "high"
-  }
-}
-
-Do NOT wrap the response in markdown formatting (like \`\`\`json). Return only the raw JSON string.
-`
-
-  let response
-  let retryCount = 0
-  const maxRetries = 2
-  
-  while (retryCount <= maxRetries) {
-    try {
-      response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [
         {
-          contents: [
-            {
-              parts: [
-                { text: promptText }
-              ]
-            }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
-        },
-        { headers: { 'content-type': 'application/json' } }
-      )
-      break
-    } catch (err: any) {
-      retryCount++
-      if (retryCount > maxRetries) throw err
-      console.warn(`Gemini API failed in enrichIngredientsText (attempt ${retryCount}). Retrying in 1.5s...`)
-      await new Promise(resolve => setTimeout(resolve, 1500))
+          parts: [
+            { text: "Product: " + productName + "\nBrand: " + brand + "\nRaw Ingredients: " + ingredientsText + "\nRaw Nutriments: " + JSON.stringify(nutriments) + langPrompt }
+          ]
+        }
+      ],
+      generationConfig: { responseMimeType: "application/json" }
+    },
+    {
+      headers: { "content-type": "application/json" },
+      httpsAgent: keepAliveAgent
     }
-  }
+  );
 
-  const candidate = response?.data?.candidates?.[0]
-  const responseText = candidate?.content?.parts?.[0]?.text?.trim()
-  if (!responseText) {
-    throw new Error('Empty response from Gemini API')
-  }
+  const candidate = response && response.data && response.data.candidates && response.data.candidates[0];
+  const responseText = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text ? candidate.content.parts[0].text.trim() : null;
+  if (!responseText) throw new Error("Empty response from Gemini");
 
-  let cleanedText = responseText
-  if (cleanedText.startsWith('```')) {
-    cleanedText = cleanedText.replace(/^```json\s*/i, '').replace(/```$/, '')
-  }
+  let cleanedText = responseText;
+  const jsonBlockMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonBlockMatch) cleanedText = jsonBlockMatch[1];
 
-  const analysis = JSON.parse(cleanedText.trim()) as IngredientAnalysis
-  return applyPreferences(analysis, userPreferences)
+  const rawJson = JSON.parse(cleanedText.trim());
+
+  const nf = rawJson.nutrition_facts || { per_100g: {} };
+  const p100 = nf.per_100g || {};
+  if (nutriments["energy-kcal_100g"] !== undefined) p100.calories = Math.round(nutriments["energy-kcal_100g"]);
+  if (nutriments.fat_100g !== undefined) p100.fat_g = parseFloat(nutriments.fat_100g);
+  if (nutriments["saturated-fat_100g"] !== undefined) p100.saturated_fat_g = parseFloat(nutriments["saturated-fat_100g"]);
+  if (nutriments["trans-fat_100g"] !== undefined) p100.trans_fat_g = parseFloat(nutriments["trans-fat_100g"]);
+  if (nutriments.sodium_100g !== undefined) p100.sodium_mg = Math.round(parseFloat(nutriments.sodium_100g) * 1000);
+  if (nutriments.carbohydrates_100g !== undefined) p100.carbs_g = parseFloat(nutriments.carbohydrates_100g);
+  if (nutriments.sugars_100g !== undefined) p100.sugar_g = parseFloat(nutriments.sugars_100g);
+  if (nutriments.fiber_100g !== undefined) p100.fiber_g = parseFloat(nutriments.fiber_100g);
+  if (nutriments.proteins_100g !== undefined) p100.protein_g = parseFloat(nutriments.proteins_100g);
+
+  nf.per_100g = p100;
+  nf.calories_100g = p100.calories;
+  nf.fat_100g = p100.fat_g !== undefined ? (p100.fat_g + "g") : "0g";
+  nf.saturated_fat_100g = p100.saturated_fat_g !== undefined ? (p100.saturated_fat_g + "g") : "0g";
+  nf.trans_fat_100g = p100.trans_fat_g !== undefined ? (p100.trans_fat_g + "g") : "0g";
+  nf.sodium_100g = p100.sodium_mg !== undefined ? (p100.sodium_mg + "mg") : "0mg";
+  nf.carbs_100g = p100.carbs_g !== undefined ? (p100.carbs_g + "g") : "0g";
+  nf.sugar_100g = p100.sugar_g !== undefined ? (p100.sugar_g + "g") : "0g";
+  nf.fiber_100g = p100.fiber_g !== undefined ? (p100.fiber_g + "g") : "0g";
+  nf.protein_100g = p100.protein_g !== undefined ? (p100.protein_g + "g") : "0g";
+  rawJson.nutrition_facts = nf;
+
+  const { score, reason, safetyLevel } = calculateHealthScore(rawJson);
+
+  const finalResult: IngredientAnalysis = {
+    product_name: rawJson.product_name || productName,
+    brand: rawJson.brand || brand,
+    health_score: score,
+    health_score_reason: reason,
+    safety_level: safetyLevel,
+    description: rawJson.description || "Food product label analysis.",
+    panel_status: "extracted",
+    ingredients: rawJson.ingredients || [],
+    additives: rawJson.additives || [],
+    allergens: rawJson.allergens_declared || [],
+    allergens_declared: rawJson.allergens_declared || [],
+    nutrition_facts: rawJson.nutrition_facts,
+    recommendations: rawJson.recommendations || [],
+    alternatives_detailed: rawJson.alternatives_detailed || [],
+    upf_score: rawJson.upf_score || 3,
+    upf_reason: rawJson.upf_reason,
+    glycemic_index_estimate: rawJson.glycemic_index_estimate || "medium",
+    glycemic_reason: rawJson.glycemic_reason,
+  };
+
+  return applyPreferences(finalResult, userPreferences);
 }
+
+export async function analyzeLabel(
+  base64Image: string,
+  userPreferences: string[] = [],
+  filename: string = "",
+  productName: string = "",
+  preferredLanguage: string = "en"
+): Promise<IngredientAnalysis> {
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  if (!geminiApiKey) {
+    throw new Error("AI Vision model is temporarily unavailable. Please verify API configuration.");
+  }
+
+  return await analyzeLabelWithGemini(base64Image, userPreferences, preferredLanguage);
+}
+
+export const MOCK_PRODUCTS: IngredientAnalysis[] = [
+  SAMPLE_PRODUCTS.sample_cookies,
+  SAMPLE_PRODUCTS.sample_oats
+];

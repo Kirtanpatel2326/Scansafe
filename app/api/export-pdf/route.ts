@@ -35,113 +35,216 @@ export async function GET(request: Request) {
       }
 
       const res = scan.result_json
-      title = `Report - ${res.product_name || 'Scan'}`
+      const isComparison = scan.barcode?.startsWith('COMPARE:')
 
-      const additivesRows = Array.isArray(res.additives) && res.additives.length > 0 
-        ? res.additives.map((add: any) => `
+      if (isComparison) {
+        title = `Comparison Report - ${res.product_a.brand} vs ${res.product_b.brand}`
+
+        const tableRows = Object.entries(res.comparison_table || {}).map(([field, values]: any) => `
           <tr>
-            <td style="font-weight:bold;">${add.name} ${add.code ? `(${add.code})` : ''}</td>
-            <td class="badge risk-${add.risk}">${add.risk.toUpperCase()}</td>
-            <td>${add.description}</td>
-            <td style="font-size:11px;color:#555;">${add.source || 'Standard Reference'}</td>
+            <td style="font-weight:bold;text-transform:capitalize;">${field.replace('_', ' ')}</td>
+            <td>${values.a}</td>
+            <td>${values.b}</td>
           </tr>
         `).join('')
-        : '<tr><td colspan="4" style="text-align:center;color:#666;">No chemical additives or E-numbers identified.</td></tr>'
 
-      const ingredientsList = Array.isArray(res.ingredients)
-        ? res.ingredients.map((ing: any) => `
-          <span class="ing-item status-${ing.status}">
-            ${ing.name} ${ing.status !== 'safe' ? `(${ing.status})` : ''}
-          </span>
-        `).join(', ')
-        : 'Not parsed'
+        const highlightsA = res.product_a.highlights.map((h: string) => `<li>${h}</li>`).join('')
+        const highlightsB = res.product_b.highlights.map((h: string) => `<li>${h}</li>`).join('')
 
-      dataHtml = `
-        <div class="header-main">
-          <h1>CLINICAL INGREDIENTS AUDIT REPORT</h1>
-          <p class="subtitle">ScanSafe ULTRA Food Intelligence Analytics</p>
-        </div>
-
-        <div class="section-grid">
-          <div class="grid-card">
-            <h3>Subject Profile</h3>
-            <table class="clinical-table-mini">
-              <tr><th>Account Email</th><td>${user.email}</td></tr>
-              <tr><th>Scan Timestamp</th><td>${new Date(scan.created_at).toLocaleString()}</td></tr>
-              <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
-            </table>
+        dataHtml = `
+          <div class="header-main">
+            <h1>CLINICAL SIDE-BY-SIDE COMPARISON REPORT</h1>
+            <p class="subtitle">ScanSafe ULTRA Food Intelligence Analytics</p>
           </div>
 
-          <div class="grid-card">
-            <h3>Product Overview</h3>
-            <table class="clinical-table-mini">
-              <tr><th>Product Name</th><td><strong>${res.product_name}</strong></td></tr>
-              <tr><th>Manufacturer / Brand</th><td>${res.brand}</td></tr>
-              <tr><th>UPF NOVA Classification</th><td><strong>NOVA Group ${res.upf_score || '4 (Ultra-Processed)'}</strong></td></tr>
-            </table>
-          </div>
-        </div>
-
-        <div class="section-main">
-          <div class="score-container">
-            <div class="score-circle">
-              <span class="score-num">${res.health_score}</span>
-              <span class="score-lbl">Score / 100</span>
+          <div class="section-grid">
+            <div class="grid-card">
+              <h3>Subject Profile</h3>
+              <table class="clinical-table-mini">
+                <tr><th>Account Email</th><td>${user.email}</td></tr>
+                <tr><th>Scan Timestamp</th><td>${new Date(scan.created_at).toLocaleString()}</td></tr>
+                <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
+              </table>
             </div>
-            <div class="score-summary">
-              <h3>Diagnostic Summary</h3>
-              <p>Safety Evaluation Status: <strong style="text-transform:uppercase;" class="risk-${res.safety_level}">${res.safety_level}</strong></p>
-              <p>${res.description}</p>
+
+            <div class="grid-card">
+              <h3>Winner Evaluation</h3>
+              <table class="clinical-table-mini">
+                <tr><th>Evaluated Choice</th><td><strong>Product A vs Product B</strong></td></tr>
+                <tr><th>Winner Selected</th><td><strong>${res.winner === 'tie' ? 'Tie' : `Product ${res.winner}`}</strong></td></tr>
+                <tr><th>Verdict Title</th><td>${res.winner === 'A' ? `${res.product_a.brand} ${res.product_a.name}` : res.winner === 'B' ? `${res.product_b.brand} ${res.product_b.name}` : 'Equal Quality'}</td></tr>
+              </table>
             </div>
           </div>
-        </div>
 
-        <div class="section-main">
-          <h3>Full Ingredients Breakdown</h3>
-          <div style="line-height:1.6;margin-top:10px;">
-            ${ingredientsList}
+          <div class="section-main">
+            <h3>Comparison Rationale</h3>
+            <p style="font-size:13px;line-height:1.6;color:#222;font-weight:500;">${res.winner_reason}</p>
           </div>
-        </div>
 
-        <div class="section-main">
-          <h3>Additives & E-Numbers Audit</h3>
-          <table class="clinical-table">
-            <thead>
-              <tr>
-                <th>Additive</th>
-                <th>Hazard Level</th>
-                <th>Risk Evaluation</th>
-                <th>Citing Agency</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${additivesRows}
-            </tbody>
-          </table>
-        </div>
+          <div class="section-grid">
+            <div class="grid-card">
+              <h3 class="risk-${res.product_a.safety_level}">Product A - ${res.product_a.brand}</h3>
+              <p style="font-size:12px;margin:4px 0 10px 0;color:#666;">${res.product_a.name}</p>
+              <table class="clinical-table-mini" style="margin-bottom:12px;">
+                <tr><th>Health Score</th><td><strong>${res.product_a.health_score} / 100</strong></td></tr>
+                <tr><th>Safety Level</th><td style="text-transform:uppercase;" class="risk-${res.product_a.safety_level}"><strong>${res.product_a.safety_level}</strong></td></tr>
+              </table>
+              <h4 style="font-size:11px;text-transform:uppercase;color:#555;margin-bottom:6px;">Safety Highlights</h4>
+              <ul style="font-size:12px;padding-left:16px;margin:0;line-height:1.5;color:#444;">
+                ${highlightsA}
+              </ul>
+            </div>
 
-        <div class="section-grid">
-          <div class="grid-card">
-            <h3>Toxicological Hazard Summary</h3>
-            <table class="clinical-table-mini">
-              <tr><th>Microplastics Exposure Risk</th><td class="risk-${res.microplastics_risk || 'medium'}">${(res.microplastics_risk || 'medium').toUpperCase()}</td></tr>
-              <tr><th>Packaging Concern Details</th><td>${res.microplastics_reason || 'Polyethylene packaging material assessment.'}</td></tr>
-              <tr><th>Soluble Carbon footprint</th><td>${res.sustainability_grade || 'C'} (${res.sustainability_reason || 'Estimated packaging footprint.'})</td></tr>
+            <div class="grid-card">
+              <h3 class="risk-${res.product_b.safety_level}">Product B - ${res.product_b.brand}</h3>
+              <p style="font-size:12px;margin:4px 0 10px 0;color:#666;">${res.product_b.name}</p>
+              <table class="clinical-table-mini" style="margin-bottom:12px;">
+                <tr><th>Health Score</th><td><strong>${res.product_b.health_score} / 100</strong></td></tr>
+                <tr><th>Safety Level</th><td style="text-transform:uppercase;" class="risk-${res.product_b.safety_level}"><strong>${res.product_b.safety_level}</strong></td></tr>
+              </table>
+              <h4 style="font-size:11px;text-transform:uppercase;color:#555;margin-bottom:6px;">Safety Highlights</h4>
+              <ul style="font-size:12px;padding-left:16px;margin:0;line-height:1.5;color:#444;">
+                ${highlightsB}
+              </ul>
+            </div>
+          </div>
+
+          <div class="section-main">
+            <h3>Head-to-Head Nutrition Comparison</h3>
+            <table class="clinical-table">
+              <thead>
+                <tr>
+                  <th>Metric / Field</th>
+                  <th>Product A (${res.product_a.brand})</th>
+                  <th>Product B (${res.product_b.brand})</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows}
+              </tbody>
             </table>
           </div>
 
-          <div class="grid-card">
-            <h3>Metabolic Impact</h3>
-            <table class="clinical-table-mini">
-              <tr><th>Glycemic Index Rating</th><td class="risk-${res.glycemic_index_estimate || 'medium'}">${(res.glycemic_index_estimate || 'medium').toUpperCase()}</td></tr>
-              <tr><th>Cardiovascular risk (Heart)</th><td>${res.health_risk_breakdown?.heart || 'low'}</td></tr>
-              <tr><th>Diabetes risk (Metabolic)</th><td>${res.health_risk_breakdown?.diabetes || 'low'}</td></tr>
-              <tr><th>Gut Inflammatory Index</th><td>${res.health_risk_breakdown?.gut_health || 'low'}</td></tr>
+          <div class="section-grid">
+            <div class="grid-card">
+              <h3 style="font-size:11px;color:#555;text-transform:uppercase;">English Verdict</h3>
+              <p style="font-size:11.5px;line-height:1.5;color:#333;">${res.verdict_english}</p>
+            </div>
+            <div class="grid-card">
+              <h3 style="font-size:11px;color:#555;text-transform:uppercase;">Hindi Verdict</h3>
+              <p style="font-size:11.5px;line-height:1.5;color:#333;">${res.verdict_hindi}</p>
+            </div>
+          </div>
+        `
+      } else {
+        title = `Report - ${res.product_name || 'Scan'}`
+
+        const additivesRows = Array.isArray(res.additives) && res.additives.length > 0 
+          ? res.additives.map((add: any) => `
+            <tr>
+              <td style="font-weight:bold;">${add.name} ${add.code ? `(${add.code})` : ''}</td>
+              <td class="badge risk-${add.risk}">${add.risk.toUpperCase()}</td>
+              <td>${add.description}</td>
+              <td style="font-size:11px;color:#555;">${add.source || 'Standard Reference'}</td>
+            </tr>
+          `).join('')
+          : '<tr><td colspan="4" style="text-align:center;color:#666;">No chemical additives or E-numbers identified.</td></tr>'
+
+        const ingredientsList = Array.isArray(res.ingredients)
+          ? res.ingredients.map((ing: any) => `
+            <span class="ing-item status-${ing.status}">
+              ${ing.name} ${ing.status !== 'safe' ? `(${ing.status})` : ''}
+            </span>
+          `).join(', ')
+          : 'Not parsed'
+
+        dataHtml = `
+          <div class="header-main">
+            <h1>CLINICAL INGREDIENTS AUDIT REPORT</h1>
+            <p class="subtitle">ScanSafe ULTRA Food Intelligence Analytics</p>
+          </div>
+
+          <div class="section-grid">
+            <div class="grid-card">
+              <h3>Subject Profile</h3>
+              <table class="clinical-table-mini">
+                <tr><th>Account Email</th><td>${user.email}</td></tr>
+                <tr><th>Scan Timestamp</th><td>${new Date(scan.created_at).toLocaleString()}</td></tr>
+                <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
+              </table>
+            </div>
+
+            <div class="grid-card">
+              <h3>Product Overview</h3>
+              <table class="clinical-table-mini">
+                <tr><th>Product Name</th><td><strong>${res.product_name}</strong></td></tr>
+                <tr><th>Manufacturer / Brand</th><td>${res.brand}</td></tr>
+                <tr><th>UPF NOVA Classification</th><td><strong>NOVA Group ${res.upf_score || '4 (Ultra-Processed)'}</strong></td></tr>
+              </table>
+            </div>
+          </div>
+
+          <div class="section-main">
+            <div class="score-container">
+              <div class="score-circle">
+                <span class="score-num">${res.health_score}</span>
+                <span class="score-lbl">Score / 100</span>
+              </div>
+              <div class="score-summary">
+                <h3>Diagnostic Summary</h3>
+                <p>Safety Evaluation Status: <strong style="text-transform:uppercase;" class="risk-${res.safety_level}">${res.safety_level}</strong></p>
+                <p>${res.description}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-main">
+            <h3>Full Ingredients Breakdown</h3>
+            <div style="line-height:1.6;margin-top:10px;">
+              ${ingredientsList}
+            </div>
+          </div>
+
+          <div class="section-main">
+            <h3>Additives & E-Numbers Audit</h3>
+            <table class="clinical-table">
+              <thead>
+                <tr>
+                  <th>Additive</th>
+                  <th>Hazard Level</th>
+                  <th>Risk Evaluation</th>
+                  <th>Citing Agency</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${additivesRows}
+              </tbody>
             </table>
           </div>
-        </div>
-      `
-    } else if (mealId) {
+
+          <div class="section-grid">
+            <div class="grid-card">
+              <h3>Toxicological Hazard Summary</h3>
+              <table class="clinical-table-mini">
+                <tr><th>Microplastics Exposure Risk</th><td class="risk-${res.microplastics_risk || 'medium'}">${(res.microplastics_risk || 'medium').toUpperCase()}</td></tr>
+                <tr><th>Packaging Concern Details</th><td>${res.microplastics_reason || 'Polyethylene packaging material assessment.'}</td></tr>
+                <tr><th>Soluble Carbon footprint</th><td>${res.sustainability_grade || 'C'} (${res.sustainability_reason || 'Estimated packaging footprint.'})</td></tr>
+              </table>
+            </div>
+
+            <div class="grid-card">
+              <h3>Metabolic Impact</h3>
+              <table class="clinical-table-mini">
+                <tr><th>Glycemic Index Rating</th><td class="risk-${res.glycemic_index_estimate || 'medium'}">${(res.glycemic_index_estimate || 'medium').toUpperCase()}</td></tr>
+                <tr><th>Cardiovascular risk (Heart)</th><td>${res.health_risk_breakdown?.heart || 'low'}</td></tr>
+                <tr><th>Diabetes risk (Metabolic)</th><td>${res.health_risk_breakdown?.diabetes || 'low'}</td></tr>
+                <tr><th>Gut Inflammatory Index</th><td>${res.health_risk_breakdown?.gut_health || 'low'}</td></tr>
+              </table>
+            </div>
+          </div>
+        `
+      }} else if (mealId) {
       const { data: meal, error } = await supabase
         .from('meal_compositions')
         .select('*')
