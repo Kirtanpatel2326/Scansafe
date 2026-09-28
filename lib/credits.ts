@@ -37,6 +37,7 @@ export interface CreditFinalizeResult {
   opId: string;
   newBalance?: number;
   error?: string;
+  alreadyFinalized?: boolean;
 }
 
 export interface CreditReleaseResult {
@@ -44,6 +45,7 @@ export interface CreditReleaseResult {
   userId: string;
   opId: string;
   error?: string;
+  alreadyReleased?: boolean;
 }
 
 /**
@@ -65,8 +67,41 @@ export async function getCreditBalance(supabase: any, userId: string): Promise<n
 }
 
 /**
+ * Retrieves reservation record by user ID and operation ID.
+ */
+export async function getReservationRecord(userId: string, opId: string): Promise<{
+  exists: boolean;
+  status?: "reserved" | "finalized" | "released" | "expired";
+  amount?: number;
+  action?: string;
+  expiresAt?: string;
+}> {
+  if (!userId || !opId) return { exists: false };
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
+    .from("credit_reservations")
+    .select("status, amount, action, expires_at")
+    .eq("user_id", userId)
+    .eq("op_id", opId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { exists: false };
+  }
+
+  return {
+    exists: true,
+    status: data.status,
+    amount: data.amount,
+    action: data.action,
+    expiresAt: data.expires_at
+  };
+}
+
+/**
  * Atomically reserves credits before executing an AI analysis action.
  * Two-phase transaction: reserve -> finalize (on success) or release (on error).
+ * Fails closed immediately on RPC error without non-transactional client-side fallbacks.
  */
 export async function reserveCredits(
   userId: string,
@@ -89,7 +124,6 @@ export async function reserveCredits(
   const adminClient = createAdminClient();
 
   try {
-    // 1. Primary: PostgreSQL Transaction RPC
     const { data: rpcData, error: rpcError } = await adminClient.rpc("reserve_credits", {
       p_user_id: userId,
       p_amount: amount,
@@ -98,54 +132,29 @@ export async function reserveCredits(
       p_description: desc
     });
 
-    if (!rpcError && rpcData) {
-      if (!rpcData.success) {
-        return {
-          success: false,
-          opId: stableOpId,
-          userId,
-          amount,
-          error: rpcData.error === "INSUFFICIENT_CREDITS"
-            ? `Insufficient scan credits. Required: ${amount}, Available: ${rpcData.available_credits ?? 0}. Please refill your scan pack.`
-            : (rpcData.message || rpcData.error || "Reservation failed")
-        };
-      }
-
-      return {
-        success: true,
-        opId: stableOpId,
-        userId,
-        amount,
-        availableCreditsAfter: rpcData.available_credits_after,
-        alreadyReserved: rpcData.already_reserved
-      };
-    }
-
-    // 2. Fallback if RPC function not found: Database row-locking query simulation
-    const { data: profile, error: fetchErr } = await adminClient
-      .from("profiles")
-      .select("id, scan_credits")
-      .eq("id", userId)
-      .single();
-
-    if (fetchErr || !profile) {
+    if (rpcError) {
+      console.error("reserve_credits RPC error:", rpcError);
       return {
         success: false,
         opId: stableOpId,
         userId,
         amount,
-        error: "User profile not found."
+        error: `Database reservation failed: ${rpcError.message || "RPC execution error"}`
       };
     }
 
-    const currentBalance = typeof profile.scan_credits === "number" ? profile.scan_credits : 0;
-    if (currentBalance < amount) {
+    if (!rpcData || !rpcData.success) {
+      const errCode = rpcData?.error || "RESERVATION_FAILED";
+      const errMsg = rpcData?.error === "INSUFFICIENT_CREDITS"
+        ? `Insufficient scan credits. Required: ${amount}, Available: ${rpcData.available_credits ?? 0}. Please refill your scan pack.`
+        : (rpcData?.message || rpcData?.error || "Credit reservation failed");
+
       return {
         success: false,
         opId: stableOpId,
         userId,
         amount,
-        error: `Insufficient scan credits. Required: ${amount}, Available: ${currentBalance}. Please refill your scan pack.`
+        error: errMsg
       };
     }
 
@@ -154,7 +163,8 @@ export async function reserveCredits(
       opId: stableOpId,
       userId,
       amount,
-      availableCreditsAfter: currentBalance - amount
+      availableCreditsAfter: rpcData.available_credits_after,
+      alreadyReserved: rpcData.already_reserved
     };
   } catch (err: any) {
     console.error("Credit reservation exception:", err);
@@ -171,11 +181,21 @@ export async function reserveCredits(
 /**
  * Finalizes a reserved credit deduction upon successful scan completion.
  * Records the debit in credit_ledger and updates profile balance atomically.
+ * Uses the reservation's stored amount, user, and action; never assumes 1 credit.
  */
 export async function finalizeReservation(
   userId: string,
   opId: string
 ): Promise<CreditFinalizeResult> {
+  if (!userId || !opId) {
+    return {
+      success: false,
+      userId,
+      opId,
+      error: "User ID and Operation ID are required for finalization"
+    };
+  }
+
   const adminClient = createAdminClient();
 
   try {
@@ -184,62 +204,61 @@ export async function finalizeReservation(
       p_op_id: opId
     });
 
-    if (!rpcError && rpcData) {
-      if (!rpcData.success) {
-        return {
-          success: false,
-          userId,
-          opId,
-          error: rpcData.error || "Failed to finalize credit deduction"
-        };
-      }
+    if (rpcError) {
+      console.error("finalize_reservation RPC error:", rpcError);
       return {
-        success: true,
+        success: false,
         userId,
         opId,
-        newBalance: rpcData.new_balance
+        error: `Database finalization error: ${rpcError.message}`
       };
     }
 
-    // Fallback: Read profile & update ledger
-    const { data: profile } = await adminClient
-      .from("profiles")
-      .select("scan_credits")
-      .eq("id", userId)
-      .single();
+    if (!rpcData || !rpcData.success) {
+      return {
+        success: false,
+        userId,
+        opId,
+        error: rpcData?.error || "Failed to finalize credit deduction"
+      };
+    }
 
-    const current = profile?.scan_credits ?? 0;
-    const newBal = Math.max(0, current - 1);
-
-    await adminClient
-      .from("profiles")
-      .update({ scan_credits: newBal })
-      .eq("id", userId);
-
-    await adminClient.from("credit_ledger").insert({
-      user_id: userId,
-      amount: -1,
-      balance_after: newBal,
-      action: "scan",
-      reference_id: opId,
-      description: `Finalized scan (${opId})`
-    });
-
-    return { success: true, userId, opId, newBalance: newBal };
+    return {
+      success: true,
+      userId,
+      opId,
+      newBalance: rpcData.new_balance,
+      alreadyFinalized: rpcData.already_finalized
+    };
   } catch (err: any) {
     console.error("Credit finalization exception:", err);
-    return { success: false, userId, opId, error: err.message || "Finalize error" };
+    return {
+      success: false,
+      userId,
+      opId,
+      error: err.message || "Finalize error"
+    };
   }
 }
 
 /**
  * Releases a reserved credit deduction back to the user if the scan/AI process fails.
+ * Returns strict failure if database release cannot be confirmed.
  */
 export async function releaseReservation(
   userId: string,
   opId: string,
   reason: string = "Scan processing error"
 ): Promise<CreditReleaseResult> {
+  if (!userId || !opId) {
+    return {
+      success: false,
+      userId,
+      opId,
+      error: "User ID and Operation ID are required for release"
+    };
+  }
+
   const adminClient = createAdminClient();
 
   try {
@@ -249,19 +268,44 @@ export async function releaseReservation(
       p_reason: reason
     });
 
-    if (!rpcError && rpcData && rpcData.success) {
-      return { success: true, userId, opId };
+    if (rpcError) {
+      console.error("release_reservation RPC error:", rpcError);
+      return {
+        success: false,
+        userId,
+        opId,
+        error: `Database release error: ${rpcError.message}`
+      };
     }
 
-    return { success: true, userId, opId };
+    if (!rpcData || !rpcData.success) {
+      return {
+        success: false,
+        userId,
+        opId,
+        error: rpcData?.error || "Failed to release reservation"
+      };
+    }
+
+    return {
+      success: true,
+      userId,
+      opId,
+      alreadyReleased: rpcData.already_released
+    };
   } catch (err: any) {
     console.error("Credit release exception:", err);
-    return { success: false, userId, opId, error: err.message };
+    return {
+      success: false,
+      userId,
+      opId,
+      error: err.message || "Failed to release reservation."
+    };
   }
 }
 
 /**
- * Legacy wrapper: checks and deducts credits atomically.
+ * Wrapper for direct single-step deduction when two-phase is not needed.
  */
 export async function checkAndDeductCredits(
   userId: string,
@@ -283,18 +327,28 @@ export async function checkAndDeductCredits(
   }
 
   const fin = await finalizeReservation(userId, res.opId!);
+  if (!fin.success) {
+    return {
+      success: false,
+      userId,
+      amount,
+      previousBalance: 0,
+      newBalance: 0,
+      error: fin.error
+    };
+  }
+
   return {
-    success: fin.success,
+    success: true,
     userId,
     amount,
     previousBalance: (fin.newBalance ?? 0) + amount,
-    newBalance: fin.newBalance ?? 0,
-    error: fin.error
+    newBalance: fin.newBalance ?? 0
   };
 }
 
 /**
- * Refunds credits back to user profile and logs audit entry in credit_ledger.
+ * Refunds credits back to user profile and logs audit entry in credit_ledger atomically via RPC.
  */
 export async function refundCredits(
   userId: string,
@@ -302,7 +356,7 @@ export async function refundCredits(
   referenceId?: string | null,
   reason?: string
 ): Promise<boolean> {
-  if (amount <= 0) return false;
+  if (amount <= 0 || !userId) return false;
   const adminClient = createAdminClient();
 
   try {
@@ -313,33 +367,10 @@ export async function refundCredits(
       p_reason: reason || `Refunded ${amount} credit(s)`
     });
 
-    if (!rpcError && rpcData && rpcData.success) {
-      return true;
+    if (rpcError || !rpcData || !rpcData.success) {
+      console.error("refund_credits RPC error:", rpcError || rpcData);
+      return false;
     }
-
-    // Direct fallback
-    const { data: profile } = await adminClient
-      .from("profiles")
-      .select("scan_credits")
-      .eq("id", userId)
-      .single();
-
-    const currentBalance = typeof profile?.scan_credits === "number" ? profile.scan_credits : 0;
-    const newBalance = currentBalance + amount;
-
-    await adminClient
-      .from("profiles")
-      .update({ scan_credits: newBalance })
-      .eq("id", userId);
-
-    await adminClient.from("credit_ledger").insert({
-      user_id: userId,
-      amount,
-      balance_after: newBalance,
-      action: "refund",
-      reference_id: referenceId || `refund_${Date.now()}`,
-      description: reason || `Refunded ${amount} credit(s)`
-    });
 
     return true;
   } catch (err) {
@@ -349,7 +380,8 @@ export async function refundCredits(
 }
 
 /**
- * Idempotently fulfills a scan pack purchase via atomic database transaction.
+ * Idempotently fulfills a scan pack purchase via atomic database transaction RPC.
+ * Fails closed immediately without non-transactional direct fallbacks.
  */
 export async function fulfillPackPurchase(
   userId: string,
@@ -380,7 +412,6 @@ export async function fulfillPackPurchase(
   const adminClient = createAdminClient();
 
   try {
-    // 1. Execute atomic fulfillment RPC
     const { data: rpcData, error: rpcError } = await adminClient.rpc("fulfill_purchase", {
       p_user_id: userId,
       p_pack_id: pack.id,
@@ -390,98 +421,30 @@ export async function fulfillPackPurchase(
       p_description: `Purchased ${pack.name} (${pack.scans} scans) for ₹${amountPaidInr || pack.priceInr}`
     });
 
-    if (!rpcError && rpcData) {
-      if (!rpcData.success) {
-        return {
-          success: false,
-          creditsAdded: 0,
-          totalCredits: 0,
-          error: rpcData.error || "Fulfillment transaction failed"
-        };
-      }
-
-      return {
-        success: true,
-        creditsAdded: rpcData.credits_added || pack.scans,
-        totalCredits: rpcData.total_credits,
-        alreadyFulfilled: rpcData.already_fulfilled
-      };
-    }
-
-    // 2. Direct fallback with idempotency check
-    const { data: existingLedger } = await adminClient
-      .from("credit_ledger")
-      .select("id, balance_after")
-      .eq("user_id", userId)
-      .eq("reference_id", paymentId)
-      .eq("action", "purchase")
-      .maybeSingle();
-
-    if (existingLedger) {
-      const { data: profile } = await adminClient
-        .from("profiles")
-        .select("scan_credits")
-        .eq("id", userId)
-        .single();
-
-      return {
-        success: true,
-        creditsAdded: pack.scans,
-        totalCredits: profile?.scan_credits || existingLedger.balance_after,
-        alreadyFulfilled: true
-      };
-    }
-
-    const { data: profile, error: fetchErr } = await adminClient
-      .from("profiles")
-      .select("id, scan_credits")
-      .eq("id", userId)
-      .single();
-
-    if (fetchErr || !profile) {
+    if (rpcError) {
+      console.error("fulfill_purchase RPC error:", rpcError);
       return {
         success: false,
         creditsAdded: 0,
         totalCredits: 0,
-        error: "User profile not found"
+        error: `Database fulfillment error: ${rpcError.message}`
       };
     }
 
-    const currentCredits = typeof profile.scan_credits === "number" ? profile.scan_credits : 0;
-    const newCredits = currentCredits + pack.scans;
-
-    const { error: updateErr } = await adminClient
-      .from("profiles")
-      .update({
-        scan_credits: newCredits,
-        plan: "pro",
-        plan_type: pack.id,
-        razorpay_subscription_id: paymentId
-      })
-      .eq("id", userId);
-
-    if (updateErr) {
+    if (!rpcData || !rpcData.success) {
       return {
         success: false,
         creditsAdded: 0,
-        totalCredits: currentCredits,
-        error: "Database profile update failed"
+        totalCredits: 0,
+        error: rpcData?.error || "Fulfillment transaction failed"
       };
     }
 
-    await adminClient.from("credit_ledger").insert({
-      user_id: userId,
-      amount: pack.scans,
-      balance_after: newCredits,
-      action: "purchase",
-      reference_id: paymentId,
-      description: `Purchased ${pack.name} (${pack.scans} scans)`
-    });
-
     return {
       success: true,
-      creditsAdded: pack.scans,
-      totalCredits: newCredits
+      creditsAdded: rpcData.credits_added || pack.scans,
+      totalCredits: rpcData.total_credits,
+      alreadyFulfilled: rpcData.already_fulfilled
     };
   } catch (err: any) {
     console.error("fulfillPackPurchase error:", err);
@@ -491,5 +454,47 @@ export async function fulfillPackPurchase(
       totalCredits: 0,
       error: err.message || "Fulfillment exception"
     };
+  }
+}
+
+/**
+ * Atomically fulfills an order from Razorpay webhook in a single PostgreSQL transaction.
+ * Updates payment_orders status to 'fulfilled', credits profile scan_credits, and records ledger entry.
+ */
+export async function fulfillOrderPayment(
+  orderId: string,
+  providerPaymentId: string | null,
+  creditsToGrant: number,
+  packId: string,
+  description: string
+): Promise<{ success: boolean; totalCredits?: number; creditsAdded?: number; error?: string; alreadyFulfilled?: boolean }> {
+  const adminClient = createAdminClient();
+  try {
+    const { data: rpcData, error: rpcError } = await adminClient.rpc("fulfill_order_payment", {
+      p_order_id: orderId,
+      p_payment_id: providerPaymentId,
+      p_credits_to_grant: creditsToGrant,
+      p_pack_id: packId,
+      p_description: description
+    });
+
+    if (rpcError) {
+      console.error("fulfill_order_payment RPC error:", rpcError);
+      return { success: false, error: rpcError.message };
+    }
+
+    if (!rpcData || !rpcData.success) {
+      return { success: false, error: rpcData?.error || "Order fulfillment failed" };
+    }
+
+    return {
+      success: true,
+      creditsAdded: rpcData.credits_added || creditsToGrant,
+      totalCredits: rpcData.total_credits,
+      alreadyFulfilled: !!rpcData.already_fulfilled
+    };
+  } catch (err: any) {
+    console.error("fulfillOrderPayment error:", err);
+    return { success: false, error: err.message || "Order fulfillment exception" };
   }
 }

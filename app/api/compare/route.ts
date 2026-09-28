@@ -1,15 +1,17 @@
 import { createClient } from "@/lib/supabase-server";
 import { reserveCredits, finalizeReservation, releaseReservation } from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
-import { ComparisonResultSchema } from "@/lib/claude";
+import { ComparisonResultSchema, calculateHealthScore, cleanNumericValue } from "@/lib/claude";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import axios from "axios";
 import { z } from "zod";
+import crypto from "crypto";
 
-export const maxDuration = 60;
+export const maxDuration = 60; // Prevent Vercel execution timeouts
 
 const ComparePayloadSchema = z.object({
+  idempotencyKey: z.string().trim().max(128).optional(),
   imageA: z.string().min(50, "Product image A is required"),
   imageB: z.string().min(50, "Product image B is required"),
   preferences: z.array(z.string()).optional().default([])
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient();
 
-    // 1. Verify session
+    // 1. Authenticate user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({
@@ -64,9 +66,66 @@ export async function POST(request: Request) {
     }
 
     const { imageA, imageB, preferences } = parsed.data;
+    const headerIdempotencyKey = request.headers.get("x-idempotency-key")?.trim() || "";
+    let idempotencyKey = parsed.data.idempotencyKey || headerIdempotencyKey;
+    if (!idempotencyKey) {
+      const normalizedPayload = {
+        imageAHash: crypto.createHash("sha256").update(imageA).digest("hex"),
+        imageBHash: crypto.createHash("sha256").update(imageB).digest("hex"),
+        preferences: Array.isArray(preferences) ? [...preferences].sort() : []
+      };
+      const hash = crypto.createHash("sha256").update(`${user.id}:${JSON.stringify(normalizedPayload)}`).digest("hex").slice(0, 24);
+      idempotencyKey = `det_${hash}`;
+    }
 
-    // 3. Atomic Credit Reservation (2 credits for compare)
-    const opId = `op_comp_${user.id.slice(0, 8)}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    // 3. IDEMPOTENCY CHECK & ATOMIC CREDIT RESERVATION (2 credits for compare)
+    const opId = `op_comp_${user.id.slice(0, 8)}_${idempotencyKey}`;
+
+    // Check if comparison with this op_id already exists in history
+    const { data: existingScan } = await supabase
+      .from("scans")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("op_id", opId)
+      .maybeSingle();
+
+    if (existingScan) {
+      if (existingScan.accounting_status === "completed") {
+        return NextResponse.json({
+          success: true,
+          comparison: existingScan.result_json,
+          scanId: existingScan.id,
+          already_completed: true
+        });
+      } else if (existingScan.accounting_status === "accounting_pending") {
+        const finalization = await finalizeReservation(user.id, opId);
+        if (finalization.success) {
+          await supabase
+            .from("scans")
+            .update({ accounting_status: "completed" })
+            .eq("id", existingScan.id);
+
+          return NextResponse.json({
+            success: true,
+            comparison: existingScan.result_json,
+            scanId: existingScan.id,
+            remainingCredits: finalization.newBalance,
+            recovered: true
+          });
+        } else {
+          return NextResponse.json({
+            success: false,
+            status: "accounting_pending",
+            error: "ACCOUNTING_FINALIZATION_FAILED",
+            opId,
+            scanId: existingScan.id,
+            message: `Comparison analysis is saved, but credit finalization failed: ${finalization.error}. Please retry.`,
+            comparison: existingScan.result_json
+          }, { status: 500 });
+        }
+      }
+    }
+
     const reservation = await reserveCredits(
       user.id,
       CREDIT_COSTS.COMPARE,
@@ -178,47 +237,161 @@ JSON.stringify({
       throw new Error("Failed to parse comparison response as JSON");
     }
 
-    // Runtime Schema Validation
+    // Runtime Schema Validation (strictly fail-closed without raw bypass)
     const validated = ComparisonResultSchema.safeParse(rawComparison);
-    const comparisonData = validated.success ? validated.data : rawComparison;
+    if (!validated.success) {
+      throw new Error(`Comparison AI returned invalid schema: ${validated.error.message}`);
+    }
+    const comparisonData = validated.data;
+
+    // Calculate objective scores using the single canonical calculateHealthScore implementation
+    const factsA = {
+      product_name: comparisonData.product_a.name,
+      brand: comparisonData.product_a.brand,
+      panel_status: comparisonData.product_a.health_score === null ? ("unreadable" as const) : ("extracted" as const),
+      nutrition_facts: {
+        panel_status: "extracted" as const,
+        per_100g: {
+          calories: cleanNumericValue(comparisonData.comparison_table?.calories?.a),
+          sugar_g: cleanNumericValue(comparisonData.comparison_table?.sugar?.a),
+          sodium_mg: cleanNumericValue(comparisonData.comparison_table?.sodium?.a),
+          protein_g: cleanNumericValue(comparisonData.comparison_table?.protein?.a),
+          fat_g: cleanNumericValue(comparisonData.comparison_table?.fat?.a),
+          fiber_g: cleanNumericValue(comparisonData.comparison_table?.fiber?.a),
+        }
+      }
+    };
+
+    const factsB = {
+      product_name: comparisonData.product_b.name,
+      brand: comparisonData.product_b.brand,
+      panel_status: comparisonData.product_b.health_score === null ? ("unreadable" as const) : ("extracted" as const),
+      nutrition_facts: {
+        panel_status: "extracted" as const,
+        per_100g: {
+          calories: cleanNumericValue(comparisonData.comparison_table?.calories?.b),
+          sugar_g: cleanNumericValue(comparisonData.comparison_table?.sugar?.b),
+          sodium_mg: cleanNumericValue(comparisonData.comparison_table?.sodium?.b),
+          protein_g: cleanNumericValue(comparisonData.comparison_table?.protein?.b),
+          fat_g: cleanNumericValue(comparisonData.comparison_table?.fat?.b),
+          fiber_g: cleanNumericValue(comparisonData.comparison_table?.fiber?.b),
+        }
+      }
+    };
+
+    const scoreResultA = calculateHealthScore(factsA);
+    const scoreResultB = calculateHealthScore(factsB);
+
+    if (scoreResultA.score !== null) {
+      comparisonData.product_a.health_score = scoreResultA.score;
+      comparisonData.product_a.safety_level = scoreResultA.safetyLevel as any;
+    }
+    if (scoreResultB.score !== null) {
+      comparisonData.product_b.health_score = scoreResultB.score;
+      comparisonData.product_b.safety_level = scoreResultB.safetyLevel as any;
+    }
+
+    // Determine deterministic winner based on calculated health score
+    if (scoreResultA.score === null && scoreResultB.score === null) {
+      comparisonData.winner = "undetermined";
+      comparisonData.winner_reason = "Both products lack sufficient nutritional evidence on their packaging to determine a winner.";
+    } else if (scoreResultA.score === null) {
+      comparisonData.winner = "B";
+      comparisonData.winner_reason = `${comparisonData.product_b.name} has verifiable nutrition facts (Score: ${scoreResultB.score}/100) while ${comparisonData.product_a.name} lacks sufficient label evidence.`;
+    } else if (scoreResultB.score === null) {
+      comparisonData.winner = "A";
+      comparisonData.winner_reason = `${comparisonData.product_a.name} has verifiable nutrition facts (Score: ${scoreResultA.score}/100) while ${comparisonData.product_b.name} lacks sufficient label evidence.`;
+    } else if (scoreResultA.score > scoreResultB.score) {
+      comparisonData.winner = "A";
+      comparisonData.winner_reason = `${comparisonData.product_a.name} achieves a higher health score (${scoreResultA.score} vs ${scoreResultB.score}) based on better macronutrient balance.`;
+    } else if (scoreResultB.score > scoreResultA.score) {
+      comparisonData.winner = "B";
+      comparisonData.winner_reason = `${comparisonData.product_b.name} achieves a higher health score (${scoreResultB.score} vs ${scoreResultA.score}) based on better macronutrient balance.`;
+    } else {
+      comparisonData.winner = "tie";
+      comparisonData.winner_reason = `Both products receive an identical nutritional health score of ${scoreResultA.score}/100.`;
+    }
+
+    // Determine representative health score and safety level
+    let representativeScore: number | null = null;
+    if (comparisonData.winner === "A" && comparisonData.product_a.health_score != null) {
+      representativeScore = comparisonData.product_a.health_score;
+    } else if (comparisonData.winner === "B" && comparisonData.product_b.health_score != null) {
+      representativeScore = comparisonData.product_b.health_score;
+    } else if (comparisonData.product_a.health_score != null) {
+      representativeScore = comparisonData.product_a.health_score;
+    } else if (comparisonData.product_b.health_score != null) {
+      representativeScore = comparisonData.product_b.health_score;
+    }
+
+    let representativeSafetyLevel = "moderate";
+    if (comparisonData.winner === "A") {
+      representativeSafetyLevel = comparisonData.product_a.safety_level || "safe";
+    } else if (comparisonData.winner === "B") {
+      representativeSafetyLevel = comparisonData.product_b.safety_level || "safe";
+    } else if (comparisonData.winner === "undetermined") {
+      representativeSafetyLevel = "insufficient_evidence";
+    }
 
     // Save comparison scan to history database
     let scanId = "";
-    try {
-      const { data: scanData } = await supabase
-        .from("scans")
-        .insert({
-          user_id: user.id,
-          product_name: (comparisonData.product_a?.name || "Product A") + " vs " + (comparisonData.product_b?.name || "Product B"),
-          barcode: "COMPARE:" + comparisonData.winner,
-          health_score: comparisonData.product_a?.health_score ?? comparisonData.product_b?.health_score ?? null,
-          safety_level: comparisonData.winner === "A" 
-            ? (comparisonData.product_a?.safety_level || "safe")
-            : comparisonData.winner === "B" 
-            ? (comparisonData.product_b?.safety_level || "safe")
-            : "moderate",
-          result_json: comparisonData
-        })
-        .select()
-        .single();
-      scanId = scanData?.id || "";
-    } catch (dbErr) {
+    const { data: scanData, error: dbErr } = await supabase
+      .from("scans")
+      .insert({
+        user_id: user.id,
+        op_id: opId,
+        accounting_status: "accounting_pending",
+        product_name: `${comparisonData.product_a?.name || "Product A"} vs ${comparisonData.product_b?.name || "Product B"}`,
+        barcode: `COMPARE:${comparisonData.winner}`,
+        health_score: representativeScore,
+        safety_level: representativeSafetyLevel,
+        result_json: comparisonData
+      })
+      .select()
+      .single();
+
+    if (dbErr) {
       console.error("Failed to save comparison to history database:", dbErr);
+    } else if (scanData) {
+      scanId = scanData.id;
     }
 
     // Finalize 2 credits deduction
-    let remainingCredits: number | undefined;
     if (activeReservationOpId) {
       const finalization = await finalizeReservation(user.id, activeReservationOpId);
-      remainingCredits = finalization.newBalance;
-      activeReservationOpId = null;
+      if (finalization.success) {
+        if (scanId) {
+          await supabase
+            .from("scans")
+            .update({ accounting_status: "completed" })
+            .eq("id", scanId);
+        }
+        activeReservationOpId = null;
+
+        return NextResponse.json({
+          success: true,
+          comparison: comparisonData,
+          scanId,
+          remainingCredits: finalization.newBalance
+        });
+      } else {
+        console.error("Credit finalization failed in comparison:", finalization.error);
+        return NextResponse.json({
+          success: false,
+          status: "accounting_pending",
+          error: "ACCOUNTING_FINALIZATION_FAILED",
+          opId: activeReservationOpId,
+          scanId,
+          message: `Comparison succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
+          comparison: comparisonData
+        }, { status: 500 });
+      }
     }
 
     return NextResponse.json({
       success: true,
       comparison: comparisonData,
-      scanId,
-      remainingCredits
+      scanId
     });
 
   } catch (err: any) {

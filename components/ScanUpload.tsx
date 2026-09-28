@@ -45,6 +45,13 @@ const MOCK_PRESETS = [
   { id: 'chobani-yogurt', name: 'Chobani Yogurt', brand: 'Chobani', emoji: '🥛', barcode: '894700010074' }
 ]
 
+function generateClientOpKey(prefix = 'scan'): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
+
 export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: ScanUploadProps) {
   const [activeSubTab, setActiveSubTab] = useState<'vision' | 'barcode' | 'batch'>('vision')
   const [dragActive, setDragActive] = useState(false)
@@ -53,6 +60,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
   const [productNameInput, setProductNameInput] = useState('')
   const [fileName, setFileName] = useState('')
   const [selectionRequired, setSelectionRequired] = useState(false)
+  const [activeOpKey, setActiveOpKey] = useState<string>(() => generateClientOpKey('scan'))
   
   // Barcode search input
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -241,13 +249,18 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         setBatchQueue([...updatedQueue])
 
         const base64 = await fileToBase64(updatedQueue[i].file)
+        const batchIdempotencyKey = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `batch_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 9)}`
         const response = await fetch('/api/analyze', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': batchIdempotencyKey
+          },
           body: JSON.stringify({
             image: base64,
             preferences: selectedPrefs,
-            filename: updatedQueue[i].file.name
+            filename: updatedQueue[i].file.name,
+            idempotencyKey: batchIdempotencyKey
           }),
         })
         const data = await response.json()
@@ -285,6 +298,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
 
   // Toggle dietary preference
   const togglePreference = (prefId: string) => {
+    setActiveOpKey(generateClientOpKey('scan'))
     setSelectedPrefs((prev) =>
       prev.includes(prefId) ? prev.filter((p) => p !== prefId) : [...prev, prefId]
     )
@@ -294,6 +308,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
   const startCamera = async () => {
     setIsCameraActive(true)
     setImagePreview(null)
+    setActiveOpKey(generateClientOpKey('scan'))
     try {
       let stream
       try {
@@ -374,6 +389,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
       }
 
       setImagePreview(dataUrl)
+      setActiveOpKey(generateClientOpKey('scan'))
       stopCamera()
       setSelectionRequired(false)
     } catch (err: any) {
@@ -402,9 +418,13 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
     setSelectionRequired(false)
 
     try {
+      const idempotencyKey = activeOpKey || generateClientOpKey('scan')
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({
           barcode: targetBarcode || null,
           image: isDemoScan || targetBarcode ? null : targetImage,
@@ -412,6 +432,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
           isDemo: isDemoScan || false,
           filename: targetFilename,
           productName: targetProductName,
+          idempotencyKey
         }),
       })
 
@@ -433,6 +454,8 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         throw new Error(data.message)
       }
 
+      // Refresh op key for subsequent scans
+      setActiveOpKey(generateClientOpKey('scan'))
       onScanSuccess(data.analysis, data.scanId, targetImage || data.analysis?.image_url || undefined)
     } catch (err: any) {
       onScanError(err.message || 'An unexpected error occurred.')
@@ -447,6 +470,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
     setProductNameInput('')
     setFileName('')
     setBatchQueue([])
+    setActiveOpKey(generateClientOpKey('scan'))
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (batchInputRef.current) batchInputRef.current.value = ''
   }

@@ -247,8 +247,283 @@ function splitCompoundIngredients(rawName: string): string[] {
 }
 
 /**
- * Calculates evidence-based health score strictly from verified data.
- * If evidence is insufficient (unreadable/missing panel or missing ingredients/nutrition),
+ * Cleans and validates a numeric nutrient measurement.
+ * Rejects negative, non-finite, and NaN values. Preserves true zeros.
+ */
+export function cleanNumericValue(val: any): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "number") {
+    if (isNaN(val) || !isFinite(val) || val < 0) return null;
+    return val;
+  }
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (trimmed.length === 0 || trimmed.toLowerCase() === "null" || trimmed.toLowerCase() === "undefined") return null;
+    if (/-\s*[\d.]/.test(trimmed)) return null; // Explicitly reject negative strings like "-20g"
+    const match = trimmed.match(/[\d.]+/);
+    if (match) {
+      const parsed = parseFloat(match[0]);
+      if (isNaN(parsed) || !isFinite(parsed) || parsed < 0) return null;
+      return parsed;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts serving size in grams or milliliters from a string.
+ * Supports "20g", "40 grams", "100ml", "1l", "1 liter", "1 bar (45g)", "1.5 oz", etc.
+ * Rejects negative values, malformed strings, and ambiguous unitless sizes.
+ */
+export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: number | null; isLiquid: boolean; unit: string | null } {
+  if (!servingSizeStr || typeof servingSizeStr !== "string") {
+    return { grams: null, isLiquid: false, unit: null };
+  }
+  const str = servingSizeStr.trim().toLowerCase();
+
+  // Reject negative quantities (e.g. "-20g", "-5ml")
+  if (/-\s*[\d.]/.test(str)) {
+    return { grams: null, isLiquid: false, unit: null };
+  }
+
+  // 1. Milliliters (e.g. "100ml", "250 ml", "100 millilitres", "100 milliliters")
+  const matchMl = str.match(/([\d.]+)\s*(?:ml|milliliters?|millilitres?)\b/i);
+  if (matchMl) {
+    const val = parseFloat(matchMl[1]);
+    if (!isNaN(val) && isFinite(val) && val > 0) {
+      return { grams: val, isLiquid: true, unit: "ml" };
+    }
+  }
+
+  // 2. Liters (e.g. "1l", "1.5 l", "1 liter", "1 litre", "2 liters")
+  const matchLiter = str.match(/([\d.]+)\s*(?:liters?|litres?|l)\b/i);
+  if (matchLiter) {
+    const val = parseFloat(matchLiter[1]);
+    if (!isNaN(val) && isFinite(val) && val > 0) {
+      return { grams: val * 1000, isLiquid: true, unit: "l" };
+    }
+  }
+
+  // 3. Grams (e.g. "20g", "20.5 g", "20 grams", "20 gm")
+  const matchGrams = str.match(/([\d.]+)\s*(?:grams?|gm|g)\b/i);
+  if (matchGrams) {
+    const val = parseFloat(matchGrams[1]);
+    if (!isNaN(val) && isFinite(val) && val > 0) {
+      return { grams: val, isLiquid: false, unit: "g" };
+    }
+  }
+
+  // 4. Ounces (e.g. "1.5 oz", "2 ounces")
+  const matchOz = str.match(/([\d.]+)\s*(?:ounces?|oz)\b/i);
+  if (matchOz) {
+    const val = parseFloat(matchOz[1]);
+    if (!isNaN(val) && isFinite(val) && val > 0) {
+      return { grams: val * 28.3495, isLiquid: false, unit: "oz" };
+    }
+  }
+
+  // 5. Standalone positive numeric digits only
+  const standalone = str.match(/^([\d.]+)$/);
+  if (standalone) {
+    const val = parseFloat(standalone[1]);
+    if (!isNaN(val) && isFinite(val) && val > 0) {
+      return { grams: val, isLiquid: false, unit: "g" };
+    }
+  }
+
+  return { grams: null, isLiquid: false, unit: null };
+}
+
+export interface Normalized100gNutrients {
+  calories_100g: number | null;
+  fat_100g: number | null;
+  saturated_fat_100g: number | null;
+  trans_fat_100g: number | null;
+  cholesterol_100g: number | null;
+  sodium_100g: number | null;
+  carbs_100g: number | null;
+  fiber_100g: number | null;
+  sugar_100g: number | null;
+  protein_100g: number | null;
+  basis: "per_100g" | "per_100ml" | "normalized_from_serving" | "unavailable";
+  serving_size_g: number | null;
+  is_liquid: boolean;
+  valid_nutrient_count: number;
+}
+
+/**
+ * Explicit nutrient normalization function.
+ * Normalizes EACH nutrient independently:
+ * - If a nutrient has a valid direct per_100g value, it is preserved.
+ * - If a nutrient is missing in per_100g but present in per_serving AND a valid serving mass/volume is known, it scales it.
+ * - If normalization is impossible, that specific nutrient is null.
+ * - Per-100g thresholds are never silently applied to per-serving numbers.
+ */
+export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
+  const emptyResult: Normalized100gNutrients = {
+    calories_100g: null,
+    fat_100g: null,
+    saturated_fat_100g: null,
+    trans_fat_100g: null,
+    cholesterol_100g: null,
+    sodium_100g: null,
+    carbs_100g: null,
+    fiber_100g: null,
+    sugar_100g: null,
+    protein_100g: null,
+    basis: "unavailable",
+    serving_size_g: null,
+    is_liquid: false,
+    valid_nutrient_count: 0
+  };
+
+  if (!nf) return emptyResult;
+
+  const p100 = nf.per_100g || {};
+  const ps = nf.per_serving || {};
+  const rawServingSize = nf.serving_size || nf.serving_size_text || (nf.serving_size_g ? `${nf.serving_size_g}g` : null) || (nf.serving_size_ml ? `${nf.serving_size_ml}ml` : null);
+  const servingInfo = parseServingSizeGrams(rawServingSize);
+  const servingSizeGrams = servingInfo.grams ?? (typeof nf.serving_size_g === "number" && nf.serving_size_g > 0 ? nf.serving_size_g : null);
+  const isLiquid = servingInfo.isLiquid || nf.basis === "per_100ml" || !!nf.serving_size_ml;
+
+  const scaleFactor = (servingSizeGrams && servingSizeGrams > 0) ? (100 / servingSizeGrams) : null;
+
+  // Helper to normalize a single nutrient independently
+  const normalizeSingleNutrient = (
+    p100Vals: any[],
+    psVals: any[],
+    flatVals: any[]
+  ): { value: number | null; fromDirect: boolean } => {
+    // 1. Direct per 100g check
+    for (const v of p100Vals) {
+      const clean = cleanNumericValue(v);
+      if (clean !== null) return { value: clean, fromDirect: true };
+    }
+
+    // If flat vals are explicitly labeled as 100g/100ml basis
+    if (nf.basis === "per_100g" || nf.basis === "per_100ml") {
+      for (const v of flatVals) {
+        const clean = cleanNumericValue(v);
+        if (clean !== null) return { value: clean, fromDirect: true };
+      }
+    }
+
+    // 2. Scaled from per-serving
+    if (scaleFactor !== null) {
+      for (const v of psVals) {
+        const clean = cleanNumericValue(v);
+        if (clean !== null) return { value: clean * scaleFactor, fromDirect: false };
+      }
+      if (nf.basis === "per_serving" || !nf.basis) {
+        for (const v of flatVals) {
+          const clean = cleanNumericValue(v);
+          if (clean !== null) return { value: clean * scaleFactor, fromDirect: false };
+        }
+      }
+    }
+
+    return { value: null, fromDirect: false };
+  };
+
+  const normCalories = normalizeSingleNutrient(
+    [p100.calories, nf.calories_100g],
+    [ps.calories],
+    [nf.calories]
+  );
+  const normFat = normalizeSingleNutrient(
+    [p100.fat_g, nf.fat_100g],
+    [ps.fat_g],
+    [nf.fat_g, nf.fat]
+  );
+  const normSatFat = normalizeSingleNutrient(
+    [p100.saturated_fat_g, nf.saturated_fat_100g],
+    [ps.saturated_fat_g],
+    [nf.saturated_fat_g, nf.saturated_fat]
+  );
+  const normTransFat = normalizeSingleNutrient(
+    [p100.trans_fat_g, nf.trans_fat_100g],
+    [ps.trans_fat_g],
+    [nf.trans_fat_g, nf.trans_fat]
+  );
+  const normCholesterol = normalizeSingleNutrient(
+    [p100.cholesterol_mg, nf.cholesterol_100g],
+    [ps.cholesterol_mg],
+    [nf.cholesterol_mg, nf.cholesterol]
+  );
+  const normSodium = normalizeSingleNutrient(
+    [p100.sodium_mg, nf.sodium_100g],
+    [ps.sodium_mg],
+    [nf.sodium_mg, nf.sodium]
+  );
+  const normCarbs = normalizeSingleNutrient(
+    [p100.carbs_g, nf.carbs_100g],
+    [ps.carbs_g],
+    [nf.carbs_g, nf.carbs]
+  );
+  const normFiber = normalizeSingleNutrient(
+    [p100.fiber_g, nf.fiber_100g],
+    [ps.fiber_g],
+    [nf.fiber_g, nf.fiber]
+  );
+  const normSugar = normalizeSingleNutrient(
+    [p100.sugar_g, nf.sugar_100g],
+    [ps.sugar_g],
+    [nf.sugar_g, nf.sugar]
+  );
+  const normProtein = normalizeSingleNutrient(
+    [p100.protein_g, nf.protein_100g],
+    [ps.protein_g],
+    [nf.protein_g, nf.protein]
+  );
+
+  const nutrientList = [normCalories, normFat, normSatFat, normTransFat, normCholesterol, normSodium, normCarbs, normFiber, normSugar, normProtein];
+  const validCount = nutrientList.filter(n => n.value !== null).length;
+
+  if (validCount === 0) {
+    return emptyResult;
+  }
+
+  const hasDirect = nutrientList.some(n => n.fromDirect && n.value !== null);
+  const basis: "per_100g" | "per_100ml" | "normalized_from_serving" = 
+    hasDirect ? (isLiquid ? "per_100ml" : "per_100g") : "normalized_from_serving";
+
+  return {
+    calories_100g: normCalories.value,
+    fat_100g: normFat.value,
+    saturated_fat_100g: normSatFat.value,
+    trans_fat_100g: normTransFat.value,
+    cholesterol_100g: normCholesterol.value,
+    sodium_100g: normSodium.value,
+    carbs_100g: normCarbs.value,
+    fiber_100g: normFiber.value,
+    sugar_100g: normSugar.value,
+    protein_100g: normProtein.value,
+    basis,
+    serving_size_g: servingSizeGrams,
+    is_liquid: isLiquid,
+    valid_nutrient_count: validCount
+  };
+}
+
+/**
+ * Checks whether valid, non-negative numeric nutritional measurements are present.
+ */
+export function hasValidNumericNutrients(nf?: any): boolean {
+  if (!nf) return false;
+  const normalized = normalizeNutrientsTo100g(nf);
+  if (normalized.valid_nutrient_count > 0) return true;
+
+  const ps = nf.per_serving || {};
+  const psVals = [ps.calories, ps.fat_g, ps.saturated_fat_g, ps.trans_fat_g, ps.cholesterol_mg, ps.sodium_mg, ps.carbs_g, ps.fiber_g, ps.sugar_g, ps.added_sugar_g, ps.protein_g, nf.calories, nf.fat, nf.sugar, nf.sodium];
+  for (const v of psVals) {
+    if (cleanNumericValue(v) !== null) return true;
+  }
+  return false;
+}
+
+/**
+ * Calculates evidence-based health score strictly from verified, normalized data.
+ * If evidence is insufficient (unreadable/missing panel, or missing ingredients AND nutrients),
  * it returns null score with safetyLevel: 'insufficient_evidence'.
  */
 export function calculateHealthScore(facts: Partial<RawProductFacts>): { 
@@ -260,15 +535,20 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): {
   const ingredients = facts.ingredients || [];
   const nf = facts.nutrition_facts;
 
-  // Check for insufficient evidence
+  const normalized = normalizeNutrientsTo100g(nf);
+  const hasIngredients = ingredients.length > 0;
+  const hasSubstantialNutrients = normalized.valid_nutrient_count >= 2;
+
+  // Minimum evidence rule:
+  // Requires readable panel AND at least 2 normalized nutrients (or ingredients + at least 1 normalized nutrient)
   if (
     panelStatus === "unreadable" || 
     panelStatus === "missing" || 
-    (ingredients.length === 0 && !nf?.per_100g && !nf?.per_serving && !nf?.calories && !nf?.sugar_100g)
+    (!hasSubstantialNutrients && !(hasIngredients && normalized.valid_nutrient_count >= 1))
   ) {
     return {
       score: null,
-      reason: "Insufficient readable evidence on product label. Please take a clear, well-lit photo of the ingredient list or nutrition table.",
+      reason: "Insufficient readable evidence on product label. Please take a clear, well-lit photo of the ingredient list and nutrition table.",
       safetyLevel: "insufficient_evidence"
     };
   }
@@ -277,11 +557,11 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): {
   const penalties: string[] = [];
   const bonuses: string[] = [];
 
-  const upf = facts.upf_score || 3;
-  if (upf === 4) {
+  // UPF penalty only if explicitly extracted / verified
+  if (facts.upf_score === 4) {
     score -= 25;
     penalties.push("ultra-processed NOVA 4 formulation");
-  } else if (upf === 3) {
+  } else if (facts.upf_score === 3) {
     score -= 10;
     penalties.push("processed matrix (NOVA 3)");
   }
@@ -307,43 +587,48 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): {
     penalties.push(`${avoidCount} restricted ingredient(s)`);
   }
 
-  const p100 = nf?.per_100g || {};
-  const sugar100g = p100.sugar_g ?? (nf?.sugar_100g ? parseFloat(nf.sugar_100g) : undefined);
-  const sodium100g = p100.sodium_mg ?? (nf?.sodium_100g ? parseFloat(nf.sodium_100g) : undefined);
-  const trans100g = p100.trans_fat_g ?? (nf?.trans_fat_100g ? parseFloat(nf.trans_fat_100g) : undefined);
-  const satFat100g = p100.saturated_fat_g ?? (nf?.saturated_fat_100g ? parseFloat(nf.saturated_fat_100g) : undefined);
-  const fiber100g = p100.fiber_g ?? (nf?.fiber_100g ? parseFloat(nf.fiber_100g) : undefined);
-  const protein100g = p100.protein_g ?? (nf?.protein_100g ? parseFloat(nf.protein_100g) : undefined);
+  const trans100g = normalized.trans_fat_100g;
+  const sugar100g = normalized.sugar_100g;
+  const sodium100g = normalized.sodium_100g;
+  const satFat100g = normalized.saturated_fat_100g;
+  const fiber100g = normalized.fiber_100g;
+  const protein100g = normalized.protein_100g;
+  const isLiquid = normalized.is_liquid;
 
-  if (typeof trans100g === "number" && trans100g > 0.1) {
+  if (trans100g !== null && trans100g > 0.1) {
     score -= 20;
     penalties.push("trans fats detected");
   }
 
-  if (typeof sugar100g === "number") {
-    if (sugar100g > 15) {
+  if (sugar100g !== null) {
+    const highSugarThreshold = isLiquid ? 8 : 15;
+    const medSugarThreshold = isLiquid ? 4 : 8;
+    if (sugar100g > highSugarThreshold) {
       score -= 15;
-      penalties.push(`high sugar (${sugar100g}g/100g)`);
-    } else if (sugar100g > 8) {
+      penalties.push(`high sugar (${sugar100g.toFixed(1)}g/100${isLiquid ? "ml" : "g"})`);
+    } else if (sugar100g > medSugarThreshold) {
       score -= 6;
     }
   }
 
-  if (typeof sodium100g === "number" && sodium100g > 600) {
-    score -= 12;
-    penalties.push(`high sodium (${sodium100g}mg/100g)`);
+  if (sodium100g !== null) {
+    const highSodiumThreshold = isLiquid ? 300 : 600;
+    if (sodium100g > highSodiumThreshold) {
+      score -= 12;
+      penalties.push(`high sodium (${Math.round(sodium100g)}mg/100${isLiquid ? "ml" : "g"})`);
+    }
   }
 
-  if (typeof satFat100g === "number" && satFat100g > 5) {
+  if (satFat100g !== null && satFat100g > 5) {
     score -= 8;
     penalties.push("elevated saturated fat");
   }
 
-  if (typeof fiber100g === "number" && fiber100g >= 3) {
+  if (fiber100g !== null && fiber100g >= 3) {
     score = Math.min(100, score + 5);
     bonuses.push("beneficial fiber");
   }
-  if (typeof protein100g === "number" && protein100g >= 10) {
+  if (protein100g !== null && protein100g >= 10) {
     score = Math.min(100, score + 5);
     bonuses.push("good protein");
   }
@@ -351,7 +636,7 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): {
   const finalScore = Math.max(0, Math.min(100, Math.round(score)));
 
   let safetyLevel: "safe" | "moderate" | "danger" = "safe";
-  if (finalScore < 40 || highRiskAdditives > 0 || (typeof trans100g === "number" && trans100g > 0.5)) {
+  if (finalScore < 40 || highRiskAdditives > 0 || (trans100g !== null && trans100g > 0.5)) {
     safetyLevel = "danger";
   } else if (finalScore < 70) {
     safetyLevel = "moderate";
@@ -359,7 +644,7 @@ export function calculateHealthScore(facts: Partial<RawProductFacts>): {
 
   let reason = "";
   if (penalties.length > 0) {
-    reason = `Score calculated based on ${penalties.slice(0, 3).join(", ")}.`;
+    reason = `ScanSafe nutritional heuristic based on ${penalties.slice(0, 3).join(", ")}.`;
   } else {
     reason = "Formulated with clean, minimally processed ingredients and a balanced nutrition profile.";
   }

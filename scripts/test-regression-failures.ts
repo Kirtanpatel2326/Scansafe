@@ -214,6 +214,54 @@ if (traceWheatCheck.dietary_compatibility?.allergen_warnings?.some(w => w.toLowe
   results.test8 = "FAIL";
 }
 
+// -------------------------------------------------------------
+// Test 9: Per-serving vs Per-100g Concentration Equivalence
+// -------------------------------------------------------------
+console.log("\n--- Testing Per-serving vs Per-100g Concentration Equivalence ---");
+const perServingItem: Partial<RawProductFacts> = {
+  product_name: "Sugar Biscuit (20g Serving)",
+  brand: "Brand",
+  panel_status: "extracted",
+  ingredients: [{ name: "Wheat flour", status: "safe", reason: "" }],
+  additives: [],
+  nutrition_facts: {
+    panel_status: "extracted",
+    serving_size: "20g",
+    per_serving: {
+      sugar_g: 10,
+      calories: 100,
+      protein_g: 2
+    }
+  }
+};
+
+const per100gItem: Partial<RawProductFacts> = {
+  product_name: "Sugar Biscuit (Per 100g)",
+  brand: "Brand",
+  panel_status: "extracted",
+  ingredients: [{ name: "Wheat flour", status: "safe", reason: "" }],
+  additives: [],
+  nutrition_facts: {
+    panel_status: "extracted",
+    per_100g: {
+      sugar_g: 50,
+      calories: 500,
+      protein_g: 10
+    }
+  }
+};
+
+const scorePerServing = calculateHealthScore(perServingItem);
+const scorePer100g = calculateHealthScore(per100gItem);
+console.log("Score Per Serving (10g / 20g):", scorePerServing.score);
+console.log("Score Per 100g (50g / 100g):", scorePer100g.score);
+
+if (scorePerServing.score !== null && scorePerServing.score === scorePer100g.score) {
+  console.log(`✅ Concentration Equivalence Fixed: Both evaluate identically to score ${scorePerServing.score}/100`);
+} else {
+  console.log(`❌ Concentration Equivalence Failed: PerServing=${scorePerServing.score}, Per100g=${scorePer100g.score}`);
+}
+
 console.log("\n==================================================");
 console.log("📊 REPRODUCTION RUN SUMMARY:", results);
 console.log("==================================================");

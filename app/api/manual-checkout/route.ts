@@ -1,19 +1,27 @@
-import { createAdminClient } from '@/lib/supabase-server'
+import { createClient, createAdminClient } from '@/lib/supabase-server'
 import { getScanPack } from '@/lib/plans'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
 const ManualCheckoutSchema = z.object({
-  utr: z.string().trim().min(8, "UTR reference must be at least 8 characters").max(50),
+  utr: z.string().trim().min(8, "UTR reference must be at least 8 alphanumeric characters").max(50),
   planType: z.string().min(1).max(50),
-  amount: z.number().positive(),
-  userId: z.string().uuid("Invalid user ID")
+  amount: z.number().positive().optional(),
+  userId: z.string().uuid().optional()
 });
 
 export async function POST(request: Request) {
   try {
-    const supabase = createAdminClient();
+    const sessionClient = await createClient();
+    const { data: { user }, error: authError } = await sessionClient.auth.getUser();
     
+    if (authError || !user) {
+      return NextResponse.json({ 
+        error: 'AUTH_REQUIRED', 
+        message: 'Please sign in to submit a manual UPI payment reference.' 
+      }, { status: 401 });
+    }
+
     let body;
     try {
       body = await request.json();
@@ -29,19 +37,30 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const { utr, planType, amount, userId } = parsed.data;
+    const { utr, planType } = parsed.data;
 
-    // Validate pack
+    // Validate pack from server catalog
     const pack = getScanPack(planType);
     if (!pack) {
       return NextResponse.json({ error: `Invalid scan pack selected: ${planType}` }, { status: 400 });
     }
 
-    // Check if this UTR was already submitted
-    const { data: existingPayment } = await supabase
+    // Normalize UTR: uppercase alphanumeric only
+    const normalizedUtr = utr.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (normalizedUtr.length < 8) {
+      return NextResponse.json({ 
+        error: 'INVALID_UTR', 
+        message: 'Normalized UTR must contain at least 8 alphanumeric characters.' 
+      }, { status: 400 });
+    }
+
+    const adminClient = createAdminClient();
+
+    // Check if this normalized UTR was already submitted
+    const { data: existingPayment } = await adminClient
       .from('pending_payments')
-      .select('id, status')
-      .eq('utr', utr)
+      .select('id, status, user_id')
+      .eq('utr', normalizedUtr)
       .maybeSingle();
 
     if (existingPayment) {
@@ -52,14 +71,14 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    // Insert into pending_payments with status 'pending'
-    const { data: inserted, error: insertError } = await supabase
+    // Insert into pending_payments with status 'pending' using server-side user.id and pack.priceInr
+    const { data: inserted, error: insertError } = await adminClient
       .from('pending_payments')
       .insert({
-        user_id: userId,
-        utr: utr,
+        user_id: user.id,
+        utr: normalizedUtr,
         plan_type: pack.id,
-        amount: amount,
+        amount: pack.priceInr,
         status: 'pending'
       })
       .select()
@@ -76,6 +95,7 @@ export async function POST(request: Request) {
       success: true,
       status: 'pending',
       paymentId: inserted?.id,
+      amount: pack.priceInr,
       message: 'Your transfer reference has been submitted. Credits will be added to your account once verified (typically within 1-2 hours).'
     });
 

@@ -67,6 +67,9 @@ export default function ScanPage() {
   const [compositing, setCompositing] = useState(false)
   const [composedMeal, setComposedMeal] = useState<any | null>(null)
   const [composerHistory, setComposerHistory] = useState<any[]>([])
+  const [mealOpKey, setMealOpKey] = useState<string>(() => 
+    typeof crypto !== 'undefined' && crypto.randomUUID ? `meal_${crypto.randomUUID()}` : `meal_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  )
 
   // Family Mode / Profiles State
   const [familyMembers, setFamilyMembers] = useState<any[]>([])
@@ -236,23 +239,34 @@ export default function ScanPage() {
 
   // Meal Composer Submissions
   const handleQuantityChange = (id: string, qty: number) => {
+    setMealOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `meal_${crypto.randomUUID()}` : `meal_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
     setItemQuantities((prev) => ({
       ...prev,
       [id]: {
-        quantity: Math.max(1, isNaN(qty) ? 100 : qty),
+        quantity: isNaN(qty) ? 1 : Math.max(0.1, qty),
         unit: prev[id]?.unit || 'g'
       }
     }))
   }
 
-  const handleUnitChange = (id: string, unit: 'g' | 'ml' | 'servings') => {
-    setItemQuantities((prev) => ({
-      ...prev,
-      [id]: {
-        quantity: prev[id]?.quantity || 100,
-        unit
+  const handleUnitChange = (id: string, newUnit: 'g' | 'ml' | 'servings') => {
+    setMealOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `meal_${crypto.randomUUID()}` : `meal_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
+    setItemQuantities((prev) => {
+      const current = prev[id] || { quantity: 100, unit: 'g' }
+      let newQty = current.quantity
+      if (newUnit === 'servings' && current.unit !== 'servings') {
+        newQty = 1
+      } else if (newUnit !== 'servings' && current.unit === 'servings') {
+        newQty = 100
       }
-    }))
+      return {
+        ...prev,
+        [id]: {
+          quantity: newQty,
+          unit: newUnit
+        }
+      }
+    })
   }
 
   const handleComposeMeal = async (e: React.FormEvent) => {
@@ -267,17 +281,23 @@ export default function ScanPage() {
         unit: itemQuantities[id]?.unit ?? 'g'
       }))
 
+      const idempotencyKey = mealOpKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? `meal_${crypto.randomUUID()}` : `meal_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
       const res = await fetch('/api/meal-composer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({
           items,
-          mealName: mealName || 'Balanced Mix'
+          mealName: mealName || 'Balanced Mix',
+          idempotencyKey
         })
       })
       const data = await res.json()
       if (res.ok && data.success) {
         setComposedMeal(data.meal)
+        setMealOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `meal_${crypto.randomUUID()}` : `meal_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
         if (user) fetchComposerHistory(user.id)
       } else {
         alert(data.error || 'Failed to compose meal analysis.')
@@ -290,6 +310,7 @@ export default function ScanPage() {
   }
 
   const toggleSelectScan = (id: string) => {
+    setMealOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `meal_${crypto.randomUUID()}` : `meal_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
     setSelectedScanIds((prev) => 
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     )
@@ -639,10 +660,11 @@ export default function ScanPage() {
                                 <div className="flex items-center gap-1.5">
                                   <input
                                     type="number"
-                                    min="1"
+                                    min="0.1"
                                     max="5000"
-                                    value={itemQuantities[s.id]?.quantity ?? 100}
-                                    onChange={(e) => handleQuantityChange(s.id, parseInt(e.target.value, 10))}
+                                    step="any"
+                                    value={itemQuantities[s.id]?.quantity ?? (itemQuantities[s.id]?.unit === 'servings' ? 1 : 100)}
+                                    onChange={(e) => handleQuantityChange(s.id, parseFloat(e.target.value))}
                                     className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-emerald-500"
                                   />
                                   <select
