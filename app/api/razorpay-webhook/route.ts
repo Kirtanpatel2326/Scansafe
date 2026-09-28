@@ -1,4 +1,4 @@
-import { fulfillPackPurchase } from "@/lib/credits";
+import { fulfillOrderPayment } from "@/lib/credits";
 import { getScanPack } from "@/lib/plans";
 import { createAdminClient } from "@/lib/supabase-server";
 import { NextResponse } from "next/server";
@@ -24,7 +24,10 @@ export async function POST(request: Request) {
     shasum.update(rawBody);
     const expectedSignature = shasum.digest("hex");
 
-    if (expectedSignature !== signature) {
+    const expectedBuf = Buffer.from(expectedSignature, "utf8");
+    const sigBuf = Buffer.from(signature, "utf8");
+
+    if (expectedBuf.length !== sigBuf.length || !crypto.timingSafeEqual(expectedBuf, sigBuf)) {
       console.error("Invalid Razorpay Webhook signature");
       return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
     }
@@ -36,70 +39,90 @@ export async function POST(request: Request) {
     if (body.event === "payment.captured" || body.event === "order.paid") {
       const paymentEntity = body.payload?.payment?.entity;
       const orderEntity = body.payload?.order?.entity;
-      const entity = paymentEntity || orderEntity;
 
-      if (!entity || !entity.id) {
-        console.error("No valid payment or order entity in webhook payload");
-        return NextResponse.json({ error: "Missing entity" }, { status: 400 });
+      const orderId = paymentEntity?.order_id || orderEntity?.id;
+      if (!orderId) {
+        console.error("No valid order_id found in webhook payload. Rejecting payment without server order association.");
+        return NextResponse.json({ error: "Missing order association" }, { status: 400 });
       }
 
-      // Canonical payment identifier: prefer payment id (pay_xxx), fallback to order id (order_xxx)
-      const canonicalPaymentId = paymentEntity?.id || orderEntity?.id;
-      const orderId = entity.order_id || orderEntity?.id;
-      const notes = entity.notes || {};
-      
-      let userId = notes.userId;
-      let packId = notes.packId || notes.planType;
-      const amountPaise = entity.amount;
-      const amountPaid = amountPaise ? Math.round(amountPaise / 100) : undefined;
+      // Canonical internal purchase reference identity: tied strictly to the stored server order
+      const canonicalFulfillmentRef = orderId;
+      const providerPaymentId = paymentEntity?.id || null;
 
-      // Verify against server-side payment_orders association if available
-      if (orderId) {
-        try {
-          const adminClient = createAdminClient();
-          const { data: serverOrder } = await adminClient
-            .from("payment_orders")
-            .select("*")
-            .eq("id", orderId)
-            .maybeSingle();
-
-          if (serverOrder) {
-            userId = userId || serverOrder.user_id;
-            packId = packId || serverOrder.pack_id;
-            
-            // Mark order as paid
-            await adminClient
-              .from("payment_orders")
-              .update({ status: "paid" })
-              .eq("id", orderId);
-          }
-        } catch (dbErr) {
-          console.warn("Could not query server payment_orders:", dbErr);
+      // Verify payment status: MUST be strictly 'captured' for payment events or 'paid' for order events
+      if (body.event === "payment.captured") {
+        if (paymentEntity?.status !== "captured") {
+          console.warn(`Payment status '${paymentEntity?.status}' is not captured. Skipping fulfillment.`);
+          return NextResponse.json({ message: `Payment not captured: status ${paymentEntity?.status}` }, { status: 200 });
+        }
+      } else if (body.event === "order.paid") {
+        if (orderEntity?.status !== "paid") {
+          console.warn(`Order status '${orderEntity?.status}' is not paid. Skipping fulfillment.`);
+          return NextResponse.json({ message: `Order not paid: status ${orderEntity?.status}` }, { status: 200 });
         }
       }
 
-      if (!userId) {
-        console.error("No userId found in Razorpay webhook notes or server order association");
-        return NextResponse.json({ error: "Unidentified user for payment" }, { status: 400 });
+      // Require server-side payment_orders lookup
+      const adminClient = createAdminClient();
+      const { data: serverOrder, error: orderErr } = await adminClient
+        .from("payment_orders")
+        .select("*")
+        .eq("id", orderId)
+        .single();
+
+      if (orderErr || !serverOrder) {
+        console.error(`Server order '${orderId}' not found in database:`, orderErr);
+        return NextResponse.json({ error: "Invalid or untrusted order ID. Server association required." }, { status: 400 });
       }
 
+      const packId = serverOrder.pack_id;
       const pack = getScanPack(packId);
+
       if (!pack) {
-        console.error(`Invalid or unmapped packId in payment: '${packId}'`);
-        return NextResponse.json({ error: `Invalid pack: ${packId}` }, { status: 400 });
+        console.error(`Invalid server packId '${packId}' for order '${orderId}'`);
+        return NextResponse.json({ error: `Invalid pack configured: ${packId}` }, { status: 400 });
       }
 
-      console.log(`Fulfilling pack purchase: user=${userId}, pack=${pack.id}, payment=${canonicalPaymentId}, amount=₹${amountPaid}...`);
+      // Verify currency is provided in event payload and matches server order
+      const actualCurrency = (paymentEntity?.currency || orderEntity?.currency || "").toUpperCase();
+      if (!actualCurrency) {
+        console.error(`Missing currency in webhook payload for order '${orderId}'`);
+        return NextResponse.json({ error: "Missing currency in webhook event payload" }, { status: 400 });
+      }
+      if (actualCurrency !== serverOrder.currency.toUpperCase()) {
+        console.error(`Currency mismatch for order '${orderId}'. Expected: ${serverOrder.currency}, Received: ${actualCurrency}`);
+        return NextResponse.json({ error: "Currency mismatch with server order" }, { status: 400 });
+      }
 
-      // Idempotent fulfillment with credit ledger entry
-      const fulfillment = await fulfillPackPurchase(userId, pack.id, canonicalPaymentId, amountPaid);
+      // Verify exact amount is provided in event payload and matches server catalog
+      const actualAmountPaise = paymentEntity?.amount !== undefined ? paymentEntity.amount : (orderEntity?.amount_paid !== undefined ? orderEntity.amount_paid : null);
+      if (actualAmountPaise === null || actualAmountPaise === undefined) {
+        console.error(`Missing actual amount in webhook payload for order '${orderId}'`);
+        return NextResponse.json({ error: "Missing actual payment amount in webhook event payload" }, { status: 400 });
+      }
+
+      const expectedAmountPaise = pack.priceInr * 100;
+      if (actualAmountPaise !== expectedAmountPaise || actualAmountPaise !== serverOrder.amount_paise) {
+        console.error(`Amount mismatch for order '${orderId}'. Expected: ${expectedAmountPaise} paise, Received: ${actualAmountPaise} paise.`);
+        return NextResponse.json({ error: "Payment amount mismatch with server catalog" }, { status: 400 });
+      }
+
+      // Atomically fulfill order in database via single PostgreSQL transaction
+      const fulfillment = await fulfillOrderPayment(
+        orderId,
+        providerPaymentId,
+        pack.scans,
+        pack.id,
+        `Purchased ${pack.name} (${pack.scans} scans) for ₹${pack.priceInr}`
+      );
 
       if (!fulfillment.success) {
         console.error("Failed to fulfill pack purchase in DB:", fulfillment.error);
         return NextResponse.json({ error: fulfillment.error || "DB fulfillment failed" }, { status: 500 });
       }
 
-      console.log("Pack successfully fulfilled:", fulfillment);
+      console.log("Pack successfully fulfilled for canonical order:", orderId, fulfillment);
     }
 
     return NextResponse.json({ success: true });

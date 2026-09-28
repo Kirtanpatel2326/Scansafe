@@ -90,6 +90,9 @@ export default function ComparePage() {
   const [analyzing, setAnalyzing] = useState(false)
   const [result, setResult] = useState<ComparisonResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [compareOpKey, setCompareOpKey] = useState<string>(() => 
+    typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  )
 
   // Check auth session
   useEffect(() => {
@@ -120,6 +123,7 @@ export default function ComparePage() {
 
   // Toggle Preferences
   const handleTogglePref = (prefId: string) => {
+    setCompareOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
     let updated: string[]
     if (selectedPrefs.includes(prefId)) {
       updated = selectedPrefs.filter(p => p !== prefId)
@@ -135,6 +139,7 @@ export default function ComparePage() {
     const file = e.target.files?.[0]
     if (!file) return
 
+    setCompareOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
     if (target === 'A') setFileA(file)
     else setFileB(file)
 
@@ -223,13 +228,18 @@ export default function ComparePage() {
         p => PREFERENCE_OPTIONS.find(o => o.id === p)?.label || p
       )
 
+      const idempotencyKey = compareOpKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
       const res = await fetch('/api/compare', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({
           imageA,
           imageB,
-          preferences: mappedPrefs
+          preferences: mappedPrefs,
+          idempotencyKey
         })
       })
 
@@ -238,6 +248,8 @@ export default function ComparePage() {
         throw new Error(data.message || 'Comparison failed to process.')
       }
 
+      // Refresh compare op key for next comparison
+      setCompareOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
       setResult(data.comparison)
       // Scroll to result section
       setTimeout(() => {

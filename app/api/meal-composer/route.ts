@@ -1,24 +1,42 @@
 import { createClient } from "@/lib/supabase-server";
 import { reserveCredits, finalizeReservation, releaseReservation } from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
+import { normalizeNutrientsTo100g } from "@/lib/claude";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import axios from "axios";
 import { z } from "zod";
+import crypto from "crypto";
 
 const MealItemSchema = z.object({
-  scanId: z.string().min(1),
-  quantity: z.number().positive().default(100),
-  unit: z.enum(["g", "ml", "servings"]).default("g")
+  scanId: z.string().min(1, "scanId is required"),
+  quantity: z.number().positive("Quantity must be a positive number"),
+  unit: z.enum(["g", "ml", "servings"])
 });
 
 const MealPayloadSchema = z.object({
+  idempotencyKey: z.string().trim().max(128).optional(),
   mealName: z.string().max(100).optional().default("Composite Meal"),
-  items: z.array(MealItemSchema).optional(),
-  scanIds: z.array(z.string()).optional()
-}).refine(data => (data.items && data.items.length > 0) || (data.scanIds && data.scanIds.length > 0), {
-  message: "Either items array or scanIds array must be provided"
+  items: z.array(MealItemSchema).min(1, "At least one item with explicit quantity and unit is required")
 });
+
+/**
+ * Extracts serving size in grams from a string like "40g", "30 g", "1.5 oz", etc.
+ */
+function parseServingSizeGrams(servingSizeStr?: string | null): number | null {
+  if (!servingSizeStr) return null;
+  const matchGrams = servingSizeStr.match(/([\d.]+)\s*g/i);
+  if (matchGrams) {
+    const val = parseFloat(matchGrams[1]);
+    return isNaN(val) || val <= 0 ? null : val;
+  }
+  const matchMl = servingSizeStr.match(/([\d.]+)\s*ml/i);
+  if (matchMl) {
+    const val = parseFloat(matchMl[1]);
+    return isNaN(val) || val <= 0 ? null : val;
+  }
+  return null;
+}
 
 export async function POST(request: Request) {
   let activeReservationOpId: string | null = null;
@@ -50,21 +68,40 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const { mealName, items: rawItems, scanIds: rawScanIds } = parsed.data;
-
-    // Normalize items with quantities
-    const items = rawItems && rawItems.length > 0
-      ? rawItems
-      : (rawScanIds || []).map(id => ({ scanId: id, quantity: 100, unit: "g" as const }));
-
-    if (items.length === 0) {
-      return NextResponse.json({ error: "No scans selected for composer." }, { status: 400 });
+    const { mealName, items } = parsed.data;
+    const headerIdempotencyKey = request.headers.get("x-idempotency-key")?.trim() || "";
+    let idempotencyKey = parsed.data.idempotencyKey || headerIdempotencyKey;
+    if (!idempotencyKey) {
+      const normalizedPayload = {
+        mealName: mealName || "Composite Meal",
+        items: [...items].sort((a, b) => a.scanId.localeCompare(b.scanId))
+      };
+      const hash = crypto.createHash("sha256").update(`${user.id}:${JSON.stringify(normalizedPayload)}`).digest("hex").slice(0, 24);
+      idempotencyKey = `det_${hash}`;
     }
 
     const scanIds = items.map(i => i.scanId);
 
-    // 2. Atomic Credit Reservation (1 credit for meal composition)
-    const opId = `op_meal_${user.id.slice(0, 8)}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    // 2. IDEMPOTENCY CHECK & ATOMIC CREDIT RESERVATION (1 credit for meal composition)
+    const opId = `op_meal_${user.id.slice(0, 8)}_${idempotencyKey}`;
+
+    // Check if meal composition with this op_id already exists
+    const { data: existingMeal } = await supabase
+      .from("meal_compositions")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("op_id", opId)
+      .maybeSingle();
+
+    if (existingMeal) {
+      return NextResponse.json({
+        success: true,
+        meal: existingMeal.analysis_json,
+        mealId: existingMeal.id,
+        already_completed: true
+      });
+    }
+
     const reservation = await reserveCredits(
       user.id,
       CREDIT_COSTS.MEAL_COMPOSER,
@@ -83,21 +120,31 @@ export async function POST(request: Request) {
 
     activeReservationOpId = opId;
 
-    // 3. Retrieve scans from DB
+    // 3. Retrieve scans from user's history
     const { data: scans, error: scansError } = await supabase
       .from("scans")
       .select("*")
       .in("id", scanIds)
       .eq("user_id", user.id);
 
-    if (scansError || !scans || scans.length === 0) {
+    const uniqueRequestedIds = new Set(scanIds);
+    if (scansError || !scans || scans.length !== uniqueRequestedIds.size) {
       if (activeReservationOpId) {
-        await releaseReservation(user.id, activeReservationOpId, "Failed to load selected scans");
+        await releaseReservation(user.id, activeReservationOpId, "Selected scan records not found");
       }
-      return NextResponse.json({ error: "Failed to retrieve selected scans from your history." }, { status: 400 });
+      return NextResponse.json({ error: "One or more selected food scans could not be found or do not belong to your account." }, { status: 400 });
     }
 
-    // 4. Quantity-Aware Macro Aggregation
+    // Reject comparison records or unreadable scans
+    const unsupportedScan = scans.find(s => s.barcode?.startsWith("COMPARE:") || s.safety_level === "insufficient_evidence");
+    if (unsupportedScan) {
+      if (activeReservationOpId) {
+        await releaseReservation(user.id, activeReservationOpId, "Unsupported scan type in meal");
+      }
+      return NextResponse.json({ error: "Comparison results or unreadable scans without nutritional data cannot be used as meal components." }, { status: 400 });
+    }
+
+    // 4. Quantity-Aware Macro Aggregation with Propagated Unknowns
     let totalCalories: number | null = 0;
     let totalFatGrams: number | null = 0;
     let totalSaturatedFatGrams: number | null = 0;
@@ -110,78 +157,97 @@ export async function POST(request: Request) {
     const mergedAdditives: any[] = [];
     const mergedAllergens: string[] = [];
     const productNames: string[] = [];
-    const quantityBreakdown: Array<{ name: string; quantity: string }> = [];
+    const quantityBreakdown: Array<{ name: string; quantity: string; amount: number; unit: string }> = [];
 
-    scans.forEach((scan) => {
+    // Process every item entry in order (properly supporting duplicate items/scans with separate portions)
+    items.forEach((itemConfig) => {
+      const scan = scans.find(s => s.id === itemConfig.scanId);
+      if (!scan) return;
+
       const res = scan.result_json || {};
       const prodName = res.product_name || scan.product_name || "Food Item";
-      productNames.push(prodName);
+      if (!productNames.includes(prodName)) {
+        productNames.push(prodName);
+      }
 
-      const itemConfig = items.find(i => i.scanId === scan.id) || { quantity: 100, unit: "g" };
+      const qty = itemConfig.quantity;
+      const unit = itemConfig.unit;
       quantityBreakdown.push({
         name: prodName,
-        quantity: `${itemConfig.quantity}${itemConfig.unit}`
+        quantity: `${qty} ${unit}`,
+        amount: qty,
+        unit
       });
 
-      // Scaling factor: calculate scale relative to standard 100g or 1 serving
       const nut = res.nutrition_facts || {};
-      const p100 = nut.per_100g || {};
       const ps = nut.per_serving || {};
+      const normalized = normalizeNutrientsTo100g(nut);
 
-      let scaleFactor = 1.0;
-      let usingPer100g = true;
+      // Determine nutrient values scaled to the exact requested portion
+      let itemCal: number | null = null;
+      let itemFat: number | null = null;
+      let itemSatFat: number | null = null;
+      let itemCarbs: number | null = null;
+      let itemSugar: number | null = null;
+      let itemProtein: number | null = null;
+      let itemSodium: number | null = null;
 
-      if (itemConfig.unit === "servings") {
-        usingPer100g = false;
-        scaleFactor = itemConfig.quantity;
+      if (unit === "servings") {
+        // Option A: Direct per-serving facts scaled by number of servings
+        const hasDirectPs = ps.calories != null || ps.fat_g != null || ps.sugar_g != null || ps.protein_g != null;
+        if (hasDirectPs) {
+          itemCal = ps.calories != null ? ps.calories * qty : (normalized.calories_100g != null && normalized.serving_size_g ? (normalized.calories_100g * normalized.serving_size_g * qty) / 100 : null);
+          itemFat = ps.fat_g != null ? ps.fat_g * qty : (normalized.fat_100g != null && normalized.serving_size_g ? (normalized.fat_100g * normalized.serving_size_g * qty) / 100 : null);
+          itemSatFat = ps.saturated_fat_g != null ? ps.saturated_fat_g * qty : (normalized.saturated_fat_100g != null && normalized.serving_size_g ? (normalized.saturated_fat_100g * normalized.serving_size_g * qty) / 100 : null);
+          itemCarbs = ps.carbs_g != null ? ps.carbs_g * qty : (normalized.carbs_100g != null && normalized.serving_size_g ? (normalized.carbs_100g * normalized.serving_size_g * qty) / 100 : null);
+          itemSugar = ps.sugar_g != null ? ps.sugar_g * qty : (normalized.sugar_100g != null && normalized.serving_size_g ? (normalized.sugar_100g * normalized.serving_size_g * qty) / 100 : null);
+          itemProtein = ps.protein_g != null ? ps.protein_g * qty : (normalized.protein_100g != null && normalized.serving_size_g ? (normalized.protein_100g * normalized.serving_size_g * qty) / 100 : null);
+          itemSodium = ps.sodium_mg != null ? ps.sodium_mg * qty : (normalized.sodium_100g != null && normalized.serving_size_g ? (normalized.sodium_100g * normalized.serving_size_g * qty) / 100 : null);
+        } else if (normalized.serving_size_g && normalized.serving_size_g > 0) {
+          // Option B: Convert servings to grams using known serving mass
+          const totalGrams = qty * normalized.serving_size_g;
+          const scale = totalGrams / 100;
+          itemCal = normalized.calories_100g != null ? normalized.calories_100g * scale : null;
+          itemFat = normalized.fat_100g != null ? normalized.fat_100g * scale : null;
+          itemSatFat = normalized.saturated_fat_100g != null ? normalized.saturated_fat_100g * scale : null;
+          itemCarbs = normalized.carbs_100g != null ? normalized.carbs_100g * scale : null;
+          itemSugar = normalized.sugar_100g != null ? normalized.sugar_100g * scale : null;
+          itemProtein = normalized.protein_100g != null ? normalized.protein_100g * scale : null;
+          itemSodium = normalized.sodium_100g != null ? normalized.sodium_100g * scale : null;
+        }
       } else {
-        // grams or ml (approx 1g = 1ml for water-based liquids)
-        scaleFactor = itemConfig.quantity / 100;
+        // Requested in grams or ml: scale relative to 100g/100ml normalized basis
+        const scale = qty / 100;
+        itemCal = normalized.calories_100g != null ? normalized.calories_100g * scale : null;
+        itemFat = normalized.fat_100g != null ? normalized.fat_100g * scale : null;
+        itemSatFat = normalized.saturated_fat_100g != null ? normalized.saturated_fat_100g * scale : null;
+        itemCarbs = normalized.carbs_100g != null ? normalized.carbs_100g * scale : null;
+        itemSugar = normalized.sugar_100g != null ? normalized.sugar_100g * scale : null;
+        itemProtein = normalized.protein_100g != null ? normalized.protein_100g * scale : null;
+        itemSodium = normalized.sodium_100g != null ? normalized.sodium_100g * scale : null;
       }
 
-      if (usingPer100g && (p100.calories != null || p100.fat_g != null || nut.calories_100g != null)) {
-        const cal = p100.calories ?? nut.calories_100g;
-        if (cal != null && totalCalories != null) totalCalories += cal * scaleFactor;
+      // Propagate missing/unknown values: if a constituent product is missing calories, total becomes null
+      if (itemCal == null) totalCalories = null;
+      else if (totalCalories != null) totalCalories += itemCal;
 
-        const fat = p100.fat_g ?? (nut.fat_100g ? parseFloat(nut.fat_100g) : null);
-        if (fat != null && totalFatGrams != null) totalFatGrams += fat * scaleFactor;
+      if (itemFat == null) totalFatGrams = null;
+      else if (totalFatGrams != null) totalFatGrams += itemFat;
 
-        const sat = p100.saturated_fat_g ?? (nut.saturated_fat_100g ? parseFloat(nut.saturated_fat_100g) : null);
-        if (sat != null && totalSaturatedFatGrams != null) totalSaturatedFatGrams += sat * scaleFactor;
+      if (itemSatFat == null) totalSaturatedFatGrams = null;
+      else if (totalSaturatedFatGrams != null) totalSaturatedFatGrams += itemSatFat;
 
-        const carbs = p100.carbs_g ?? (nut.carbs_100g ? parseFloat(nut.carbs_100g) : null);
-        if (carbs != null && totalCarbsGrams != null) totalCarbsGrams += carbs * scaleFactor;
+      if (itemCarbs == null) totalCarbsGrams = null;
+      else if (totalCarbsGrams != null) totalCarbsGrams += itemCarbs;
 
-        const sugar = p100.sugar_g ?? (nut.sugar_100g ? parseFloat(nut.sugar_100g) : null);
-        if (sugar != null && totalSugarGrams != null) totalSugarGrams += sugar * scaleFactor;
+      if (itemSugar == null) totalSugarGrams = null;
+      else if (totalSugarGrams != null) totalSugarGrams += itemSugar;
 
-        const protein = p100.protein_g ?? (nut.protein_100g ? parseFloat(nut.protein_100g) : null);
-        if (protein != null && totalProteinGrams != null) totalProteinGrams += protein * scaleFactor;
+      if (itemProtein == null) totalProteinGrams = null;
+      else if (totalProteinGrams != null) totalProteinGrams += itemProtein;
 
-        const sodium = p100.sodium_mg ?? (nut.sodium_100g ? parseFloat(nut.sodium_100g) : null);
-        if (sodium != null && totalSodiumMg != null) totalSodiumMg += sodium * scaleFactor;
-      } else if (ps.calories != null || nut.calories != null) {
-        const cal = ps.calories ?? nut.calories;
-        if (cal != null && totalCalories != null) totalCalories += cal * scaleFactor;
-
-        const fat = ps.fat_g ?? (nut.fat ? parseFloat(nut.fat) : null);
-        if (fat != null && totalFatGrams != null) totalFatGrams += fat * scaleFactor;
-
-        const sat = ps.saturated_fat_g ?? (nut.saturated_fat ? parseFloat(nut.saturated_fat) : null);
-        if (sat != null && totalSaturatedFatGrams != null) totalSaturatedFatGrams += sat * scaleFactor;
-
-        const carbs = ps.carbs_g ?? (nut.carbs ? parseFloat(nut.carbs) : null);
-        if (carbs != null && totalCarbsGrams != null) totalCarbsGrams += carbs * scaleFactor;
-
-        const sugar = ps.sugar_g ?? (nut.sugar ? parseFloat(nut.sugar) : null);
-        if (sugar != null && totalSugarGrams != null) totalSugarGrams += sugar * scaleFactor;
-
-        const protein = ps.protein_g ?? (nut.protein ? parseFloat(nut.protein) : null);
-        if (protein != null && totalProteinGrams != null) totalProteinGrams += protein * scaleFactor;
-
-        const sodium = ps.sodium_mg ?? (nut.sodium ? parseFloat(nut.sodium) : null);
-        if (sodium != null && totalSodiumMg != null) totalSodiumMg += sodium * scaleFactor;
-      }
+      if (itemSodium == null) totalSodiumMg = null;
+      else if (totalSodiumMg != null) totalSodiumMg += itemSodium;
 
       if (Array.isArray(res.additives)) {
         res.additives.forEach((add: any) => {
@@ -209,9 +275,11 @@ export async function POST(request: Request) {
       }
     });
 
-    const averageHealthScore = Math.round(
-      scans.reduce((sum, s) => sum + (s.health_score || 50), 0) / scans.length
-    );
+    // Health Score: average only known non-null scores without substituting 50
+    const validScores = scans.map(s => s.health_score).filter((s): s is number => typeof s === "number" && !isNaN(s));
+    const averageHealthScore = validScores.length > 0
+      ? Math.round(validScores.reduce((sum, s) => sum + s, 0) / validScores.length)
+      : null;
 
     let compositeVerdict = `Combined analysis of: ${quantityBreakdown.map(q => `${q.name} (${q.quantity})`).join(", ")}.`;
     const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -273,6 +341,7 @@ Return ONLY plain text.`;
       .from("meal_compositions")
       .insert({
         user_id: user.id,
+        op_id: opId,
         name: mealName || "Composite Meal",
         scans_list: scanIds,
         analysis_json: compositeAnalysis
@@ -284,18 +353,34 @@ Return ONLY plain text.`;
       console.error("Failed to save meal composition record:", saveErr);
     }
 
-    let remainingCredits: number | undefined;
     if (activeReservationOpId) {
       const finalization = await finalizeReservation(user.id, activeReservationOpId);
-      remainingCredits = finalization.newBalance;
-      activeReservationOpId = null;
+      if (finalization.success) {
+        activeReservationOpId = null;
+        return NextResponse.json({
+          success: true,
+          meal: compositeAnalysis,
+          mealId: savedMeal?.id,
+          remainingCredits: finalization.newBalance
+        });
+      } else {
+        console.error("Credit finalization failed in meal composer:", finalization.error);
+        return NextResponse.json({
+          success: false,
+          status: "accounting_pending",
+          error: "ACCOUNTING_FINALIZATION_FAILED",
+          opId: activeReservationOpId,
+          mealId: savedMeal?.id,
+          message: `Meal was composed, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
+          meal: compositeAnalysis
+        }, { status: 500 });
+      }
     }
 
     return NextResponse.json({
       success: true,
       meal: compositeAnalysis,
-      mealId: savedMeal?.id,
-      remainingCredits
+      mealId: savedMeal?.id
     });
   } catch (error: any) {
     console.error("Error in meal composer route:", error);

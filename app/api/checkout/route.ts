@@ -62,21 +62,22 @@ export async function POST(request: Request) {
 
     const order = await razorpay.orders.create(options);
 
-    // Store server-side order association in payment_orders
-    try {
-      const adminClient = createAdminClient();
-      await adminClient
-        .from("payment_orders")
-        .insert({
-          id: order.id,
-          user_id: user.id,
-          pack_id: pack.id,
-          amount_paise: amount,
-          currency: currency,
-          status: "created"
-        });
-    } catch (orderSaveErr) {
-      console.warn("Could not save payment_orders record:", orderSaveErr);
+    // Store server-side order association in payment_orders (strictly required for webhook verification)
+    const adminClient = createAdminClient();
+    const { error: orderSaveErr } = await adminClient
+      .from("payment_orders")
+      .insert({
+        id: order.id,
+        user_id: user.id,
+        pack_id: pack.id,
+        amount_paise: amount,
+        currency: currency,
+        status: "created"
+      });
+
+    if (orderSaveErr) {
+      console.error("Failed to save payment_orders record:", orderSaveErr);
+      return NextResponse.json({ error: "Failed to persist server order association" }, { status: 500 });
     }
 
     return NextResponse.json({

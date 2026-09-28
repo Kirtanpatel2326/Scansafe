@@ -56,58 +56,53 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Payment has already been approved" }, { status: 400 });
       }
 
-      const pack = getScanPack(payment.plan_type) || getScanPack("pack_100");
-      const creditsToGrant = pack ? pack.scans : 100;
-      const refId = payment.utr ? `UTR:${payment.utr}` : `MANUAL:${paymentId}`;
-
-      // 1. Try atomic approve RPC function
-      try {
-        const { data: rpcRes, error: rpcErr } = await supabase.rpc("approve_manual_payment", {
-          p_payment_id: paymentId,
-          p_admin_id: user.id,
-          p_credits_to_grant: creditsToGrant
-        });
-
-        if (!rpcErr && rpcRes?.success) {
-          return NextResponse.json({ success: true, totalCredits: rpcRes.total_credits });
-        }
-      } catch (rpcErr) {
-        console.warn("Manual payment RPC not available, using fallback:", rpcErr);
+      const pack = getScanPack(payment.plan_type);
+      if (!pack) {
+        return NextResponse.json({ error: `Invalid plan_type in payment request: ${payment.plan_type}` }, { status: 400 });
       }
 
-      // 2. Fallback: Fulfill credits first, only update status if fulfillment succeeds
-      const fulfillment = await fulfillPackPurchase(
-        payment.user_id,
-        pack ? pack.id : "pack_100",
-        refId,
-        payment.amount
-      );
+      const creditsToGrant = pack.scans;
 
-      if (!fulfillment.success) {
-        console.error("Fulfillment failed on admin approval:", fulfillment.error);
-        return NextResponse.json({ error: "Failed to fulfill credits: " + fulfillment.error }, { status: 500 });
+      // Execute atomic admin approval RPC (grants credits, logs ledger, updates status in single transaction)
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc("approve_manual_payment", {
+        p_payment_id: paymentId,
+        p_admin_id: user.id,
+        p_credits_to_grant: creditsToGrant
+      });
+
+      if (rpcErr) {
+        console.error("Admin approval RPC error:", rpcErr);
+        return NextResponse.json({ error: `Approval transaction failed: ${rpcErr.message}` }, { status: 500 });
       }
 
-      const { error: updatePayErr } = await supabase
-        .from("pending_payments")
-        .update({ status: "approved" })
-        .eq("id", paymentId);
-
-      if (updatePayErr) {
-        console.error("Failed to update payment status:", updatePayErr);
-        return NextResponse.json({ error: "Failed to update approval status" }, { status: 500 });
+      if (!rpcRes || !rpcRes.success) {
+        const errMsg = rpcRes?.error || "Failed to approve payment";
+        return NextResponse.json({ error: errMsg }, { status: 400 });
       }
 
-      return NextResponse.json({ success: true, fulfillment });
+      return NextResponse.json({
+        success: true,
+        totalCredits: rpcRes.total_credits,
+        creditsGranted: creditsToGrant
+      });
     } else if (action === "reject") {
-      const { error: updatePayErr } = await supabase
-        .from("pending_payments")
-        .update({ status: "rejected" })
-        .eq("id", paymentId);
+      const { data: rejectRes, error: rejectErr } = await supabase.rpc("reject_manual_payment", {
+        p_payment_id: paymentId,
+        p_admin_id: user.id,
+        p_reason: "Manual UPI transfer rejected by administrator"
+      });
 
-      if (updatePayErr) throw updatePayErr;
+      if (rejectErr) {
+        console.error("Admin rejection RPC error:", rejectErr);
+        return NextResponse.json({ error: `Rejection transaction failed: ${rejectErr.message}` }, { status: 500 });
+      }
 
-      return NextResponse.json({ success: true });
+      if (!rejectRes || !rejectRes.success) {
+        const errMsg = rejectRes?.error || "Failed to reject payment";
+        return NextResponse.json({ error: errMsg }, { status: 400 });
+      }
+
+      return NextResponse.json({ success: true, status: "rejected" });
     }
 
     return NextResponse.json({ error: "Invalid action specifier" }, { status: 400 });
