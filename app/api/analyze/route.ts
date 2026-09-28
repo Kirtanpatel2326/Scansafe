@@ -267,8 +267,7 @@ export async function POST(request: Request) {
           // Apply user preferences dynamically on read
           const personalizedAnalysis = applyPreferences(baseAnalysis, finalPrefs);
 
-          let scanId = "";
-          const { data: scanData } = await supabase
+          const { data: scanData, error: scanInsertErr } = await supabase
             .from("scans")
             .insert({
               user_id: user.id,
@@ -283,18 +282,45 @@ export async function POST(request: Request) {
             .select()
             .single();
 
-          scanId = scanData?.id || "";
+          let finalScanData = scanData;
+          if (scanInsertErr || !scanData) {
+            if (scanInsertErr && (scanInsertErr.code === "23505" || scanInsertErr.message?.includes("unique") || scanInsertErr.message?.includes("duplicate key"))) {
+              const { data: existingSaved } = await supabase
+                .from("scans")
+                .select("*")
+                .eq("user_id", user.id)
+                .eq("op_id", opId)
+                .maybeSingle();
+
+              if (existingSaved) {
+                finalScanData = existingSaved;
+                activeReservationOpId = null;
+              }
+            }
+
+            if (!finalScanData) {
+              console.error("Failed to save cached scan to database:", scanInsertErr);
+              if (activeReservationOpId && !reservation.alreadyReserved) {
+                await releaseReservation(user.id, activeReservationOpId, "Database save failure for cached scan");
+                activeReservationOpId = null;
+              }
+              return NextResponse.json({
+                error: "DATABASE_ERROR",
+                message: "Failed to save scan record. Your credits have not been charged."
+              }, { status: 500 });
+            }
+          }
+
+          const scanId = finalScanData.id;
 
           // Finalize credit deduction on successful scan
           if (activeReservationOpId) {
             const finalization = await finalizeReservation(user.id, activeReservationOpId);
             if (finalization.success) {
-              if (scanId) {
-                await supabase
-                  .from("scans")
-                  .update({ accounting_status: "completed" })
-                  .eq("id", scanId);
-              }
+              await supabase
+                .from("scans")
+                .update({ accounting_status: "completed" })
+                .eq("id", scanId);
               activeReservationOpId = null;
 
               return NextResponse.json({
@@ -388,7 +414,7 @@ export async function POST(request: Request) {
             // Apply user preferences dynamically for current user
             const personalizedAnalysis = applyPreferences(enriched, finalPrefs);
 
-            const { data: scanData } = await supabase
+            const { data: scanData, error: offScanErr } = await supabase
               .from("scans")
               .insert({
                 user_id: user.id,
@@ -403,17 +429,44 @@ export async function POST(request: Request) {
               .select()
               .single();
 
-            const scanId = scanData?.id || "";
+            let finalScanData = scanData;
+            if (offScanErr || !scanData) {
+              if (offScanErr && (offScanErr.code === "23505" || offScanErr.message?.includes("unique") || offScanErr.message?.includes("duplicate key"))) {
+                const { data: existingSaved } = await supabase
+                  .from("scans")
+                  .select("*")
+                  .eq("user_id", user.id)
+                  .eq("op_id", opId)
+                  .maybeSingle();
+
+                if (existingSaved) {
+                  finalScanData = existingSaved;
+                  activeReservationOpId = null;
+                }
+              }
+
+              if (!finalScanData) {
+                console.error("Failed to save OFF scan to database:", offScanErr);
+                if (activeReservationOpId && !reservation.alreadyReserved) {
+                  await releaseReservation(user.id, activeReservationOpId, "Database save failure for OFF scan");
+                  activeReservationOpId = null;
+                }
+                return NextResponse.json({
+                  error: "DATABASE_ERROR",
+                  message: "Failed to save scan record. Your credits have not been charged."
+                }, { status: 500 });
+              }
+            }
+
+            const scanId = finalScanData.id;
 
             if (activeReservationOpId) {
               const finalization = await finalizeReservation(user.id, activeReservationOpId);
               if (finalization.success) {
-                if (scanId) {
-                  await supabase
-                    .from("scans")
-                    .update({ accounting_status: "completed" })
-                    .eq("id", scanId);
-                }
+                await supabase
+                  .from("scans")
+                  .update({ accounting_status: "completed" })
+                  .eq("id", scanId);
                 activeReservationOpId = null;
 
                 return NextResponse.json({
@@ -480,7 +533,6 @@ export async function POST(request: Request) {
     }
 
     // Save scan to user's private history
-    let scanId = "";
     const { data: scanData, error: scanInsertErr } = await supabase
       .from("scans")
       .insert({
@@ -496,9 +548,36 @@ export async function POST(request: Request) {
       .select()
       .single();
 
-    if (!scanInsertErr && scanData) {
-      scanId = scanData.id;
+    let finalScanData = scanData;
+    if (scanInsertErr || !scanData) {
+      if (scanInsertErr && (scanInsertErr.code === "23505" || scanInsertErr.message?.includes("unique") || scanInsertErr.message?.includes("duplicate key"))) {
+        const { data: existingSaved } = await supabase
+          .from("scans")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("op_id", opId)
+          .maybeSingle();
+
+        if (existingSaved) {
+          finalScanData = existingSaved;
+          activeReservationOpId = null;
+        }
+      }
+
+      if (!finalScanData) {
+        console.error("Failed to save vision scan to database:", scanInsertErr);
+        if (activeReservationOpId && !reservation.alreadyReserved) {
+          await releaseReservation(user.id, activeReservationOpId, "Database save failure for vision scan");
+          activeReservationOpId = null;
+        }
+        return NextResponse.json({
+          error: "DATABASE_ERROR",
+          message: "Failed to save scan record. Your credits have not been charged."
+        }, { status: 500 });
+      }
     }
+
+    const scanId = finalScanData.id;
 
     // If barcode was provided and panel was extracted, cache neutral raw facts (strictly excluding user image & personalized preferences)
     if (barcode && baseAnalysis.panel_status === "extracted") {
