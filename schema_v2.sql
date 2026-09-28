@@ -47,7 +47,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_payments_utr
 
 -- 1.3 MEAL COMPOSITIONS AUDIT COLUMNS
 ALTER TABLE public.meal_compositions
-  ADD COLUMN IF NOT EXISTS op_id TEXT;
+  ADD COLUMN IF NOT EXISTS op_id TEXT,
+  ADD COLUMN IF NOT EXISTS accounting_status TEXT DEFAULT 'completed';
 
 CREATE INDEX IF NOT EXISTS idx_meal_compositions_user_op_id ON public.meal_compositions(user_id, op_id);
 

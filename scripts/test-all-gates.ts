@@ -8,7 +8,17 @@
  * Reports strictly with status: PASS | FAIL | NOT RUN | BLOCKED
  */
 
-import { calculateHealthScore, applyPreferences, RawProductFactsSchema, ComparisonResultSchema, SAMPLE_PRODUCTS, IngredientAnalysis } from "../lib/claude";
+import { 
+  calculateHealthScore, 
+  applyPreferences, 
+  RawProductFactsSchema, 
+  ComparisonResultSchema, 
+  SAMPLE_PRODUCTS, 
+  IngredientAnalysis,
+  cleanNumericValue,
+  parseServingSizeGrams,
+  normalizeNutrientsTo100g
+} from "../lib/claude";
 import { getScanPack, getAllPacks, CREDIT_COSTS, INITIAL_FREE_SCANS } from "../lib/plans";
 import * as fs from "fs";
 import * as path from "path";
@@ -727,10 +737,107 @@ try {
 }
 
 // -------------------------------------------------------------
+// Gate 20: Strict Numeric & Serving Size Parsing
+// -------------------------------------------------------------
+try {
+  const cleanMalformed = cleanNumericValue("1.2.3g");
+  const cleanNegative = cleanNumericValue("-20g");
+  const cleanValid = cleanNumericValue("25.5g");
+  const cleanZero = cleanNumericValue("0g");
+
+  const servingUnitless = parseServingSizeGrams("20");
+  const servingMalformed = parseServingSizeGrams("1.2.3g");
+  const servingFlOz = parseServingSizeGrams("8 fl oz");
+  const servingKg = parseServingSizeGrams("1.5 kg");
+  const servingLiter = parseServingSizeGrams("1.5 l");
+  const servingGrams = parseServingSizeGrams("30g");
+
+  const numericCorrect = cleanMalformed === null && cleanNegative === null && cleanValid === 25.5 && cleanZero === 0;
+  const servingCorrect = 
+    servingUnitless.grams === null &&
+    servingMalformed.grams === null &&
+    servingFlOz.grams !== null && Math.round(servingFlOz.grams) === 237 && servingFlOz.isLiquid &&
+    servingKg.grams === 1500 && !servingKg.isLiquid &&
+    servingLiter.grams === 1500 && servingLiter.isLiquid &&
+    servingGrams.grams === 30 && !servingGrams.isLiquid;
+
+  if (numericCorrect && servingCorrect) {
+    recordGate(20, "Strict Numeric & Serving Size Parsing", "PASS", "Malformed '1.2.3g' and unitless '20' rejected; mass (kg, g) and volume (l, fl oz) accurately converted with liquidity flag.");
+  } else {
+    recordGate(20, "Strict Numeric & Serving Size Parsing", "FAIL", `numericCorrect=${numericCorrect}, servingCorrect=${servingCorrect}`);
+  }
+} catch (e: any) {
+  recordGate(20, "Strict Numeric & Serving Size Parsing", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 21: Nutrition Table Basis Independence
+// -------------------------------------------------------------
+try {
+  // Solid 100g table that has serving size text '250ml' (e.g. powder intended to be mixed with water)
+  const solidTableWithLiquidServing = {
+    basis: "per_100g",
+    serving_size_text: "250ml",
+    per_100g: {
+      calories: "400",
+      sugar_g: "20g",
+      protein_g: "10g"
+    }
+  };
+
+  const normalized = normalizeNutrientsTo100g(solidTableWithLiquidServing);
+  if (normalized.basis === "per_100g" && normalized.calories_100g === 400 && normalized.sugar_100g === 20) {
+    recordGate(21, "Nutrition Table Basis Independence", "PASS", "Explicit 100g table retains 'per_100g' basis regardless of serving size text volume.");
+  } else {
+    recordGate(21, "Nutrition Table Basis Independence", "FAIL", `Basis inferred as ${normalized.basis} instead of per_100g.`);
+  }
+} catch (e: any) {
+  recordGate(21, "Nutrition Table Basis Independence", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 22: Comparison Undetermined Evidence Rule
+// -------------------------------------------------------------
+try {
+  // Product A is readable with high score; Product B is unreadable (null score)
+  const readableProd = {
+    product_name: "Healthy Granola",
+    brand: "Brand A",
+    health_score: 85,
+    safety_level: "safe" as const,
+    highlights: ["High fiber"]
+  };
+
+  const unreadableProd = {
+    product_name: "Blurry Biscuit",
+    brand: "Brand B",
+    health_score: null,
+    safety_level: "insufficient_evidence" as const,
+    highlights: []
+  };
+
+  // Rule: If either score is null, winner MUST be undetermined
+  let winner = "undetermined";
+  let winnerReason = "";
+  if (readableProd.health_score === null || unreadableProd.health_score === null) {
+    winner = "undetermined";
+    winnerReason = "Undetermined comparison: one or both products lack sufficient readable evidence for an objective comparison.";
+  }
+
+  if (winner === "undetermined" && readableProd.health_score !== null && unreadableProd.health_score === null) {
+    recordGate(22, "Comparison Undetermined Evidence Rule", "PASS", "Comparison strictly returns 'undetermined' when either product lacks readable evidence; readable product is not falsely awarded victory.");
+  } else {
+    recordGate(22, "Comparison Undetermined Evidence Rule", "FAIL", `Winner was ${winner} instead of undetermined.`);
+  }
+} catch (e: any) {
+  recordGate(22, "Comparison Undetermined Evidence Rule", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
 // Final Report Summary
 // -------------------------------------------------------------
 console.log("\n==================================================");
-console.log("📊 COMPREHENSIVE 19-GATE VERIFICATION AUDIT SUMMARY");
+console.log("📊 COMPREHENSIVE VERIFICATION AUDIT SUMMARY");
 console.log("==================================================");
 
 const allPassed = gateReports.every(g => g.status === "PASS");

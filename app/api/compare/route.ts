@@ -282,34 +282,32 @@ JSON.stringify({
     const scoreResultA = calculateHealthScore(factsA);
     const scoreResultB = calculateHealthScore(factsB);
 
-    if (scoreResultA.score !== null) {
-      comparisonData.product_a.health_score = scoreResultA.score;
-      comparisonData.product_a.safety_level = scoreResultA.safetyLevel as any;
-    }
-    if (scoreResultB.score !== null) {
-      comparisonData.product_b.health_score = scoreResultB.score;
-      comparisonData.product_b.safety_level = scoreResultB.safetyLevel as any;
-    }
+    // Always assign calculated score and evidence status, including null
+    comparisonData.product_a.health_score = scoreResultA.score;
+    comparisonData.product_a.safety_level = scoreResultA.safetyLevel as any;
+    comparisonData.product_b.health_score = scoreResultB.score;
+    comparisonData.product_b.safety_level = scoreResultB.safetyLevel as any;
 
     // Determine deterministic winner based on calculated health score
-    if (scoreResultA.score === null && scoreResultB.score === null) {
+    // Rule: Return 'undetermined' when either product lacks evidence required for a fair comparison.
+    if (scoreResultA.score === null || scoreResultB.score === null) {
       comparisonData.winner = "undetermined";
-      comparisonData.winner_reason = "Both products lack sufficient nutritional evidence on their packaging to determine a winner.";
-    } else if (scoreResultA.score === null) {
-      comparisonData.winner = "B";
-      comparisonData.winner_reason = `${comparisonData.product_b.name} has verifiable nutrition facts (Score: ${scoreResultB.score}/100) while ${comparisonData.product_a.name} lacks sufficient label evidence.`;
-    } else if (scoreResultB.score === null) {
-      comparisonData.winner = "A";
-      comparisonData.winner_reason = `${comparisonData.product_a.name} has verifiable nutrition facts (Score: ${scoreResultA.score}/100) while ${comparisonData.product_b.name} lacks sufficient label evidence.`;
+      if (scoreResultA.score === null && scoreResultB.score === null) {
+        comparisonData.winner_reason = "Both products lack sufficient readable label evidence to perform an objective comparison.";
+      } else if (scoreResultA.score === null) {
+        comparisonData.winner_reason = `Undetermined comparison: ${comparisonData.product_a.name} lacks sufficient readable label evidence for a fair comparison with ${comparisonData.product_b.name}.`;
+      } else {
+        comparisonData.winner_reason = `Undetermined comparison: ${comparisonData.product_b.name} lacks sufficient readable label evidence for a fair comparison with ${comparisonData.product_a.name}.`;
+      }
+    } else if (Math.abs(scoreResultA.score - scoreResultB.score) <= 3) {
+      comparisonData.winner = "tie";
+      comparisonData.winner_reason = `Both products receive comparable nutritional health scores (${scoreResultA.score} vs ${scoreResultB.score}/100).`;
     } else if (scoreResultA.score > scoreResultB.score) {
       comparisonData.winner = "A";
       comparisonData.winner_reason = `${comparisonData.product_a.name} achieves a higher health score (${scoreResultA.score} vs ${scoreResultB.score}) based on better macronutrient balance.`;
-    } else if (scoreResultB.score > scoreResultA.score) {
+    } else {
       comparisonData.winner = "B";
       comparisonData.winner_reason = `${comparisonData.product_b.name} achieves a higher health score (${scoreResultB.score} vs ${scoreResultA.score}) based on better macronutrient balance.`;
-    } else {
-      comparisonData.winner = "tie";
-      comparisonData.winner_reason = `Both products receive an identical nutritional health score of ${scoreResultA.score}/100.`;
     }
 
     // Determine representative health score and safety level

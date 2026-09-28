@@ -111,6 +111,11 @@ export const ComparisonResultSchema = z.object({
   product_a: z.object({
     name: z.string().default("Product A"),
     brand: z.string().default("Brand A"),
+    panel_status: z.enum(["extracted", "unreadable", "missing"]).default("extracted"),
+    ingredients: z.array(IngredientItemSchema).default([]),
+    additives: z.array(AdditiveItemSchema).default([]),
+    nutrition_facts: NutritionFactsSchema.optional(),
+    upf_score: z.number().min(1).max(4).optional(),
     health_score: z.number().nullable().optional(),
     safety_level: z.enum(["safe", "moderate", "danger", "insufficient_evidence"]).default("safe"),
     highlights: z.array(z.string()).default([])
@@ -118,6 +123,11 @@ export const ComparisonResultSchema = z.object({
   product_b: z.object({
     name: z.string().default("Product B"),
     brand: z.string().default("Brand B"),
+    panel_status: z.enum(["extracted", "unreadable", "missing"]).default("extracted"),
+    ingredients: z.array(IngredientItemSchema).default([]),
+    additives: z.array(AdditiveItemSchema).default([]),
+    nutrition_facts: NutritionFactsSchema.optional(),
+    upf_score: z.number().min(1).max(4).optional(),
     health_score: z.number().nullable().optional(),
     safety_level: z.enum(["safe", "moderate", "danger", "insufficient_evidence"]).default("safe"),
     highlights: z.array(z.string()).default([])
@@ -248,7 +258,7 @@ function splitCompoundIngredients(rawName: string): string[] {
 
 /**
  * Cleans and validates a numeric nutrient measurement.
- * Rejects negative, non-finite, and NaN values. Preserves true zeros.
+ * Rejects negative, non-finite, NaN, and malformed values (e.g. "1.2.3g"). Preserves true zeros.
  */
 export function cleanNumericValue(val: any): number | null {
   if (val === null || val === undefined) return null;
@@ -260,9 +270,14 @@ export function cleanNumericValue(val: any): number | null {
     const trimmed = val.trim();
     if (trimmed.length === 0 || trimmed.toLowerCase() === "null" || trimmed.toLowerCase() === "undefined") return null;
     if (/-\s*[\d.]/.test(trimmed)) return null; // Explicitly reject negative strings like "-20g"
-    const match = trimmed.match(/[\d.]+/);
+    
+    // Reject malformed strings with multiple decimal points (e.g. "1.2.3", "1.2.3g")
+    if ((trimmed.match(/\./g) || []).length > 1) return null;
+
+    // Match valid non-negative float or integer with optional unit
+    const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:[a-zA-Z%]*)$/);
     if (match) {
-      const parsed = parseFloat(match[0]);
+      const parsed = parseFloat(match[1]);
       if (isNaN(parsed) || !isFinite(parsed) || parsed < 0) return null;
       return parsed;
     }
@@ -272,8 +287,8 @@ export function cleanNumericValue(val: any): number | null {
 
 /**
  * Extracts serving size in grams or milliliters from a string.
- * Supports "20g", "40 grams", "100ml", "1l", "1 liter", "1 bar (45g)", "1.5 oz", etc.
- * Rejects negative values, malformed strings, and ambiguous unitless sizes.
+ * Supports "20g", "40 grams", "100ml", "1l", "1 liter", "1 bar (45g)", "1.5 oz", "8 fl oz", etc.
+ * Strictly rejects negative values, malformed strings (e.g. "1.2.3g"), and ambiguous unitless sizes (e.g. "20").
  */
 export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: number | null; isLiquid: boolean; unit: string | null } {
   if (!servingSizeStr || typeof servingSizeStr !== "string") {
@@ -286,8 +301,13 @@ export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: 
     return { grams: null, isLiquid: false, unit: null };
   }
 
+  // Reject malformed multiple decimal points (e.g. "1.2.3g")
+  if ((str.match(/\./g) || []).length > 1) {
+    return { grams: null, isLiquid: false, unit: null };
+  }
+
   // 1. Milliliters (e.g. "100ml", "250 ml", "100 millilitres", "100 milliliters")
-  const matchMl = str.match(/([\d.]+)\s*(?:ml|milliliters?|millilitres?)\b/i);
+  const matchMl = str.match(/(\d+(?:\.\d+)?)\s*(?:ml|milliliters?|millilitres?)\b/i);
   if (matchMl) {
     const val = parseFloat(matchMl[1]);
     if (!isNaN(val) && isFinite(val) && val > 0) {
@@ -296,7 +316,7 @@ export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: 
   }
 
   // 2. Liters (e.g. "1l", "1.5 l", "1 liter", "1 litre", "2 liters")
-  const matchLiter = str.match(/([\d.]+)\s*(?:liters?|litres?|l)\b/i);
+  const matchLiter = str.match(/(\d+(?:\.\d+)?)\s*(?:liters?|litres?|l)\b/i);
   if (matchLiter) {
     const val = parseFloat(matchLiter[1]);
     if (!isNaN(val) && isFinite(val) && val > 0) {
@@ -304,8 +324,26 @@ export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: 
     }
   }
 
-  // 3. Grams (e.g. "20g", "20.5 g", "20 grams", "20 gm")
-  const matchGrams = str.match(/([\d.]+)\s*(?:grams?|gm|g)\b/i);
+  // 3. Fluid Ounces (e.g. "8 fl oz", "8 fl. oz.", "8 floz")
+  const matchFlOz = str.match(/(\d+(?:\.\d+)?)\s*(?:fl\.?\s*oz\.?|fluid\s+ounces?)\b/i);
+  if (matchFlOz) {
+    const val = parseFloat(matchFlOz[1]);
+    if (!isNaN(val) && isFinite(val) && val > 0) {
+      return { grams: val * 29.5735, isLiquid: true, unit: "fl oz" };
+    }
+  }
+
+  // 4. Kilograms (e.g. "1kg", "1.5 kg")
+  const matchKg = str.match(/(\d+(?:\.\d+)?)\s*(?:kg|kilograms?)\b/i);
+  if (matchKg) {
+    const val = parseFloat(matchKg[1]);
+    if (!isNaN(val) && isFinite(val) && val > 0) {
+      return { grams: val * 1000, isLiquid: false, unit: "kg" };
+    }
+  }
+
+  // 5. Grams (e.g. "20g", "20.5 g", "20 grams", "20 gm")
+  const matchGrams = str.match(/(\d+(?:\.\d+)?)\s*(?:grams?|gm|g)\b/i);
   if (matchGrams) {
     const val = parseFloat(matchGrams[1]);
     if (!isNaN(val) && isFinite(val) && val > 0) {
@@ -313,8 +351,8 @@ export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: 
     }
   }
 
-  // 4. Ounces (e.g. "1.5 oz", "2 ounces")
-  const matchOz = str.match(/([\d.]+)\s*(?:ounces?|oz)\b/i);
+  // 6. Ounces (e.g. "1.5 oz", "2 ounces")
+  const matchOz = str.match(/(\d+(?:\.\d+)?)\s*(?:ounces?|oz)\b/i);
   if (matchOz) {
     const val = parseFloat(matchOz[1]);
     if (!isNaN(val) && isFinite(val) && val > 0) {
@@ -322,15 +360,7 @@ export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: 
     }
   }
 
-  // 5. Standalone positive numeric digits only
-  const standalone = str.match(/^([\d.]+)$/);
-  if (standalone) {
-    const val = parseFloat(standalone[1]);
-    if (!isNaN(val) && isFinite(val) && val > 0) {
-      return { grams: val, isLiquid: false, unit: "g" };
-    }
-  }
-
+  // Standalone numbers without units MUST be rejected (e.g. "20" cannot be assumed to be grams)
   return { grams: null, isLiquid: false, unit: null };
 }
 
@@ -358,6 +388,7 @@ export interface Normalized100gNutrients {
  * - If a nutrient is missing in per_100g but present in per_serving AND a valid serving mass/volume is known, it scales it.
  * - If normalization is impossible, that specific nutrient is null.
  * - Per-100g thresholds are never silently applied to per-serving numbers.
+ * - Never infers nutrition table basis solely from serving text (e.g. 100g table remains per_100g even if serving is 250ml).
  */
 export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
   const emptyResult: Normalized100gNutrients = {
@@ -384,7 +415,11 @@ export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
   const rawServingSize = nf.serving_size || nf.serving_size_text || (nf.serving_size_g ? `${nf.serving_size_g}g` : null) || (nf.serving_size_ml ? `${nf.serving_size_ml}ml` : null);
   const servingInfo = parseServingSizeGrams(rawServingSize);
   const servingSizeGrams = servingInfo.grams ?? (typeof nf.serving_size_g === "number" && nf.serving_size_g > 0 ? nf.serving_size_g : null);
-  const isLiquid = servingInfo.isLiquid || nf.basis === "per_100ml" || !!nf.serving_size_ml;
+  
+  // Distinguish nutrition table basis from serving size units
+  const isExplicit100ml = nf.basis === "per_100ml" || !!nf.per_100ml;
+  const isExplicit100g = nf.basis === "per_100g" || !!nf.per_100g;
+  const isLiquid = isExplicit100ml ? true : (isExplicit100g ? false : servingInfo.isLiquid);
 
   const scaleFactor = (servingSizeGrams && servingSizeGrams > 0) ? (100 / servingSizeGrams) : null;
 
@@ -394,7 +429,7 @@ export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
     psVals: any[],
     flatVals: any[]
   ): { value: number | null; fromDirect: boolean } => {
-    // 1. Direct per 100g check
+    // 1. Direct per 100g/100ml check
     for (const v of p100Vals) {
       const clean = cleanNumericValue(v);
       if (clean !== null) return { value: clean, fromDirect: true };
@@ -484,8 +519,14 @@ export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
   }
 
   const hasDirect = nutrientList.some(n => n.fromDirect && n.value !== null);
-  const basis: "per_100g" | "per_100ml" | "normalized_from_serving" = 
-    hasDirect ? (isLiquid ? "per_100ml" : "per_100g") : "normalized_from_serving";
+  let basis: "per_100g" | "per_100ml" | "normalized_from_serving" = "normalized_from_serving";
+  if (isExplicit100ml) {
+    basis = "per_100ml";
+  } else if (isExplicit100g || hasDirect) {
+    basis = "per_100g";
+  } else {
+    basis = "normalized_from_serving";
+  }
 
   return {
     calories_100g: normCalories.value,
