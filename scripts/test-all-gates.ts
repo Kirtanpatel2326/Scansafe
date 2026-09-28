@@ -17,7 +17,8 @@ import {
   IngredientAnalysis,
   cleanNumericValue,
   parseServingSizeGrams,
-  normalizeNutrientsTo100g
+  normalizeNutrientsTo100g,
+  mapSourceNutriments
 } from "../lib/claude";
 import { getScanPack, getAllPacks, CREDIT_COSTS, INITIAL_FREE_SCANS } from "../lib/plans";
 import * as fs from "fs";
@@ -468,14 +469,22 @@ try {
     product_name: "Sweet Biscuit (Per Serving)",
     brand: "Brand A",
     panel_status: "extracted" as const,
-    ingredients: [{ name: "Wheat flour", status: "safe" as const, reason: "Grain" }],
+    ingredients: [
+      { name: "Wheat flour", status: "safe" as const, reason: "Grain" },
+      { name: "Sugar", status: "safe" as const, reason: "Sweetener" },
+      { name: "Vegetable fat", status: "safe" as const, reason: "Fat" }
+    ],
     additives: [],
     nutrition_facts: {
       panel_status: "extracted" as const,
-      basis: "per_serving" as const,
-      serving_size_text: "20g",
-      sugar_g: 10,
-      protein_g: 2
+      serving_size: "20g",
+      per_serving: {
+        sugar_g: 10,
+        calories: 100,
+        protein_g: 2,
+        fat_g: 4,
+        sodium_mg: 50
+      }
     }
   };
 
@@ -484,13 +493,21 @@ try {
     product_name: "Sweet Biscuit (Per 100g)",
     brand: "Brand B",
     panel_status: "extracted" as const,
-    ingredients: [{ name: "Wheat flour", status: "safe" as const, reason: "Grain" }],
+    ingredients: [
+      { name: "Wheat flour", status: "safe" as const, reason: "Grain" },
+      { name: "Sugar", status: "safe" as const, reason: "Sweetener" },
+      { name: "Vegetable fat", status: "safe" as const, reason: "Fat" }
+    ],
     additives: [],
     nutrition_facts: {
       panel_status: "extracted" as const,
-      basis: "per_100g" as const,
-      sugar_g: 50,
-      protein_g: 10
+      per_100g: {
+        sugar_g: 50,
+        calories: 500,
+        protein_g: 10,
+        fat_g: 20,
+        sodium_mg: 250
+      }
     }
   };
 
@@ -831,6 +848,159 @@ try {
   }
 } catch (e: any) {
   recordGate(22, "Comparison Undetermined Evidence Rule", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 23: Pregnancy Hazard Screening
+// -------------------------------------------------------------
+try {
+  const unpasteurizedProd = {
+    product_name: "Raw Dairy Milk",
+    brand: "Farm",
+    health_score: 80,
+    health_score_reason: "",
+    safety_level: "safe" as const,
+    description: "",
+    ingredients: [{ name: "Unpasteurized milk", status: "safe" as const, reason: "" }],
+    additives: [],
+    allergens: [],
+    nutrition_facts: { panel_status: "extracted" as const },
+    recommendations: []
+  };
+  const pregResult = applyPreferences(unpasteurizedProd, ["pregnancy"]);
+  if (!pregResult.dietary_compatibility?.is_compatible && pregResult.dietary_compatibility?.violations?.some(v => v.ingredient.toLowerCase().includes("unpasteurized"))) {
+    recordGate(23, "Pregnancy Hazard Screening", "PASS", "Unpasteurized milk strictly flags pregnancy hazard violation and returns is_compatible: false.");
+  } else {
+    recordGate(23, "Pregnancy Hazard Screening", "FAIL", "Unpasteurized milk was mistakenly marked compatible for pregnancy!");
+  }
+} catch (e: any) {
+  recordGate(23, "Pregnancy Hazard Screening", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 24: Unsupported Preference Security
+// -------------------------------------------------------------
+try {
+  const riceProd = {
+    product_name: "Rice Cake",
+    brand: "Brand",
+    health_score: 90,
+    health_score_reason: "",
+    safety_level: "safe" as const,
+    description: "",
+    ingredients: [{ name: "Brown Rice", status: "safe" as const, reason: "" }],
+    additives: [],
+    allergens: [],
+    nutrition_facts: { panel_status: "extracted" as const },
+    recommendations: []
+  };
+  const unsuppResult = applyPreferences(riceProd, ["gluten-free", "unknown-allergy"]);
+  if (!unsuppResult.dietary_compatibility?.is_compatible && unsuppResult.dietary_compatibility?.status === "unsupported_preference") {
+    recordGate(24, "Unsupported Preference Security", "PASS", "Unsupported preference fails closed with status: 'unsupported_preference' and is_compatible: false.");
+  } else {
+    recordGate(24, "Unsupported Preference Security", "FAIL", "Unsupported preference passed as compatible!");
+  }
+} catch (e: any) {
+  recordGate(24, "Unsupported Preference Security", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 25: Unrelated Allergen Declarations Isolation
+// -------------------------------------------------------------
+try {
+  const gfClaimOnly = {
+    product_name: "Mystery Snack",
+    brand: "Brand",
+    health_score: null,
+    health_score_reason: "Insufficient evidence",
+    safety_level: "insufficient_evidence" as const,
+    description: "",
+    ingredients: [],
+    additives: [],
+    allergens_declared: ["Gluten-Free"],
+    allergens: ["Gluten-Free"],
+    nutrition_facts: { panel_status: "extracted" as const },
+    recommendations: []
+  };
+  const unrelatedResult = applyPreferences(gfClaimOnly, ["allergy-soy"]);
+  if (!unrelatedResult.dietary_compatibility?.is_compatible && unrelatedResult.dietary_compatibility?.status === "insufficient_data") {
+    recordGate(25, "Unrelated Allergen Declarations Isolation", "PASS", "'Gluten-Free' declaration does not falsely certify absence of soy when ingredient panel is empty.");
+  } else {
+    recordGate(25, "Unrelated Allergen Declarations Isolation", "FAIL", "Unrelated 'Gluten-Free' claim falsely certified soy allergy compatibility!");
+  }
+} catch (e: any) {
+  recordGate(25, "Unrelated Allergen Declarations Isolation", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 26: Incomplete Single-Ingredient Evidence Rejection
+// -------------------------------------------------------------
+try {
+  const incompleteFact = {
+    product_name: "One Ingredient Food",
+    brand: "Brand",
+    panel_status: "extracted" as const,
+    ingredients: [{ name: "Sugar", status: "safe" as const, reason: "" }],
+    additives: [],
+    nutrition_facts: {
+      panel_status: "extracted" as const,
+      per_100g: { calories: 400, protein_g: 2 }
+    }
+  };
+  const incScore = calculateHealthScore(incompleteFact);
+  if (incScore.score === null && incScore.safetyLevel === "insufficient_evidence") {
+    recordGate(26, "Incomplete Single-Ingredient Evidence Rejection", "PASS", "Single ingredient with incomplete macronutrient panel strictly returns score: null.");
+  } else {
+    recordGate(26, "Incomplete Single-Ingredient Evidence Rejection", "FAIL", `Returned score ${incScore.score} for incomplete evidence!`);
+  }
+} catch (e: any) {
+  recordGate(26, "Incomplete Single-Ingredient Evidence Rejection", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 27: Liquid Nutrition Table (per_100ml) Normalization
+// -------------------------------------------------------------
+try {
+  const liquidTest = {
+    basis: "per_100ml",
+    per_100ml: {
+      calories: 45,
+      sugar_g: 10,
+      sodium_mg: 20,
+      protein_g: 1
+    }
+  };
+  const normLiq = normalizeNutrientsTo100g(liquidTest as any);
+  if (normLiq.basis === "per_100ml" && normLiq.calories_100g === 45 && normLiq.sugar_100g === 10 && normLiq.sodium_100g === 20 && normLiq.is_liquid) {
+    recordGate(27, "Liquid Nutrition Table Normalization", "PASS", "Liquid table per_100ml values correctly preserved with basis 'per_100ml' and is_liquid: true.");
+  } else {
+    recordGate(27, "Liquid Nutrition Table Normalization", "FAIL", `Liquid normalization failed: calories=${normLiq.calories_100g}, basis=${normLiq.basis}`);
+  }
+} catch (e: any) {
+  recordGate(27, "Liquid Nutrition Table Normalization", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 28: Sodium & Cholesterol Source Unit Conversion
+// -------------------------------------------------------------
+try {
+  const lowSodiumOFF = mapSourceNutriments({ sodium_value: 9.9, sodium_unit: "mg" });
+  const tenSodiumOFF = mapSourceNutriments({ sodium_value: 10, sodium_unit: "mg" });
+  const gramsSodiumOFF = mapSourceNutriments({ sodium_100g: 0.5 });
+  const cholOFF = mapSourceNutriments({ cholesterol_value: 0.8, cholesterol_unit: "mg" });
+
+  const lowSodPassed = lowSodiumOFF.per_100g?.sodium_mg === 10;
+  const tenSodPassed = tenSodiumOFF.per_100g?.sodium_mg === 10;
+  const gramSodPassed = gramsSodiumOFF.per_100g?.sodium_mg === 500;
+  const cholPassed = cholOFF.per_100g?.cholesterol_mg === 1;
+
+  if (lowSodPassed && tenSodPassed && gramSodPassed && cholPassed) {
+    recordGate(28, "Sodium & Cholesterol Unit Conversion", "PASS", "Source unit conversions verified without magnitude threshold guessing.");
+  } else {
+    recordGate(28, "Sodium & Cholesterol Unit Conversion", "FAIL", `lowSod=${lowSodiumOFF.per_100g?.sodium_mg}, tenSod=${tenSodiumOFF.per_100g?.sodium_mg}, gramSod=${gramsSodiumOFF.per_100g?.sodium_mg}`);
+  }
+} catch (e: any) {
+  recordGate(28, "Sodium & Cholesterol Unit Conversion", "FAIL", e.message);
 }
 
 // -------------------------------------------------------------

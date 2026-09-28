@@ -4,10 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "security-audit": "node scripts/security-audit.js"
+    "security-audit": "node scripts/security-audit.js",
+    "test": "npx tsx scripts/test-regression-failures.ts && npx tsx scripts/test-all-gates.ts",
+    "test:regression": "npx tsx scripts/test-regression-failures.ts",
+    "test:gates": "npx tsx scripts/test-all-gates.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
@@ -35,6 +38,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   },
   "overrides": {

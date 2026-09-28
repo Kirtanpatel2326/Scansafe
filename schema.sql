@@ -13,18 +13,25 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Create Policies
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- Profiles Policies
+DROP POLICY IF EXISTS "Allow users to read their own profile" ON public.profiles;
 CREATE POLICY "Allow users to read their own profile" 
     ON public.profiles FOR SELECT 
     USING (auth.uid() = id);
 
-CREATE POLICY "Allow users to update their own profile" 
+DROP POLICY IF EXISTS "Allow users to update their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Allow users to update non-sensitive profile fields" ON public.profiles;
+CREATE POLICY "Allow users to update non-sensitive profile fields" 
     ON public.profiles FOR UPDATE 
     USING (auth.uid() = id);
 
-CREATE POLICY "Allow service role or auth trigger to insert profiles" 
-    ON public.profiles FOR INSERT 
-    WITH CHECK (true);
+-- Revoke table-level UPDATE/INSERT from clients to protect scan_credits and plan
+REVOKE ALL ON public.profiles FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.profiles TO authenticated, anon;
+GRANT UPDATE (full_name, dietary_profile) ON public.profiles TO authenticated;
 
 
 -- 1.5 PENDING PAYMENTS (For manual UPI verification)
@@ -40,29 +47,15 @@ CREATE TABLE IF NOT EXISTS public.pending_payments (
 
 ALTER TABLE public.pending_payments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can insert their own pending payments" ON public.pending_payments;
 CREATE POLICY "Users can insert their own pending payments"
     ON public.pending_payments FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view their own pending payments" ON public.pending_payments;
 CREATE POLICY "Users can view their own pending payments"
     ON public.pending_payments FOR SELECT
     USING (auth.uid() = user_id);
-
--- Enable Row Level Security (RLS)
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- Create Policies
-CREATE POLICY "Allow users to read their own profile" 
-    ON public.profiles FOR SELECT 
-    USING (auth.uid() = id);
-
-CREATE POLICY "Allow users to update their own profile" 
-    ON public.profiles FOR UPDATE 
-    USING (auth.uid() = id);
-
-CREATE POLICY "Allow service role or auth trigger to insert profiles" 
-    ON public.profiles FOR INSERT 
-    WITH CHECK (true);
 
 
 -- 2. FAMILY MEMBERS TABLE (Multi-profile mode)
@@ -76,6 +69,7 @@ CREATE TABLE IF NOT EXISTS public.family_members (
 
 ALTER TABLE public.family_members ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage their own family members" ON public.family_members;
 CREATE POLICY "Users can manage their own family members"
     ON public.family_members FOR ALL
     USING (auth.uid() = user_id);
@@ -85,16 +79,27 @@ CREATE POLICY "Users can manage their own family members"
 CREATE TABLE IF NOT EXISTS public.scans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    op_id TEXT,
+    accounting_status TEXT DEFAULT 'completed',
     product_name TEXT NOT NULL,
     barcode TEXT,
-    health_score INTEGER NOT NULL CHECK (health_score BETWEEN 0 AND 100),
-    safety_level TEXT NOT NULL CHECK (safety_level IN ('safe', 'moderate', 'danger')),
+    health_score INTEGER CHECK (health_score IS NULL OR (health_score BETWEEN 0 AND 100)),
+    safety_level TEXT NOT NULL CHECK (safety_level IN ('safe', 'moderate', 'danger', 'insufficient_evidence')),
     result_json JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+DELETE FROM public.scans a
+USING public.scans b
+WHERE a.id < b.id 
+  AND a.user_id = b.user_id 
+  AND a.op_id = b.op_id 
+  AND a.op_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_user_op_id_unique ON public.scans(user_id, op_id) WHERE op_id IS NOT NULL;
 ALTER TABLE public.scans ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage their own scans" ON public.scans;
 CREATE POLICY "Users can manage their own scans"
     ON public.scans FOR ALL
     USING (auth.uid() = user_id);
@@ -104,14 +109,25 @@ CREATE POLICY "Users can manage their own scans"
 CREATE TABLE IF NOT EXISTS public.meal_compositions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    op_id TEXT,
+    accounting_status TEXT DEFAULT 'completed',
     name TEXT NOT NULL,
     scans_list UUID[] NOT NULL, -- references scans(id)
     analysis_json JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+DELETE FROM public.meal_compositions a
+USING public.meal_compositions b
+WHERE a.id < b.id 
+  AND a.user_id = b.user_id 
+  AND a.op_id = b.op_id 
+  AND a.op_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_meal_compositions_user_op_id_unique ON public.meal_compositions(user_id, op_id) WHERE op_id IS NOT NULL;
 ALTER TABLE public.meal_compositions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage their own meals" ON public.meal_compositions;
 CREATE POLICY "Users can manage their own meals"
     ON public.meal_compositions FOR ALL
     USING (auth.uid() = user_id);
@@ -129,6 +145,7 @@ CREATE TABLE IF NOT EXISTS public.favorites (
 
 ALTER TABLE public.favorites ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage their own favorites" ON public.favorites;
 CREATE POLICY "Users can manage their own favorites"
     ON public.favorites FOR ALL
     USING (auth.uid() = user_id);
@@ -145,42 +162,48 @@ CREATE TABLE IF NOT EXISTS public.blacklist (
 
 ALTER TABLE public.blacklist ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage their own blacklisted ingredients" ON public.blacklist;
 CREATE POLICY "Users can manage their own blacklisted ingredients"
     ON public.blacklist FOR ALL
     USING (auth.uid() = user_id);
 
 
--- 7. GLOBAL PRODUCTS CACHE
+-- 7. GLOBAL PRODUCTS CACHE (Trusted server-only writes)
 CREATE TABLE IF NOT EXISTS public.products_cache (
     barcode TEXT PRIMARY KEY,
     product_name TEXT NOT NULL,
     brand TEXT,
     raw_data JSONB NOT NULL,
+    schema_version TEXT DEFAULT '2.0',
+    source TEXT DEFAULT 'ocr',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 ALTER TABLE public.products_cache ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Anyone can read cached products" ON public.products_cache;
 CREATE POLICY "Anyone can read cached products"
     ON public.products_cache FOR SELECT
     USING (true);
 
-CREATE POLICY "Authenticated users can cache products"
-    ON public.products_cache FOR INSERT
-    WITH CHECK (auth.role() = 'authenticated');
+-- Revoke direct client write privileges on shared product cache
+REVOKE INSERT, UPDATE, DELETE ON public.products_cache FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.products_cache TO PUBLIC, anon, authenticated;
 
 
 -- 8. AUTO PROFILE CREATION TRIGGER ON SIGNUP
--- Creates a profile row automatically when a new user registers in auth.users
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.profiles (id, email, full_name, plan)
+    INSERT INTO public.profiles (id, email, full_name, plan, plan_type, scan_credits)
     VALUES (
         new.id,
         new.email,
         COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-        'free'
+        'free',
+        'free',
+        5
     ) ON CONFLICT (id) DO NOTHING;
     RETURN new;
 END;

@@ -33,7 +33,15 @@ ALTER TABLE public.scans
   ADD CONSTRAINT scans_safety_level_check 
   CHECK (safety_level IN ('safe', 'moderate', 'danger', 'insufficient_evidence'));
 
-CREATE INDEX IF NOT EXISTS idx_scans_user_op_id ON public.scans(user_id, op_id);
+-- Safe migration deduplication: clean any duplicate operation records prior to creating unique index
+DELETE FROM public.scans a
+USING public.scans b
+WHERE a.id < b.id 
+  AND a.user_id = b.user_id 
+  AND a.op_id = b.op_id 
+  AND a.op_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_user_op_id_unique ON public.scans(user_id, op_id) WHERE op_id IS NOT NULL;
 
 -- 1.2 PENDING PAYMENTS AUDIT COLUMNS & UNIQUE UTR
 ALTER TABLE public.pending_payments 
@@ -50,7 +58,14 @@ ALTER TABLE public.meal_compositions
   ADD COLUMN IF NOT EXISTS op_id TEXT,
   ADD COLUMN IF NOT EXISTS accounting_status TEXT DEFAULT 'completed';
 
-CREATE INDEX IF NOT EXISTS idx_meal_compositions_user_op_id ON public.meal_compositions(user_id, op_id);
+DELETE FROM public.meal_compositions a
+USING public.meal_compositions b
+WHERE a.id < b.id 
+  AND a.user_id = b.user_id 
+  AND a.op_id = b.op_id 
+  AND a.op_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_meal_compositions_user_op_id_unique ON public.meal_compositions(user_id, op_id) WHERE op_id IS NOT NULL;
 
 -- 2. CREDIT RESERVATIONS TABLE (For two-phase atomic credit reservation & release)
 CREATE TABLE IF NOT EXISTS public.credit_reservations (
@@ -131,12 +146,24 @@ CREATE POLICY "Users can view their own credit ledger"
     USING (auth.uid() = user_id);
 
 -- 5. HARDEN TABLE-LEVEL & COLUMN-LEVEL PERMISSIONS (Prevent privilege escalation)
-REVOKE INSERT, UPDATE, DELETE ON public.credit_ledger FROM anon, authenticated;
-REVOKE INSERT, UPDATE, DELETE ON public.credit_reservations FROM anon, authenticated;
-REVOKE UPDATE, DELETE ON public.payment_orders FROM anon, authenticated;
+REVOKE ALL ON public.credit_ledger FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.credit_ledger TO authenticated;
 
-REVOKE UPDATE (plan, plan_type, scan_credits, scans_today, scans_reset_at, razorpay_subscription_id) 
-    ON public.profiles FROM authenticated;
+REVOKE ALL ON public.credit_reservations FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.credit_reservations TO authenticated;
+
+REVOKE ALL ON public.payment_orders FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.payment_orders TO authenticated;
+
+-- PostgreSQL Table vs Column Grant Hardening: Revoke table-level UPDATE/INSERT, then grant column-level UPDATE
+REVOKE ALL ON public.profiles FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.profiles TO authenticated, anon;
+GRANT UPDATE (full_name, dietary_profile) ON public.profiles TO authenticated;
+
+-- Hardening shared cache: revoke write access from client roles
+REVOKE INSERT, UPDATE, DELETE ON public.products_cache FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.products_cache TO PUBLIC, anon, authenticated;
+DROP POLICY IF EXISTS "Authenticated users can cache products" ON public.products_cache;
 
 DROP POLICY IF EXISTS "Allow users to update their own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Allow users to update non-sensitive fields in their own profile" ON public.profiles;
@@ -185,12 +212,27 @@ BEGIN
 
         IF v_existing_res.status = 'reserved' THEN
             IF v_existing_res.expires_at <= timezone('utc'::text, now()) THEN
-                UPDATE public.credit_reservations SET status = 'expired' WHERE id = v_existing_res.id;
-                RETURN jsonb_build_object('success', false, 'error', 'RESERVATION_EXPIRED', 'message', 'Previous reservation has expired.');
+                -- Reservation expired: reactivate it for retry
+                UPDATE public.credit_reservations 
+                SET status = 'reserved', 
+                    expires_at = timezone('utc'::text, now()) + interval '5 minutes',
+                    description = p_description
+                WHERE id = v_existing_res.id;
+                RETURN jsonb_build_object('success', true, 'op_id', p_op_id, 'amount', p_amount, 'reopened', true);
             END IF;
             RETURN jsonb_build_object('success', true, 'op_id', p_op_id, 'already_reserved', true);
         ELSIF v_existing_res.status = 'finalized' THEN
             RETURN jsonb_build_object('success', true, 'op_id', p_op_id, 'already_finalized', true);
+        ELSIF v_existing_res.status = 'released' OR v_existing_res.status = 'expired' THEN
+            -- Allow retrying a failed or released operation
+            UPDATE public.credit_reservations 
+            SET status = 'reserved', 
+                amount = p_amount,
+                action = p_action,
+                expires_at = timezone('utc'::text, now()) + interval '5 minutes',
+                description = p_description
+            WHERE id = v_existing_res.id;
+            RETURN jsonb_build_object('success', true, 'op_id', p_op_id, 'amount', p_amount, 'reopened', true);
         ELSE
             RETURN jsonb_build_object('success', false, 'error', 'RESERVATION_CLOSED', 'status', v_existing_res.status);
         END IF;
@@ -261,12 +303,7 @@ BEGIN
         RETURN jsonb_build_object('success', true, 'already_finalized', true, 'new_balance', v_new_balance);
     END IF;
 
-    IF v_res.status = 'expired' OR (v_res.status = 'reserved' AND v_res.expires_at <= timezone('utc'::text, now())) THEN
-        UPDATE public.credit_reservations SET status = 'expired' WHERE id = v_res.id;
-        RETURN jsonb_build_object('success', false, 'error', 'RESERVATION_EXPIRED', 'message', 'Cannot finalize an expired reservation.');
-    END IF;
-
-    IF v_res.status <> 'reserved' THEN
+    IF v_res.status <> 'reserved' AND v_res.status <> 'expired' THEN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_STATUS', 'status', v_res.status);
     END IF;
 

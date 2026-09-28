@@ -303,13 +303,65 @@ export async function POST(request: Request) {
       }
     });
 
-    // Health Score: average only known non-null scores without substituting 50
-    const validScores = scans.map(s => s.health_score).filter((s): s is number => typeof s === "number" && !isNaN(s));
-    const averageHealthScore = validScores.length > 0
-      ? Math.round(validScores.reduce((sum, s) => sum + s, 0) / validScores.length)
-      : null;
+    // Health Score Calculation: Dimensionally Sound Weighting
+    // Strategy:
+    // 1. If calories are known for all scored constituent items, calculate calorie-weighted average.
+    // 2. Else if all scored constituent items share identical physical units (e.g. all grams or all ml), calculate quantity-weighted average.
+    // 3. Otherwise (incompatible units without complete calories), calculate unweighted arithmetic mean.
+    const scoredItems: Array<{ score: number; calories: number | null; quantity: number; unit: string }> = [];
 
-    let compositeVerdict = `Combined analysis of: ${quantityBreakdown.map(q => `${q.name} (${q.quantity})`).join(", ")}.`;
+    items.forEach((item) => {
+      const scan = scans.find(s => s.id === item.scanId);
+      if (scan && typeof scan.health_score === "number" && !isNaN(scan.health_score)) {
+        const res = scan.result_json || {};
+        const nut = res.nutrition_facts || {};
+        const normalized = normalizeNutrientsTo100g(nut);
+        let itemCal: number | null = null;
+
+        if (item.unit === "servings") {
+          if (nut.per_serving?.calories != null) {
+            itemCal = nut.per_serving.calories * item.quantity;
+          } else if (normalized.calories_100g != null && normalized.serving_size_g) {
+            itemCal = (normalized.calories_100g * normalized.serving_size_g * item.quantity) / 100;
+          }
+        } else {
+          if (normalized.calories_100g != null) {
+            itemCal = (normalized.calories_100g * item.quantity) / 100;
+          }
+        }
+
+        scoredItems.push({
+          score: scan.health_score,
+          calories: itemCal,
+          quantity: item.quantity,
+          unit: item.unit
+        });
+      }
+    });
+
+    let portionAwareHealthScore: number | null = null;
+    if (scoredItems.length > 0) {
+      const allHaveCalories = scoredItems.every(si => si.calories !== null && si.calories > 0);
+      const allSameUnit = scoredItems.every(si => si.unit === scoredItems[0].unit);
+
+      if (allHaveCalories) {
+        // Option 1: Calorie-weighted
+        const totalCal = scoredItems.reduce((acc, si) => acc + (si.calories || 0), 0);
+        const weightedSum = scoredItems.reduce((acc, si) => acc + si.score * (si.calories || 0), 0);
+        portionAwareHealthScore = totalCal > 0 ? Math.round(weightedSum / totalCal) : null;
+      } else if (allSameUnit) {
+        // Option 2: Quantity-weighted (homogeneous physical units)
+        const totalQty = scoredItems.reduce((acc, si) => acc + si.quantity, 0);
+        const weightedSum = scoredItems.reduce((acc, si) => acc + si.score * si.quantity, 0);
+        portionAwareHealthScore = totalQty > 0 ? Math.round(weightedSum / totalQty) : null;
+      } else {
+        // Option 3: Unweighted arithmetic mean across distinct dimensions
+        const sum = scoredItems.reduce((acc, si) => acc + si.score, 0);
+        portionAwareHealthScore = Math.round(sum / scoredItems.length);
+      }
+    }
+
+    let compositeVerdict = `Combined portion-weighted nutritional analysis of: ${quantityBreakdown.map(q => `${q.name} (${q.quantity})`).join(", ")}.`;
     const geminiApiKey = process.env.GEMINI_API_KEY;
 
     if (geminiApiKey) {
@@ -319,6 +371,7 @@ export async function POST(request: Request) {
         const promptText = `You are ScanSafe nutritional scientist.
 Evaluate this meal combination strictly based on evidence:
 Items consumed: ${quantityBreakdown.map(q => `${q.name} (${q.quantity})`).join(", ")}
+Portion-Weighted Health Score: ${portionAwareHealthScore != null ? portionAwareHealthScore + "/100" : "Insufficient Data"}
 Total Calories: ${totalCalories != null ? Math.round(totalCalories) : "Unknown"} kcal
 Total Carbs: ${totalCarbsGrams != null ? totalCarbsGrams.toFixed(1) + "g" : "Unknown"} (Sugar: ${totalSugarGrams != null ? totalSugarGrams.toFixed(1) + "g" : "Unknown"})
 Total Fats: ${totalFatGrams != null ? totalFatGrams.toFixed(1) + "g" : "Unknown"} (Saturated: ${totalSaturatedFatGrams != null ? totalSaturatedFatGrams.toFixed(1) + "g" : "Unknown"})
@@ -346,7 +399,7 @@ Return ONLY plain text.`;
 
     const compositeAnalysis = {
       meal_name: mealName || "Composite Meal",
-      health_score: averageHealthScore,
+      health_score: portionAwareHealthScore,
       composite_verdict: compositeVerdict,
       product_count: scans.length,
       quantity_breakdown: quantityBreakdown,
@@ -378,24 +431,51 @@ Return ONLY plain text.`;
       .select()
       .single();
 
-    if (saveErr) {
-      console.error("Failed to save meal composition record:", saveErr);
+    let finalSavedMeal = savedMeal;
+    if (saveErr || !savedMeal) {
+      // Check for concurrent unique constraint race on (user_id, op_id)
+      if (saveErr && (saveErr.code === "23505" || saveErr.message?.includes("unique") || saveErr.message?.includes("duplicate key"))) {
+        const { data: existingSaved } = await supabase
+          .from("meal_compositions")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("op_id", opId)
+          .maybeSingle();
+
+        if (existingSaved) {
+          finalSavedMeal = existingSaved;
+          activeReservationOpId = null; // Do NOT release winning reservation
+        }
+      }
+
+      if (!finalSavedMeal) {
+        console.error("Failed to save meal composition record:", saveErr);
+        if (activeReservationOpId && !reservation.alreadyReserved) {
+          await releaseReservation(user.id, activeReservationOpId, "Database save failure for meal composition");
+          activeReservationOpId = null;
+        }
+        return NextResponse.json({
+          error: "DATABASE_ERROR",
+          message: "Failed to save meal record. Your credits have not been deducted."
+        }, { status: 500 });
+      }
     }
+
+    const mealId = finalSavedMeal.id;
 
     if (activeReservationOpId) {
       const finalization = await finalizeReservation(user.id, activeReservationOpId);
       if (finalization.success) {
-        if (savedMeal?.id) {
-          await supabase
-            .from("meal_compositions")
-            .update({ accounting_status: "completed" })
-            .eq("id", savedMeal.id);
-        }
+        await supabase
+          .from("meal_compositions")
+          .update({ accounting_status: "completed" })
+          .eq("id", mealId);
         activeReservationOpId = null;
+
         return NextResponse.json({
           success: true,
           meal: compositeAnalysis,
-          mealId: savedMeal?.id,
+          mealId,
           remainingCredits: finalization.newBalance
         });
       } else {
@@ -405,7 +485,7 @@ Return ONLY plain text.`;
           status: "accounting_pending",
           error: "ACCOUNTING_FINALIZATION_FAILED",
           opId: activeReservationOpId,
-          mealId: savedMeal?.id,
+          mealId,
           message: `Meal was composed, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
           meal: compositeAnalysis
         }, { status: 500 });
