@@ -94,12 +94,40 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (existingMeal) {
-      return NextResponse.json({
-        success: true,
-        meal: existingMeal.analysis_json,
-        mealId: existingMeal.id,
-        already_completed: true
-      });
+      if (existingMeal.accounting_status === "completed") {
+        return NextResponse.json({
+          success: true,
+          meal: existingMeal.analysis_json,
+          mealId: existingMeal.id,
+          already_completed: true
+        });
+      } else if (existingMeal.accounting_status === "accounting_pending") {
+        const finalization = await finalizeReservation(user.id, opId);
+        if (finalization.success) {
+          await supabase
+            .from("meal_compositions")
+            .update({ accounting_status: "completed" })
+            .eq("id", existingMeal.id);
+
+          return NextResponse.json({
+            success: true,
+            meal: existingMeal.analysis_json,
+            mealId: existingMeal.id,
+            remainingCredits: finalization.newBalance,
+            recovered: true
+          });
+        } else {
+          return NextResponse.json({
+            success: false,
+            status: "accounting_pending",
+            error: "ACCOUNTING_FINALIZATION_FAILED",
+            opId,
+            mealId: existingMeal.id,
+            message: `Meal was composed, but credit finalization failed: ${finalization.error}. Please retry.`,
+            meal: existingMeal.analysis_json
+          }, { status: 500 });
+        }
+      }
     }
 
     const reservation = await reserveCredits(
@@ -342,6 +370,7 @@ Return ONLY plain text.`;
       .insert({
         user_id: user.id,
         op_id: opId,
+        accounting_status: "accounting_pending",
         name: mealName || "Composite Meal",
         scans_list: scanIds,
         analysis_json: compositeAnalysis
@@ -356,6 +385,12 @@ Return ONLY plain text.`;
     if (activeReservationOpId) {
       const finalization = await finalizeReservation(user.id, activeReservationOpId);
       if (finalization.success) {
+        if (savedMeal?.id) {
+          await supabase
+            .from("meal_compositions")
+            .update({ accounting_status: "completed" })
+            .eq("id", savedMeal.id);
+        }
         activeReservationOpId = null;
         return NextResponse.json({
           success: true,
