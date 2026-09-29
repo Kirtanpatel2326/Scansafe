@@ -1,7 +1,15 @@
 import { createClient } from "@/lib/supabase-server";
-import { reserveCredits, finalizeReservation, releaseReservation } from "@/lib/credits";
+import { 
+  reserveCredits, 
+  finalizeReservation, 
+  releaseReservation, 
+  claimOperation, 
+  saveOperationResultAndFinalize, 
+  releaseOperationOnFailure, 
+  recoverOperationAccounting 
+} from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
-import { normalizeNutrientsTo100g } from "@/lib/claude";
+import { normalizeNutrientsTo100g, parseServingSizeGrams, parseMeasurementQuantity } from "@/lib/claude";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import axios from "axios";
@@ -20,27 +28,11 @@ const MealPayloadSchema = z.object({
   items: z.array(MealItemSchema).min(1, "At least one item with explicit quantity and unit is required")
 });
 
-/**
- * Extracts serving size in grams from a string like "40g", "30 g", "1.5 oz", etc.
- */
-function parseServingSizeGrams(servingSizeStr?: string | null): number | null {
-  if (!servingSizeStr) return null;
-  const matchGrams = servingSizeStr.match(/([\d.]+)\s*g/i);
-  if (matchGrams) {
-    const val = parseFloat(matchGrams[1]);
-    return isNaN(val) || val <= 0 ? null : val;
-  }
-  const matchMl = servingSizeStr.match(/([\d.]+)\s*ml/i);
-  if (matchMl) {
-    const val = parseFloat(matchMl[1]);
-    return isNaN(val) || val <= 0 ? null : val;
-  }
-  return null;
-}
-
 export async function POST(request: Request) {
   let activeReservationOpId: string | null = null;
   let currentUserId: string | null = null;
+  let activeWorkerId: string | null = null;
+  let activeFencingToken: number | undefined = undefined;
 
   try {
     const supabase = await createClient();
@@ -70,7 +62,14 @@ export async function POST(request: Request) {
 
     const { mealName, items } = parsed.data;
     const headerIdempotencyKey = request.headers.get("x-idempotency-key")?.trim() || "";
-    let idempotencyKey = parsed.data.idempotencyKey || headerIdempotencyKey;
+    const bodyIdempotencyKey = parsed.data.idempotencyKey?.trim() || "";
+    if (headerIdempotencyKey && bodyIdempotencyKey && headerIdempotencyKey !== bodyIdempotencyKey) {
+      return NextResponse.json({
+        error: "IDEMPOTENCY_KEY_MISMATCH",
+        message: "Conflicting idempotency keys provided in header and body."
+      }, { status: 400 });
+    }
+    let idempotencyKey = bodyIdempotencyKey || headerIdempotencyKey;
     if (!idempotencyKey) {
       const normalizedPayload = {
         mealName: mealName || "Composite Meal",
@@ -84,66 +83,87 @@ export async function POST(request: Request) {
 
     // 2. IDEMPOTENCY CHECK & ATOMIC CREDIT RESERVATION (1 credit for meal composition)
     const opId = `op_meal_${user.id.slice(0, 8)}_${idempotencyKey}`;
+    const payloadHash = crypto.createHash("sha256").update(JSON.stringify({
+      mealName: mealName || "Composite Meal",
+      items: [...items].sort((a, b) => a.scanId.localeCompare(b.scanId))
+    })).digest("hex");
 
-    // Check if meal composition with this op_id already exists
-    const { data: existingMeal } = await supabase
-      .from("meal_compositions")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("op_id", opId)
-      .maybeSingle();
+    const workerId = `w_${process.pid || 1}_${crypto.randomBytes(4).toString("hex")}`;
+    activeWorkerId = workerId;
 
-    if (existingMeal) {
-      if (existingMeal.accounting_status === "completed") {
-        return NextResponse.json({
-          success: true,
-          meal: existingMeal.analysis_json,
-          mealId: existingMeal.id,
-          already_completed: true
-        });
-      } else if (existingMeal.accounting_status === "accounting_pending") {
-        const finalization = await finalizeReservation(user.id, opId);
-        if (finalization.success) {
-          await supabase
-            .from("meal_compositions")
-            .update({ accounting_status: "completed" })
-            .eq("id", existingMeal.id);
-
-          return NextResponse.json({
-            success: true,
-            meal: existingMeal.analysis_json,
-            mealId: existingMeal.id,
-            remainingCredits: finalization.newBalance,
-            recovered: true
-          });
-        } else {
-          return NextResponse.json({
-            success: false,
-            status: "accounting_pending",
-            error: "ACCOUNTING_FINALIZATION_FAILED",
-            opId,
-            mealId: existingMeal.id,
-            message: `Meal was composed, but credit finalization failed: ${finalization.error}. Please retry.`,
-            meal: existingMeal.analysis_json
-          }, { status: 500 });
-        }
-      }
-    }
-
-    const reservation = await reserveCredits(
+    // Atomically claim operation
+    const claim = await claimOperation(
       user.id,
-      CREDIT_COSTS.MEAL_COMPOSER,
-      "meal_compose",
       opId,
-      `Meal composition: ${mealName}`
+      "meal_composer",
+      CREDIT_COSTS.MEAL_COMPOSER,
+      payloadHash,
+      workerId,
+      120
     );
 
-    if (!reservation.success) {
+    if (!claim.success) {
+      if (claim.error === "IDEMPOTENCY_CONFLICT") {
+        return NextResponse.json({
+          error: "IDEMPOTENCY_CONFLICT",
+          message: "This idempotency key was previously used with different meal items."
+        }, { status: 409 });
+      }
+      if (claim.error === "OPERATION_IN_PROGRESS") {
+        return NextResponse.json({
+          error: "OPERATION_IN_PROGRESS",
+          message: "This meal composition is actively being processed by another worker. Please wait."
+        }, { status: 409 });
+      }
+      if (claim.error === "INSUFFICIENT_CREDITS") {
+        return NextResponse.json({
+          error: "INSUFFICIENT_CREDITS",
+          message: "You need at least 1 scan credit to compose a meal. Please refill your scan pack.",
+          availableCredits: claim.availableCredits ?? 0
+        }, { status: 403 });
+      }
       return NextResponse.json({
-        error: "INSUFFICIENT_CREDITS",
-        message: reservation.error || "You need at least 1 scan credit to compose a meal. Please refill your scan pack.",
-        availableCredits: reservation.availableCreditsAfter ?? 0
-      }, { status: 403 });
+        error: claim.error || "OPERATION_CLAIM_FAILED",
+        message: claim.message || "Failed to claim meal composer operation."
+      }, { status: 500 });
+    }
+
+    activeFencingToken = claim.fencingToken;
+
+    if (claim.status === "completed" || claim.alreadyCompleted) {
+      const savedMeal = claim.result?.meal || claim.result;
+      const savedMealId = claim.result?.mealId || opId;
+      return NextResponse.json({
+        success: true,
+        meal: savedMeal,
+        mealId: savedMealId,
+        already_completed: true
+      });
+    }
+
+    if (claim.status === "accounting_pending" || claim.accountingPending) {
+      const recovery = await recoverOperationAccounting(user.id, opId);
+      const savedMeal = claim.result?.meal || claim.result;
+      const savedMealId = claim.result?.mealId || opId;
+      if (recovery.success) {
+        return NextResponse.json({
+          success: true,
+          meal: savedMeal,
+          mealId: savedMealId,
+          remainingCredits: recovery.newBalance,
+          recovered: true
+        });
+      } else {
+        return NextResponse.json({
+          success: false,
+          status: "accounting_pending",
+          error: "ACCOUNTING_FINALIZATION_FAILED",
+          opId,
+          mealId: savedMealId,
+          message: `Meal was composed, but credit finalization failed: ${recovery.error}. Please retry.`,
+          meal: savedMeal
+        }, { status: 500 });
+      }
     }
 
     activeReservationOpId = opId;
@@ -158,7 +178,8 @@ export async function POST(request: Request) {
     const uniqueRequestedIds = new Set(scanIds);
     if (scansError || !scans || scans.length !== uniqueRequestedIds.size) {
       if (activeReservationOpId) {
-        await releaseReservation(user.id, activeReservationOpId, "Selected scan records not found");
+        await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Selected scan records not found", activeFencingToken);
+        activeReservationOpId = null;
       }
       return NextResponse.json({ error: "One or more selected food scans could not be found or do not belong to your account." }, { status: 400 });
     }
@@ -167,7 +188,8 @@ export async function POST(request: Request) {
     const unsupportedScan = scans.find(s => s.barcode?.startsWith("COMPARE:") || s.safety_level === "insufficient_evidence");
     if (unsupportedScan) {
       if (activeReservationOpId) {
-        await releaseReservation(user.id, activeReservationOpId, "Unsupported scan type in meal");
+        await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Unsupported scan type in meal", activeFencingToken);
+        activeReservationOpId = null;
       }
       return NextResponse.json({ error: "Comparison results or unreadable scans without nutritional data cannot be used as meal components." }, { status: 400 });
     }
@@ -244,15 +266,43 @@ export async function POST(request: Request) {
           itemSodium = normalized.sodium_100g != null ? normalized.sodium_100g * scale : null;
         }
       } else {
-        // Requested in grams or ml: scale relative to 100g/100ml normalized basis
-        const scale = qty / 100;
-        itemCal = normalized.calories_100g != null ? normalized.calories_100g * scale : null;
-        itemFat = normalized.fat_100g != null ? normalized.fat_100g * scale : null;
-        itemSatFat = normalized.saturated_fat_100g != null ? normalized.saturated_fat_100g * scale : null;
-        itemCarbs = normalized.carbs_100g != null ? normalized.carbs_100g * scale : null;
-        itemSugar = normalized.sugar_100g != null ? normalized.sugar_100g * scale : null;
-        itemProtein = normalized.protein_100g != null ? normalized.protein_100g * scale : null;
-        itemSodium = normalized.sodium_100g != null ? normalized.sodium_100g * scale : null;
+        // Requested in grams or ml: verify dimensional compatibility
+        const requestedDimension = unit === "ml" ? "volume" : "mass";
+        const basisDimension = normalized.is_liquid || normalized.basis === "per_100ml" ? "volume" : (normalized.basis === "per_100g" ? "mass" : "unknown");
+
+        if (requestedDimension === basisDimension) {
+          const scale = qty / 100;
+          itemCal = normalized.calories_100g != null ? normalized.calories_100g * scale : null;
+          itemFat = normalized.fat_100g != null ? normalized.fat_100g * scale : null;
+          itemSatFat = normalized.saturated_fat_100g != null ? normalized.saturated_fat_100g * scale : null;
+          itemCarbs = normalized.carbs_100g != null ? normalized.carbs_100g * scale : null;
+          itemSugar = normalized.sugar_100g != null ? normalized.sugar_100g * scale : null;
+          itemProtein = normalized.protein_100g != null ? normalized.protein_100g * scale : null;
+          itemSodium = normalized.sodium_100g != null ? normalized.sodium_100g * scale : null;
+        } else {
+          // Dimension mismatch (e.g. requested ml for solid 100g, or grams for liquid 100ml)
+          // Do NOT assume 1 ml = 1 g. Check if serving size unit matches requested dimension.
+          const rawServing = parseServingSizeGrams(nut.serving_size || nut.serving_size_text);
+          if (rawServing.dimension === requestedDimension && rawServing.grams && rawServing.grams > 0) {
+            const servingRatio = qty / rawServing.grams;
+            itemCal = ps.calories != null ? ps.calories * servingRatio : null;
+            itemFat = ps.fat_g != null ? ps.fat_g * servingRatio : null;
+            itemSatFat = ps.saturated_fat_g != null ? ps.saturated_fat_g * servingRatio : null;
+            itemCarbs = ps.carbs_g != null ? ps.carbs_g * servingRatio : null;
+            itemSugar = ps.sugar_g != null ? ps.sugar_g * servingRatio : null;
+            itemProtein = ps.protein_g != null ? ps.protein_g * servingRatio : null;
+            itemSodium = ps.sodium_mg != null ? ps.sodium_mg * servingRatio : null;
+          } else {
+            // Incompatible dimension without density: nutrients cannot be scaled safely
+            itemCal = null;
+            itemFat = null;
+            itemSatFat = null;
+            itemCarbs = null;
+            itemSugar = null;
+            itemProtein = null;
+            itemSodium = null;
+          }
+        }
       }
 
       // Propagate missing/unknown values: if a constituent product is missing calories, total becomes null
@@ -444,14 +494,13 @@ Return ONLY plain text.`;
 
         if (existingSaved) {
           finalSavedMeal = existingSaved;
-          activeReservationOpId = null; // Do NOT release winning reservation
         }
       }
 
       if (!finalSavedMeal) {
         console.error("Failed to save meal composition record:", saveErr);
-        if (activeReservationOpId && !reservation.alreadyReserved) {
-          await releaseReservation(user.id, activeReservationOpId, "Database save failure for meal composition");
+        if (activeReservationOpId) {
+          await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for meal composition", activeFencingToken);
           activeReservationOpId = null;
         }
         return NextResponse.json({
@@ -463,44 +512,40 @@ Return ONLY plain text.`;
 
     const mealId = finalSavedMeal.id;
 
-    if (activeReservationOpId) {
-      const finalization = await finalizeReservation(user.id, activeReservationOpId);
-      if (finalization.success) {
+    // Finalize credit deduction atomically
+    const finalization = await saveOperationResultAndFinalize(user.id, opId, workerId, { meal: compositeAnalysis, mealId }, activeFencingToken);
+    if (finalization.success) {
+      if (mealId) {
         await supabase
           .from("meal_compositions")
           .update({ accounting_status: "completed" })
           .eq("id", mealId);
-        activeReservationOpId = null;
-
-        return NextResponse.json({
-          success: true,
-          meal: compositeAnalysis,
-          mealId,
-          remainingCredits: finalization.newBalance
-        });
-      } else {
-        console.error("Credit finalization failed in meal composer:", finalization.error);
-        return NextResponse.json({
-          success: false,
-          status: "accounting_pending",
-          error: "ACCOUNTING_FINALIZATION_FAILED",
-          opId: activeReservationOpId,
-          mealId,
-          message: `Meal was composed, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
-          meal: compositeAnalysis
-        }, { status: 500 });
       }
+      activeReservationOpId = null;
+
+      return NextResponse.json({
+        success: true,
+        meal: compositeAnalysis,
+        mealId,
+        remainingCredits: finalization.newBalance
+      });
+    } else {
+      console.error("Credit finalization failed in meal composer:", finalization.error);
+      return NextResponse.json({
+        success: false,
+        status: "accounting_pending",
+        error: "ACCOUNTING_FINALIZATION_FAILED",
+        opId: activeReservationOpId,
+        mealId,
+        message: `Meal was composed, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
+        meal: compositeAnalysis
+      }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      meal: compositeAnalysis,
-      mealId: savedMeal?.id
-    });
   } catch (error: any) {
     console.error("Error in meal composer route:", error);
-    if (activeReservationOpId && currentUserId) {
-      await releaseReservation(currentUserId, activeReservationOpId, "Meal composer calculation failure");
+    if (activeReservationOpId && currentUserId && activeWorkerId && typeof activeFencingToken === "number") {
+      await releaseOperationOnFailure(currentUserId, activeReservationOpId, activeWorkerId, error.message || "Meal composer calculation failure", activeFencingToken);
     }
     return NextResponse.json({ error: "Failed to compose meal nutrients. Your credit has been restored." }, { status: 500 });
   }

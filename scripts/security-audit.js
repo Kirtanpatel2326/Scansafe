@@ -174,13 +174,11 @@ console.log('');
 console.log(`${colors.bright}${colors.blue}[4/5] Checking Server-Side Pricing Verification...${colors.reset}`);
 
 let pricingOk = false;
-let webhookSecured = false;
-
 // Check checkout route
 try {
   const checkoutPath = path.join(projectRoot, 'app', 'api', 'checkout', 'route.ts');
   const content = fs.readFileSync(checkoutPath, 'utf8');
-  if (content.includes('amount = 99900') && content.includes('planType') && !content.includes('amount = body.amount')) {
+  if ((content.includes('getScanPack') || content.includes('amount = 99900')) && !content.includes('amount = body.amount') && !content.includes('amount: rawBody.amount')) {
     pricingOk = true;
     console.log(`  ${colors.green}✓${colors.reset} Pricing logic is enforced server-side. No client-side price injection allowed.`);
   } else {

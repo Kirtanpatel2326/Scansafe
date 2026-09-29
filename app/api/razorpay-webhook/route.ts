@@ -11,7 +11,7 @@ export async function POST(request: Request) {
 
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
     if (!webhookSecret) {
-      console.error("RAZORPAY_WEBHOOK_SECRET is not configured on the server.");
+      console.error("Payment webhook signing key is not configured on the server.");
       return NextResponse.json({ error: "Webhook secret is not configured" }, { status: 500 });
     }
 
@@ -96,17 +96,23 @@ export async function POST(request: Request) {
       }
 
       // Verify exact amount is provided in event payload and matches server catalog
-      const actualAmountPaise = paymentEntity?.amount !== undefined ? paymentEntity.amount : (orderEntity?.amount_paid !== undefined ? orderEntity.amount_paid : null);
-      if (actualAmountPaise === null || actualAmountPaise === undefined) {
+      const actualAmountUnits = paymentEntity?.amount !== undefined ? paymentEntity.amount : (orderEntity?.amount_paid !== undefined ? orderEntity.amount_paid : null);
+      if (actualAmountUnits === null || actualAmountUnits === undefined) {
         console.error(`Missing actual amount in webhook payload for order '${orderId}'`);
         return NextResponse.json({ error: "Missing actual payment amount in webhook event payload" }, { status: 400 });
       }
 
-      const expectedAmountPaise = pack.priceInr * 100;
-      if (actualAmountPaise !== expectedAmountPaise || actualAmountPaise !== serverOrder.amount_paise) {
-        console.error(`Amount mismatch for order '${orderId}'. Expected: ${expectedAmountPaise} paise, Received: ${actualAmountPaise} paise.`);
+      const isUsd = serverOrder.currency.toUpperCase() === "USD";
+      const expectedAmountUnits = isUsd 
+        ? (pack.priceCents || (pack.priceUsd ? pack.priceUsd * 100 : 900)) 
+        : (pack.pricePaise || pack.priceInr * 100);
+
+      if (actualAmountUnits !== expectedAmountUnits || actualAmountUnits !== serverOrder.amount_paise) {
+        console.error(`Amount mismatch for order '${orderId}'. Expected: ${expectedAmountUnits} (${isUsd ? 'USD cents' : 'INR paise'}), Received: ${actualAmountUnits}.`);
         return NextResponse.json({ error: "Payment amount mismatch with server catalog" }, { status: 400 });
       }
+
+      const priceDisplay = isUsd ? `$${pack.priceUsd || (expectedAmountUnits / 100)}` : `₹${pack.priceInr}`;
 
       // Atomically fulfill order in database via single PostgreSQL transaction
       const fulfillment = await fulfillOrderPayment(
@@ -114,7 +120,7 @@ export async function POST(request: Request) {
         providerPaymentId,
         pack.scans,
         pack.id,
-        `Purchased ${pack.name} (${pack.scans} scans) for ₹${pack.priceInr}`
+        `Purchased ${pack.name} (${pack.scans} scans) for ${priceDisplay}`
       );
 
       if (!fulfillment.success) {

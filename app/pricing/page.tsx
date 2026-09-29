@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
-import { Sparkles, Check, CreditCard, RefreshCw, Star, Zap, ShieldCheck, Shield, Smartphone, QrCode, X } from 'lucide-react'
+import { getAllPacks, SCAN_PACKS, LIVE_PAYMENTS_ENABLED } from '@/lib/plans'
+import { Sparkles, Check, CreditCard, RefreshCw, Star, Zap, ShieldCheck, Shield, Smartphone, QrCode, X, AlertTriangle } from 'lucide-react'
 import Image from 'next/image'
 
 // Load script helper
@@ -27,25 +28,16 @@ export default function PricingPage() {
   const [planType, setPlanType] = useState<string>('free')
   const [upgrading, setUpgrading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
-  const [isInternational, setIsInternational] = useState(false)
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('week')
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('pack_100')
   const [showManualModal, setShowManualModal] = useState(false)
   const [utr, setUtr] = useState('')
   const [submittingUtr, setSubmittingUtr] = useState(false)
 
-  useEffect(() => {
-    // Auto-detect location based on timezone (instant, no API required)
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-      if (tz !== 'Asia/Calcutta' && tz !== 'Asia/Kolkata') {
-        setIsInternational(true)
-        setSelectedPeriod('usd_9')
-      }
-    } catch (e) {
-      console.error('Error detecting timezone', e)
-    }
+  const packs = getAllPacks()
+  const selectedPack = SCAN_PACKS[selectedPeriod] || packs[1]
 
-    // 1. Check active session (retrieves cached session and handles background refreshes)
+  useEffect(() => {
+    // 1. Check active session
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const currentUser = session?.user ?? null
       setUser(currentUser)
@@ -57,8 +49,8 @@ export default function PricingPage() {
       }
     })
 
-    // 2. Listen for auth changes (token refreshes, sign ins, sign outs)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // 2. Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const currentUser = session?.user ?? null
       setUser(currentUser)
       if (currentUser) {
@@ -98,32 +90,30 @@ export default function PricingPage() {
   }
 
   const handleManualUpgrade = async () => {
+    if (!LIVE_PAYMENTS_ENABLED) {
+      alert('Manual payment submissions are currently disabled pending production verification. Please use the zero-credit sample demo.')
+      return
+    }
+
     if (!user) {
       router.push('/auth')
       return
     }
-    if (utr.trim().length < 12) {
-      alert('Please enter a valid 12-digit UTR number.')
+    if (utr.trim().length < 8) {
+      alert('Please enter a valid UTR number (at least 8 characters).')
       return
     }
 
     setSubmittingUtr(true)
     try {
-      const planNameMap: Record<string, number> = {
-        day: 10,
-        week: 99,
-        month: 299,
-        year: 999
-      }
-      const amount = planNameMap[selectedPeriod] || 999
-
+      const targetPack = SCAN_PACKS[selectedPeriod] || packs[1]
       const res = await fetch('/api/manual-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.id,
-          planType: selectedPeriod,
-          amount,
+          planType: targetPack.id,
+          amount: targetPack.priceInr,
           utr: utr.trim()
         })
       })
@@ -149,6 +139,11 @@ export default function PricingPage() {
   }
 
   const handleUpgrade = async (planTypeParam: string) => {
+    if (!LIVE_PAYMENTS_ENABLED) {
+      alert('Live payment checkout is currently disabled pending production gateway verification. Please use the zero-credit sample demo.')
+      return
+    }
+
     if (!user) {
       router.push('/auth')
       return
@@ -168,32 +163,23 @@ export default function PricingPage() {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planType: planTypeParam })
+        body: JSON.stringify({ packId: planTypeParam, planType: planTypeParam })
       })
       const data = await res.json()
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to initialize payment order.')
+        throw new Error(data.message || data.error || 'Failed to initialize payment order.')
       }
 
-      const planNameMap: Record<string, string> = {
-        day: '10 Scan Pack',
-        week: '100 Scan Pack',
-        month: '320 Scan Pack',
-        year: '1200 Scan Pack',
-        usd_1: '10 Scan Pack (Impulse)',
-        usd_9: '120 Scan Pack (Sweet Spot)',
-        usd_99: '1,500 Scans (Pro)',
-        usd_299: '5,000 Scans (Creator)'
-      }
+      const targetPack = SCAN_PACKS[planTypeParam] || packs[1]
 
       // Open Razorpay Options
       const options = {
         key: data.keyId,
         amount: data.amount,
-        currency: data.currency,
+        currency: data.currency || 'INR',
         name: 'ScanSafe Pro',
-        description: `Upgrade to ScanSafe ${planNameMap[planTypeParam]}`,
+        description: `Upgrade to ${targetPack.name} (${targetPack.scans} Scans)`,
         order_id: data.orderId,
         prefill: {
           name: data.user.name || '',
@@ -202,7 +188,7 @@ export default function PricingPage() {
         theme: {
           color: '#10b981', // emerald-500
         },
-        handler: async function (response: any) {
+        handler: async function (_response: any) {
           setIsSuccess(true)
           setPlan('pro')
           setPlanType(planTypeParam)
@@ -255,22 +241,38 @@ export default function PricingPage() {
               <Star className="w-4 h-4 fill-emerald-400" /> Welcome to ScanSafe Pro
             </p>
             <p className="text-zinc-400 text-sm mt-4 leading-relaxed">
-              Your account is now upgraded to Pro. You have unlocked unlimited daily scans, personalized allergen warnings, and premium history records.
+              Your account has been credited. You have unlocked comprehensive scan credits, personalized allergen warnings, and premium history records.
             </p>
             <p className="text-zinc-500 text-xs mt-8">Redirecting you to the dashboard...</p>
           </div>
         ) : (
           /* Normal pricing state */
           <div className="w-full max-w-4xl flex flex-col items-center">
-              {/* Header banner */}
-            <div className="text-center mb-10">
+            {/* Header banner */}
+            <div className="text-center mb-8">
               <h1 className="text-4xl font-black text-white sm:text-5xl">
                 Choose Your <span className="text-emerald-400">Health Journey</span>
               </h1>
               <p className="text-zinc-400 text-sm mt-3 max-w-md mx-auto leading-relaxed">
-                ScanSafe helps you shop smart and eat healthy. Choose the plan that fits your shopping frequency.
+                ScanSafe helps you shop smart and eat healthy. All scan packs feature lifetime validity with no subscription lock-in.
               </p>
             </div>
+
+            {/* Prototype Demo Notice when live payments are unverified */}
+            {!LIVE_PAYMENTS_ENABLED && (
+              <div className="mb-8 w-full max-w-3xl rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-center text-xs text-amber-200 flex flex-col sm:flex-row items-center justify-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                <div className="text-left">
+                  <span className="font-bold text-amber-300">Prototype Demonstration Mode:</span> Live payment gateway processing is awaiting production database verification. New paid checkouts are temporarily disabled for this submission. You can test all scanning, comparison, and nutrition features freely using our zero-credit sample demo.
+                </div>
+                <button
+                  onClick={() => router.push('/scan')}
+                  className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-black hover:bg-amber-300 transition"
+                >
+                  Try Sample Demo
+                </button>
+              </div>
+            )}
 
             {/* Plan Display cards */}
             <div className="grid md:grid-cols-2 gap-8 w-full">
@@ -286,7 +288,7 @@ export default function PricingPage() {
                   <p className="text-zinc-500 text-xs mt-1">Perfect for trial and light usage</p>
                   <div className="flex items-baseline gap-2 mb-4">
                     <span className="text-4xl font-black text-white">₹0</span>
-                    <span className="text-zinc-400 font-medium">/forever</span>
+                    <span className="text-zinc-400 font-medium">/starter</span>
                   </div>
                   
                   <div className="h-[1px] bg-zinc-850 my-6" />
@@ -304,6 +306,10 @@ export default function PricingPage() {
                       <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
                       Standard allergy notifications
                     </li>
+                    <li className="flex items-center gap-2.5">
+                      <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
+                      Interactive zero-credit sample demo
+                    </li>
                   </ul>
                 </div>
                 
@@ -317,160 +323,148 @@ export default function PricingPage() {
               </div>
 
               {/* Pro Plan */}
-              {(() => {
-                const inrPeriods = [
-                  { id: 'day', name: '10 Scans', price: 10, symbol: '₹', period: '', desc: '10 lifetime scans', savings: '₹1.00/scan' },
-                  { id: 'week', name: '100 Scans', price: 99, symbol: '₹', period: '', desc: '100 lifetime scans', savings: '₹0.99/scan' },
-                  { id: 'month', name: '320 Scans', price: 299, symbol: '₹', period: '', desc: '320 lifetime scans', savings: '₹0.93/scan' },
-                  { id: 'year', name: '1200 Scans', price: 999, symbol: '₹', period: '', desc: '1200 lifetime scans', savings: '₹0.83/scan' },
-                ] as const
-                
-                const usdPeriods = [
-                  { id: 'usd_1', name: '10 Scans', price: 1, symbol: '$', period: '', desc: 'The Impulse Buy', savings: 'Quick Trial' },
-                  { id: 'usd_9', name: '120 Scans', price: 9, symbol: '$', period: '', desc: 'The Sweet Spot', savings: 'Enthusiast' },
-                  { id: 'usd_99', name: 'Pro Tier', price: 99, symbol: '$', period: '', desc: '1,500 scans + Custom Brand PDF', savings: 'For Trainers' },
-                  { id: 'usd_299', name: 'Creator Tier', price: 299, symbol: '$', period: '', desc: '5,000 scans + Priority AI Speed', savings: 'Enterprise ⭐' },
-                ] as const
+              <div className="relative rounded-2xl border-2 border-emerald-500 bg-zinc-900/20 p-8 flex flex-col justify-between shadow-lg shadow-emerald-500/5 overflow-hidden">
+                {plan === 'pro' ? (
+                  <div className="absolute top-3.5 right-3.5 rounded bg-emerald-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider flex items-center gap-0.5">
+                    <Zap className="w-3 h-3 fill-black" /> Refill Credits
+                  </div>
+                ) : (
+                  <div className="absolute top-3.5 right-3.5 rounded bg-emerald-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider">
+                    Official Catalog
+                  </div>
+                )}
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-1.5">
+                    ScanSafe Pro <Zap className="w-4 h-4 text-emerald-400 fill-emerald-400" />
+                  </h3>
+                  <p className="text-zinc-400 text-xs mt-1">Direct pay-per-pack credits with lifetime validity</p>
+                  
+                  {/* Dynamic Price Display */}
+                  <div className="my-6">
+                    <span className="text-4xl font-black text-white">₹{selectedPack.priceInr}</span>
+                    <span className="text-zinc-400 text-xs ml-2">
+                      for {selectedPack.scans} scans ({selectedPack.tag})
+                    </span>
+                  </div>
 
-                const activePeriods = isInternational ? usdPeriods : inrPeriods
-                const activePeriod = activePeriods.find(p => p.id === selectedPeriod) || activePeriods[isInternational ? 1 : 3]
+                  <div className="h-[1px] bg-zinc-850 my-6" />
 
-                return (
-                  <div className="relative rounded-2xl border-2 border-emerald-500 bg-zinc-900/20 p-8 flex flex-col justify-between shadow-lg shadow-emerald-500/5 overflow-hidden">
-                    {plan === 'pro' ? (
-                      <div className="absolute top-3.5 right-3.5 rounded bg-emerald-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider flex items-center gap-0.5">
-                        <Zap className="w-3 h-3 fill-black" /> Refill Credits
-                      </div>
-                    ) : (
-                      <div className="absolute top-3.5 right-3.5 rounded bg-emerald-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider">
-                        Best Value
-                      </div>
-                    )}
-                    <div>
-                      <h3 className="text-xl font-bold text-white flex items-center gap-1.5">
-                        ScanSafe Pro <Zap className="w-4 h-4 text-emerald-400 fill-emerald-400" />
-                      </h3>
-                      <p className="text-zinc-400 text-xs mt-1">Unlock the full power of food analysis with flexible options</p>
-                      
-                      {/* Dynamic Price Display */}
-                      <div className="my-6">
-                        <span className="text-4xl font-black text-white">{activePeriod.symbol}{activePeriod.price}</span>
-                        <span className="text-zinc-500 text-xs ml-1">
-                          {activePeriod.period}
-                        </span>
-                      </div>
-
-                      <div className="h-[1px] bg-zinc-850 my-6" />
-
-                      {/* Plan Selector */}
-                      <div className="mb-8">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block mb-3">
-                          Select Scan Pack
-                        </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {activePeriods.map((p) => {
-                            const isSelected = selectedPeriod === p.id
-                            const isActiveSubscription = plan === 'pro' && planType === p.id
-                            return (
-                              <button
-                                key={p.id}
-                                type="button"
-                                onClick={() => setSelectedPeriod(p.id)}
-                                className={`flex flex-col justify-between items-start rounded-xl border p-3 text-left transition cursor-pointer relative ${
-                                  isSelected
-                                    ? 'bg-emerald-950/20 border-emerald-500 text-white shadow-md shadow-emerald-500/5'
-                                    : 'bg-zinc-950/40 border-zinc-850 text-zinc-300 hover:border-zinc-850'
-                                }`}
-                              >
-                                <div className="flex w-full justify-between items-center gap-1.5">
-                                  <span className="font-bold text-xs truncate">{p.name}</span>
-                                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider shrink-0 ${
-                                    isSelected ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-400'
-                                  }`}>
-                                    {p.savings}
-                                  </span>
-                                </div>
-                                <div className="mt-2 flex items-baseline">
-                                  <span className="text-lg font-black">{p.symbol}{p.price}</span>
-                                  <span className="text-[9px] text-zinc-500 ml-1">{p.period}</span>
-                                </div>
-
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-
-                      <ul className="text-zinc-300 text-sm space-y-4">
-                        <li className="flex items-center gap-2.5">
-                          <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
-                          <span className="font-semibold text-white">Full scan history browser</span>
-                        </li>
-                        <li className="flex items-center gap-2.5">
-                          <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
-                          Custom diet preference warning profiles
-                        </li>
-                        <li className="flex items-center gap-2.5">
-                          <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
-                          AI-generated healthy alternatives recommendations
-                        </li>
-                        <li className="flex items-center gap-2.5">
-                          <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
-                          {isInternational && (selectedPeriod === 'usd_99' || selectedPeriod === 'usd_299') ? 'Custom Branded PDF Exports' : 'Priority Email Support'}
-                        </li>
-                      </ul>
-                    </div>
-
-                    <button
-                      disabled={upgrading}
-                      onClick={() => handleUpgrade(selectedPeriod)}
-                      className="mt-8 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 text-black py-3.5 text-sm font-bold hover:bg-emerald-400 transition disabled:bg-zinc-900 disabled:border disabled:border-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
-                    >
-                      {upgrading ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" /> Initializing Gateway...
-                        </>
-                      ) : (
-                        <>
-                          <CreditCard className="w-4 h-4" /> Purchase {activePeriod.name}
-                        </>
-                      )}
-                    </button>
-
-                    {!isInternational && (
-                      <button
-                        disabled={upgrading}
-                        onClick={() => setShowManualModal(true)}
-                        className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-transparent border border-emerald-500/50 text-emerald-400 py-3.5 text-sm font-bold hover:bg-emerald-500/10 transition disabled:border-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed"
-                      >
-                        <QrCode className="w-4 h-4" /> Pay directly via UPI QR
-                      </button>
-                    )}
-
-                    {/* Trust Badges */}
-                    <div className="mt-6 pt-5 border-t border-zinc-800/50 flex flex-col items-center gap-3">
-                      <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
-                        Powered by <span className="text-white font-bold tracking-tight text-xs flex items-center gap-1"><Shield className="w-3.5 h-3.5 text-blue-500 fill-blue-500/20" /> Razorpay</span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                         <div className="text-xs font-medium text-zinc-500 flex items-center gap-1">
-                           <Smartphone className="w-4 h-4" /> UPI Apps
-                         </div>
-                         <div className="text-xs font-medium text-zinc-500 flex items-center gap-1">
-                           <CreditCard className="w-4 h-4" /> Cards & NetBanking
-                         </div>
-                      </div>
+                  {/* Plan Selector */}
+                  <div className="mb-8">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block mb-3">
+                      Select Scan Pack (Official INR Pricing)
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {packs.map((p) => {
+                        const isSelected = selectedPeriod === p.id
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setSelectedPeriod(p.id)}
+                            className={`flex flex-col justify-between items-start rounded-xl border p-3 text-left transition cursor-pointer relative ${
+                              isSelected
+                                ? 'bg-emerald-950/20 border-emerald-500 text-white shadow-md shadow-emerald-500/5'
+                                : 'bg-zinc-950/40 border-zinc-850 text-zinc-300 hover:border-zinc-850'
+                            }`}
+                          >
+                            <div className="flex w-full justify-between items-center gap-1.5">
+                              <span className="font-bold text-xs truncate">{p.name}</span>
+                              <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider shrink-0 ${
+                                isSelected ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-400'
+                              }`}>
+                                {p.tag || `₹${p.priceInr}`}
+                              </span>
+                            </div>
+                            <div className="mt-2 flex items-baseline">
+                              <span className="text-lg font-black">₹{p.priceInr}</span>
+                              <span className="text-[9px] text-zinc-500 ml-1">({p.scans} credits)</span>
+                            </div>
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
-                )
-              })()}
+
+                  <ul className="text-zinc-300 text-sm space-y-4">
+                    <li className="flex items-center gap-2.5">
+                      <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
+                      <span className="font-semibold text-white">Full scan history browser</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
+                      Custom diet preference warning profiles
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
+                      Side-by-side product comparison & meal composer
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <div className="rounded-full bg-emerald-500/20 text-emerald-400 p-0.5"><Check className="w-3.5 h-3.5" /></div>
+                      {(selectedPeriod === 'pack_320' || selectedPeriod === 'pack_1200') ? 'Advanced Additive & Toxicology Deep Dives' : 'Standard Email Support'}
+                    </li>
+                  </ul>
+                </div>
+
+                <button
+                  disabled={upgrading || !LIVE_PAYMENTS_ENABLED}
+                  onClick={() => handleUpgrade(selectedPeriod)}
+                  className="mt-8 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 text-black py-3.5 text-sm font-bold hover:bg-emerald-400 transition disabled:bg-zinc-900 disabled:border disabled:border-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
+                >
+                  {upgrading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Initializing Gateway...
+                    </>
+                  ) : !LIVE_PAYMENTS_ENABLED ? (
+                    <>
+                      <CreditCard className="w-4 h-4" /> Live Payments Awaiting Verification
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4" /> Purchase {selectedPack.name} (₹{selectedPack.priceInr})
+                    </>
+                  )}
+                </button>
+
+                {LIVE_PAYMENTS_ENABLED ? (
+                  <button
+                    disabled={upgrading}
+                    onClick={() => setShowManualModal(true)}
+                    className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-transparent border border-emerald-500/50 text-emerald-400 py-3.5 text-sm font-bold hover:bg-emerald-500/10 transition disabled:border-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed"
+                  >
+                    <QrCode className="w-4 h-4" /> Pay directly via UPI QR
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => router.push('/scan')}
+                    className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-transparent border border-emerald-500/50 text-emerald-400 py-3.5 text-sm font-bold hover:bg-emerald-500/10 transition"
+                  >
+                    <Sparkles className="w-4 h-4" /> Try Zero-Credit Sample Demo
+                  </button>
+                )}
+
+                {/* Trust Badges */}
+                <div className="mt-6 pt-5 border-t border-zinc-800/50 flex flex-col items-center gap-3">
+                  <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                    Powered by <span className="text-white font-bold tracking-tight text-xs flex items-center gap-1"><Shield className="w-3.5 h-3.5 text-blue-500 fill-blue-500/20" /> Razorpay</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                     <div className="text-xs font-medium text-zinc-500 flex items-center gap-1">
+                       <Smartphone className="w-4 h-4" /> UPI Apps
+                     </div>
+                     <div className="text-xs font-medium text-zinc-500 flex items-center gap-1">
+                       <CreditCard className="w-4 h-4" /> Cards & NetBanking
+                     </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </main>
 
       {/* Manual UPI QR Modal */}
-      {showManualModal && (
+      {showManualModal && LIVE_PAYMENTS_ENABLED && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl relative flex flex-col items-center">
             <button
@@ -502,12 +496,12 @@ export default function PricingPage() {
             <div className="w-full space-y-4">
               <div>
                 <label className="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
-                  Enter 12-Digit UTR Number
+                  Enter UTR Number
                 </label>
                 <input
                   type="text"
                   value={utr}
-                  onChange={(e) => setUtr(e.target.value.replace(/[^0-9]/g, '').slice(0, 12))}
+                  onChange={(e) => setUtr(e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 30))}
                   placeholder="e.g., 312345678901"
                   className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
@@ -515,7 +509,7 @@ export default function PricingPage() {
 
               <button
                 onClick={handleManualUpgrade}
-                disabled={submittingUtr || utr.length < 12}
+                disabled={submittingUtr || utr.length < 8}
                 className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 text-black py-3 text-sm font-bold hover:bg-emerald-400 transition disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
               >
                 {submittingUtr ? (

@@ -66,7 +66,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
   const [barcodeInput, setBarcodeInput] = useState('')
 
   // Batch queue
-  const [batchQueue, setBatchQueue] = useState<Array<{ file: File, preview: string, status: 'pending' | 'scanning' | 'success' | 'failed', result?: any }>>([])
+  const [batchQueue, setBatchQueue] = useState<Array<{ file: File, preview: string, status: 'pending' | 'scanning' | 'success' | 'failed', result?: any, idempotencyKey?: string }>>([])
   
   // Camera state
   const [isCameraActive, setIsCameraActive] = useState(false)
@@ -225,7 +225,8 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         return {
           file,
           preview: URL.createObjectURL(file),
-          status: 'pending' as const
+          status: 'pending' as const,
+          idempotencyKey: generateClientOpKey('batch')
         }
       })
       setBatchQueue(prev => [...prev, ...newItems])
@@ -249,7 +250,9 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         setBatchQueue([...updatedQueue])
 
         const base64 = await fileToBase64(updatedQueue[i].file)
-        const batchIdempotencyKey = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `batch_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 9)}`
+        const batchIdempotencyKey = updatedQueue[i].idempotencyKey || generateClientOpKey('batch')
+        updatedQueue[i].idempotencyKey = batchIdempotencyKey
+
         const response = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 

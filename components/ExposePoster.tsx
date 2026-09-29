@@ -20,7 +20,10 @@ export const ExposePoster = forwardRef<HTMLDivElement, ExposePosterProps>(({ res
   const flaggedIngredients = ingredients.filter(i => i.status === "avoid" || i.status === "caution").slice(0, 3);
   const alternatives = alternatives_detailed.slice(0, 2);
 
-  const getScoreColor = (score: number) => {
+  const hasScore = health_score !== null && health_score !== undefined;
+
+  const getScoreColor = (score: number | null | undefined) => {
+    if (score == null) return "#71717a";
     if (score >= 70) return "#10b981";
     if (score >= 40) return "#f59e0b";
     return "#f43f5e";
@@ -66,21 +69,21 @@ export const ExposePoster = forwardRef<HTMLDivElement, ExposePosterProps>(({ res
              backgroundColor: scoreColor, 
              color: "#000000", 
              fontWeight: 900, 
-             fontSize: "64px", 
+             fontSize: hasScore ? "64px" : "48px", 
              boxShadow: `0 0 40px ${scoreColor}40`, 
              flexShrink: 0 
            }}>
-             {health_score}
+             {hasScore ? health_score : "--"}
            </div>
            <div style={{ minWidth: 0 }}>
               <p style={{ fontSize: "20px", fontWeight: 800, color: scoreColor, letterSpacing: "0.15em", textTransform: "uppercase", margin: 0, marginBottom: "4px" }}>
-                ScanSafe Health Score / 100
+                {hasScore ? "ScanSafe Health Score / 100" : "ScanSafe Health Score — Unrated"}
               </p>
               <h1 style={{ fontSize: "52px", fontWeight: 900, lineHeight: 1.2, letterSpacing: "-0.025em", color: "#ffffff", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "820px" }}>
                 {product_name}
               </h1>
               {brand && (
-                <p style={{ fontSize: "22px", color: "#a1a1aa", marginTop: "4px", margin: 0 }}>by {brand} • NOVA Group {upf_score}</p>
+                <p style={{ fontSize: "22px", color: "#a1a1aa", marginTop: "4px", margin: 0 }}>by {brand}{upf_score ? ` • NOVA Group ${upf_score}` : ""}</p>
               )}
            </div>
         </div>

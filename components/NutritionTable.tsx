@@ -68,7 +68,7 @@ export default function NutritionTable({ nutrition }: NutritionTableProps) {
     if (!valStr || valStr === 'N/A') return 'N/A'
     
     if (serving_size && serving_size !== 'N/A') {
-      const servingMatch = serving_size.match(/(d+(?:.d+)?)s*(g|ml|gm)/i)
+      const servingMatch = serving_size.match(/(\d+(?:\.\d+)?)\s*(g|gm|grams?|ml|milliliters?)/i)
       if (servingMatch) {
         const servingWeight = parseFloat(servingMatch[1])
         if (servingWeight > 0) {
@@ -77,7 +77,7 @@ export default function NutritionTable({ nutrition }: NutritionTableProps) {
             const estimated = (valNum / servingWeight) * 100
             const unitMatch = valStr.match(/[a-zA-Z]+$/)
             const unit = unitMatch ? unitMatch[0] : ''
-            return `${estimated.toFixed(1).replace(/.0$/, '')}${unit}`
+            return `${estimated.toFixed(1).replace(/\.0$/, '')}${unit}`
           }
         }
       }
@@ -90,7 +90,7 @@ export default function NutritionTable({ nutrition }: NutritionTableProps) {
     if (calories === undefined || calories === null) return 'N/A'
     
     if (serving_size && serving_size !== 'N/A') {
-      const servingMatch = serving_size.match(/(d+(?:.d+)?)s*(g|ml|gm)/i)
+      const servingMatch = serving_size.match(/(\d+(?:\.\d+)?)\s*(g|gm|grams?|ml|milliliters?)/i)
       if (servingMatch) {
         const servingWeight = parseFloat(servingMatch[1])
         if (servingWeight > 0) {
