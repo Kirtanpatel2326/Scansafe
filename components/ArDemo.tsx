@@ -46,10 +46,10 @@ export default function ArDemo() {
     
     if (exposeRef.current) {
         exposeRef.current.style.opacity = '0'
-        exposeRef.current.textContent = '📸 EXPOSE ON SOCIAL MEDIA'
-        exposeRef.current.style.color = '#FF3D00'
-        exposeRef.current.style.borderColor = '#FF3D00'
-        exposeRef.current.style.background = '#1a0505'
+        exposeRef.current.textContent = '📊 Share Health Breakdown'
+        exposeRef.current.style.color = '#10B981'
+        exposeRef.current.style.borderColor = '#10B981'
+        exposeRef.current.style.background = '#051a0e'
     }
     stepsRef.current.forEach(s => { if(s) s.classList.remove('visible') })
     setIsExposed(false)
@@ -136,7 +136,7 @@ export default function ArDemo() {
   const handleExpose = () => {
     setIsExposed(true)
     if (exposeRef.current) {
-      exposeRef.current.textContent = '✓ SHARED — YOUR FOLLOWERS NOW KNOW'
+      exposeRef.current.textContent = '✓ Health Breakdown Ready to Share'
       exposeRef.current.style.color = '#00C853'
       exposeRef.current.style.borderColor = '#00C853'
       exposeRef.current.style.background = '#00C85311'
@@ -192,7 +192,7 @@ export default function ArDemo() {
               </div>
               <div id="ss-sc-track"><div id="ss-sc-fill" ref={fillRef}></div></div>
             </div>
-            <div id="ss-expose" ref={exposeRef} onClick={handleExpose}>📸 EXPOSE ON SOCIAL MEDIA</div>
+            <div id="ss-expose" ref={exposeRef} onClick={handleExpose}>📊 Share Health Breakdown</div>
           </div>
         </div>
 
@@ -204,15 +204,15 @@ export default function ArDemo() {
             <div className="ss-step" id="st1" ref={el => { if(el) stepsRef.current[0] = el }}>
               <div className="ss-step-num">01</div>
               <div>
-                <div className="ss-step-title">Snap Any Ingredient Label</div>
-                <div className="ss-step-desc">No barcode needed. Blurry photo, crumpled wrapper — our Vision AI reads it all.</div>
+                <div className="ss-step-title">Scan Packaged Label</div>
+                <div className="ss-step-desc">Scan packaged-food labels to understand listed ingredients and nutrition. AI can misread labels; review the extracted information.</div>
               </div>
             </div>
             <div className="ss-step" id="st2" ref={el => { if(el) stepsRef.current[1] = el }}>
               <div className="ss-step-num">02</div>
               <div>
-                <div className="ss-step-title">AI Flags Every Risk Instantly</div>
-                <div className="ss-step-desc">AR boxes lock onto harmful chemicals in milliseconds. Red = Avoid. Yellow = Caution. Green = Safe.</div>
+                <div className="ss-step-title">Analyzes Listed Ingredients & Additives</div>
+                <div className="ss-step-desc">Highlights listed additives and potential allergens based on nutritional guidelines.</div>
                 <div style={{display: 'flex', gap: '6px', marginTop: '6px'}}>
                   <span className="ss-step-tag tag-r">AVOID</span>
                   <span className="ss-step-tag tag-y">CAUTION</span>
@@ -223,8 +223,8 @@ export default function ArDemo() {
             <div className="ss-step" id="st3" ref={el => { if(el) stepsRef.current[2] = el }}>
               <div className="ss-step-num">03</div>
               <div>
-                <div className="ss-step-title">Get Your Health Score</div>
-                <div className="ss-step-desc">FSSAI compliance check + personalized score based on your dietary profile.</div>
+                <div className="ss-step-title">Get Nutrition Score</div>
+                <div className="ss-step-desc">Nutrition-based estimate score. Missing or unreadable information is marked as unknown.</div>
               </div>
             </div>
             <div className="ss-step" id="st4" ref={el => { if(el) stepsRef.current[3] = el }}>

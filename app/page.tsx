@@ -123,6 +123,12 @@ export default function LandingPage() {
               <Camera className="w-5 h-5 transition-transform group-hover:rotate-12" /> {t.heroBtnStart}
             </a>
             <a
+              href="/demo"
+              className="group w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 px-8 py-4 font-bold text-lg transition-all duration-300 backdrop-blur-md"
+            >
+              <Sparkles className="w-5 h-5 text-emerald-400" /> Try Guest Demo
+            </a>
+            <a
               href="/pitch"
               className="group w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-white px-8 py-4 font-semibold text-lg transition-all duration-300 backdrop-blur-md"
             >
@@ -142,70 +148,70 @@ export default function LandingPage() {
         </motion.div>
       </section>
 
-      {/* ================= SOCIAL PROOF ================= */}
+      {/* ================= TRANSPARENCY & METHODOLOGY ================= */}
       <section className="py-20 border-y border-white/5 bg-zinc-950/50">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex flex-col items-center text-center mb-16">
-            <h2 className="text-3xl md:text-5xl font-black text-white mb-6">{t.metricsTitle}</h2>
-            <div className="flex flex-wrap justify-center gap-8 md:gap-16 mt-4">
+            <h2 className="text-3xl md:text-5xl font-black text-white mb-4">Transparent Food Label Intelligence</h2>
+            <p className="text-zinc-400 text-sm max-w-2xl mx-auto mb-8">
+              Scan packaged-food labels to understand listed ingredients, nutrition facts, and dietary compatibility based on published guidelines.
+            </p>
+            <div className="flex flex-wrap justify-center gap-8 md:gap-16 mt-2">
               <div className="flex flex-col items-center">
-                <span className="text-4xl md:text-5xl font-black text-emerald-400">100%</span>
-                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Evidence-Based Vision</span>
+                <span className="text-4xl md:text-5xl font-black text-emerald-400">Optical OCR</span>
+                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Printed Label Extraction</span>
               </div>
               <div className="hidden md:block w-px h-16 bg-zinc-800"></div>
               <div className="flex flex-col items-center">
-                <span className="text-4xl md:text-5xl font-black text-indigo-400">FSSAI & Global</span>
-                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Regulatory Auditing</span>
+                <span className="text-4xl md:text-5xl font-black text-indigo-400">Nutritional Facts</span>
+                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">100g / Serving Standards</span>
               </div>
               <div className="hidden md:block w-px h-16 bg-zinc-800"></div>
               <div className="flex flex-col items-center">
-                <span className="text-4xl md:text-5xl font-black text-rose-400">0</span>
-                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Hallucinated Data</span>
+                <span className="text-4xl md:text-5xl font-black text-amber-400">Unknown When Missing</span>
+                <span className="text-sm font-bold text-zinc-500 uppercase tracking-widest mt-2">Zero Fabricated Values</span>
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <motion.div initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars} className="bg-zinc-900/40 border border-zinc-800 p-8 rounded-3xl relative">
-              <div className="flex gap-1 mb-4 text-amber-400">
-                {[1,2,3,4,5].map(i => <svg key={i} className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>)}
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm mb-4">
+                01
               </div>
-              <p className="text-zinc-300 text-lg leading-relaxed mb-6">{t.testimText1}</p>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-emerald-500 to-indigo-500 flex items-center justify-center text-white font-bold">A</div>
-                <div>
-                  <p className="text-sm font-bold text-white">{t.testimName1}</p>
-                  <p className="text-xs text-zinc-500">{t.testimRole1}</p>
-                </div>
-              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Capture Packaging</h3>
+              <p className="text-zinc-400 text-sm leading-relaxed mb-4">
+                Photograph the printed ingredient list and nutrition table clearly. AI reads visible printed text directly from food packaging.
+              </p>
+              <p className="text-xs text-zinc-500 border-t border-zinc-850 pt-3">
+                AI can misread blurry or curved labels. Always inspect the extracted text.
+              </p>
             </motion.div>
 
             <motion.div initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars} className="bg-zinc-900/40 border border-zinc-800 p-8 rounded-3xl relative">
-              <div className="flex gap-1 mb-4 text-amber-400">
-                {[1,2,3,4,5].map(i => <svg key={i} className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>)}
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm mb-4">
+                02
               </div>
-              <p className="text-zinc-300 text-lg leading-relaxed mb-6">{t.testimText2}</p>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-rose-500 to-orange-500 flex items-center justify-center text-white font-bold">K</div>
-                <div>
-                  <p className="text-sm font-bold text-white">{t.testimName2}</p>
-                  <p className="text-xs text-zinc-500">{t.testimRole2}</p>
-                </div>
-              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Evidence-Based Extraction</h3>
+              <p className="text-zinc-400 text-sm leading-relaxed mb-4">
+                Extracts listed additives, allergens, and macronutrients. Missing panels are strictly marked as unknown rather than assumed.
+              </p>
+              <p className="text-xs text-zinc-500 border-t border-zinc-850 pt-3">
+                No pseudo-scientific metrics or unverified laboratory certifications.
+              </p>
             </motion.div>
 
             <motion.div initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars} className="bg-zinc-900/40 border border-zinc-800 p-8 rounded-3xl relative">
-              <div className="flex gap-1 mb-4 text-amber-400">
-                {[1,2,3,4,5].map(i => <svg key={i} className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>)}
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm mb-4">
+                03
               </div>
-              <p className="text-zinc-300 text-lg leading-relaxed mb-6">{t.testimText3}</p>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold">M</div>
-                <div>
-                  <p className="text-sm font-bold text-white">{t.testimName3}</p>
-                  <p className="text-xs text-zinc-500">{t.testimRole3}</p>
-                </div>
-              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Nutritional Estimates</h3>
+              <p className="text-zinc-400 text-sm leading-relaxed mb-4">
+                Scores represent nutritional estimates based on declared facts. They do not certify chemical purity, product safety, or regulatory compliance.
+              </p>
+              <p className="text-xs text-zinc-500 border-t border-zinc-850 pt-3">
+                Scores are informational guidelines, not medical advice.
+              </p>
             </motion.div>
           </div>
         </div>

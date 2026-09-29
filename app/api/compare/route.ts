@@ -9,7 +9,7 @@ import {
   recoverOperationAccounting
 } from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
-import { ComparisonResultSchema, calculateHealthScore, cleanNumericValue, normalizeNutrientsTo100g } from "@/lib/claude";
+import { ComparisonResultSchema, calculateHealthScore, cleanNumericValue, normalizeNutrientsTo100g, evaluateComparison } from "@/lib/claude";
 import { evaluateDietaryCompatibility } from "@/lib/preferences";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -383,28 +383,10 @@ JSON.stringify({
 
     // Determine deterministic winner based on calculated health score
     // Rule: Return 'undetermined' when either product lacks evidence required for a fair comparison.
-    if (scoreResultA.score === null || scoreResultB.score === null) {
-      comparisonData.winner = "undetermined";
-      if (scoreResultA.score === null && scoreResultB.score === null) {
-        comparisonData.winner_reason = "Both products lack sufficient readable label evidence to perform an objective comparison.";
-      } else if (scoreResultA.score === null) {
-        comparisonData.winner_reason = `Undetermined comparison: ${nameA} lacks sufficient readable label evidence for a fair comparison with ${nameB}.`;
-      } else {
-        comparisonData.winner_reason = `Undetermined comparison: ${nameB} lacks sufficient readable label evidence for a fair comparison with ${nameA}.`;
-      }
-    } else if (Math.abs(scoreResultA.score - scoreResultB.score) <= 3) {
-      comparisonData.winner = "tie";
-      comparisonData.winner_reason = `Both products receive comparable nutritional health scores (${scoreResultA.score} vs ${scoreResultB.score}/100).`;
-    } else if (scoreResultA.score > scoreResultB.score) {
-      comparisonData.winner = "A";
-      comparisonData.winner_reason = `${nameA} achieves a higher health score (${scoreResultA.score} vs ${scoreResultB.score}) based on better macronutrient balance.`;
-    } else {
-      comparisonData.winner = "B";
-      comparisonData.winner_reason = `${nameB} achieves a higher health score (${scoreResultB.score} vs ${scoreResultA.score}) based on better macronutrient balance.`;
-    }
-
-    // Synchronize plain English verdict with authoritative winner
-    comparisonData.verdict_english = comparisonData.winner_reason;
+    const evalResult = evaluateComparison(comparisonData.product_a, comparisonData.product_b);
+    comparisonData.winner = evalResult.winner;
+    comparisonData.winner_reason = evalResult.winner_reason;
+    comparisonData.verdict_english = evalResult.winner_reason;
 
     // Determine representative health score and safety level
     let representativeScore: number | null = null;

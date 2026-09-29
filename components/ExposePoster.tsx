@@ -147,8 +147,8 @@ export const ExposePoster = forwardRef<HTMLDivElement, ExposePosterProps>(({ res
 
         {/* Footer */}
         <div style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "24px", borderTop: "1px solid #27272a" }}>
-          <p style={{ fontSize: "22px", color: "#71717a", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.1em", margin: 0 }}>
-            Know your food. Shop healthier.
+          <p style={{ fontSize: "18px", color: "#71717a", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.08em", margin: 0 }}>
+            Nutrition estimate from declared ingredients • Not medical advice
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: "16px", backgroundColor: "#18181b", padding: "16px 32px", borderRadius: "9999px", border: "1px solid #27272a" }}>
             <Zap style={{ width: "32px", height: "32px", color: "#10b981" }} />
