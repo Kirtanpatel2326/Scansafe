@@ -23,34 +23,36 @@ import {
 import Image from 'next/image'
 
 interface ComparisonResult {
-  winner: 'A' | 'B' | 'tie'
+  winner: 'A' | 'B' | 'tie' | 'undetermined'
   winner_reason: string
   product_a: {
     name: string
     brand: string
-    health_score: number
-    safety_level: 'safe' | 'moderate' | 'danger'
+    health_score?: number | null
+    safety_level: 'safe' | 'moderate' | 'danger' | 'insufficient_evidence'
     highlights: string[]
   }
   product_b: {
     name: string
     brand: string
-    health_score: number
-    safety_level: 'safe' | 'moderate' | 'danger'
+    health_score?: number | null
+    safety_level: 'safe' | 'moderate' | 'danger' | 'insufficient_evidence'
     highlights: string[]
   }
-  comparison_table: {
-    calories: { a: string; b: string }
-    sugar: { a: string; b: string }
-    sodium: { a: string; b: string }
-    protein: { a: string; b: string }
-    fat: { a: string; b: string }
-    fiber: { a: string; b: string }
-    additives: { a: string; b: string }
-    fssai_status: { a: string; b: string }
+  comparison_table?: {
+    calories?: { a?: string | null; b?: string | null }
+    sugar?: { a?: string | null; b?: string | null }
+    sodium?: { a?: string | null; b?: string | null }
+    protein?: { a?: string | null; b?: string | null }
+    fat?: { a?: string | null; b?: string | null }
+    fiber?: { a?: string | null; b?: string | null }
+    additives?: { a?: string | null; b?: string | null }
+    fssai_status?: { a?: string | null; b?: string | null }
+    basis?: string
+    [key: string]: any
   }
-  verdict_english: string
-  verdict_hindi: string
+  verdict_english?: string
+  verdict_hindi?: string
 }
 
 const PREFERENCE_OPTIONS = [
@@ -267,10 +269,22 @@ export default function ComparePage() {
   // Format WhatsApp Share message
   const getWhatsAppShareUrl = () => {
     if (!result) return '#'
+    if (result.winner === 'undetermined') {
+      const text = `ScanSafe Comparison Alert! 🔍\n\nComparison inconclusive due to unreadable or missing nutrition information.\n\nProduct A: ${result.product_a.brand || ''} ${result.product_a.name || ''}\nProduct B: ${result.product_b.brand || ''} ${result.product_b.name || ''}\n\nReason: ${result.winner_reason}\n\nCompare your foods at https://scansafe.co.in/compare`
+      return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`
+    }
+    if (result.winner === 'tie') {
+      const scoreA = result.product_a.health_score != null ? `Score: ${result.product_a.health_score}` : 'Unrated'
+      const scoreB = result.product_b.health_score != null ? `Score: ${result.product_b.health_score}` : 'Unrated'
+      const text = `ScanSafe Comparison Alert! 🔍\n\n🤝 It's a Healthy Tie!\nProduct A: ${result.product_a.brand || ''} ${result.product_a.name || ''} (${scoreA})\nProduct B: ${result.product_b.brand || ''} ${result.product_b.name || ''} (${scoreB})\n\nReason: ${result.winner_reason}\n\nCompare your foods at https://scansafe.co.in/compare`
+      return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`
+    }
     const winProd = result.winner === 'A' ? result.product_a : result.product_b
     const loseProd = result.winner === 'A' ? result.product_b : result.product_a
     
-    let text = `ScanSafe Comparison Alert! 🔍\n\n🏆 Winner: ${winProd.brand} ${winProd.name} (Score: ${winProd.health_score})\n❌ Alternate: ${loseProd.brand} ${loseProd.name} (Score: ${loseProd.health_score})\n\nReason: ${result.winner_reason}\n\nCompare your shopping cart items now at https://scansafe.co.in/compare`
+    const winScore = winProd.health_score != null ? `Score: ${winProd.health_score}` : 'Unrated'
+    const loseScore = loseProd.health_score != null ? `Score: ${loseProd.health_score}` : 'Unrated'
+    const text = `ScanSafe Comparison Alert! 🔍\n\n🏆 Winner: ${winProd.brand || ''} ${winProd.name || ''} (${winScore})\n❌ Alternate: ${loseProd.brand || ''} ${loseProd.name || ''} (${loseScore})\n\nReason: ${result.winner_reason}\n\nCompare your shopping cart items now at https://scansafe.co.in/compare`
     return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`
   }
 
@@ -521,21 +535,41 @@ export default function ComparePage() {
         {result && (
           <section id="comparison-results" className="scroll-mt-6 flex flex-col gap-8 mb-16">
             
-            {/* WINNER CONTAINER */}
-            <div className="relative rounded-3xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 via-zinc-950 to-black p-6 md:p-8 overflow-hidden shadow-xl shadow-emerald-500/5">
+            {/* WINNER / VERDICT CONTAINER */}
+            <div className={`relative rounded-3xl border p-6 md:p-8 overflow-hidden shadow-xl ${
+              result.winner === 'undetermined'
+                ? 'border-amber-500/30 bg-gradient-to-br from-amber-950/20 via-zinc-950 to-black shadow-amber-500/5'
+                : result.winner === 'tie'
+                ? 'border-blue-500/30 bg-gradient-to-br from-blue-950/20 via-zinc-950 to-black shadow-blue-500/5'
+                : 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 via-zinc-950 to-black shadow-emerald-500/5'
+            }`}>
               <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
               
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-900/60 pb-5 mb-5">
                 <div>
-                  <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full uppercase tracking-wider font-extrabold flex items-center gap-1.5 w-fit">
-                    <Sparkles className="w-3.5 h-3.5 fill-emerald-400" /> Comparison Winner
+                  <span className={`text-[10px] border px-3 py-1 rounded-full uppercase tracking-wider font-extrabold flex items-center gap-1.5 w-fit ${
+                    result.winner === 'undetermined'
+                      ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                      : result.winner === 'tie'
+                      ? 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                      : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  }`}>
+                    {result.winner === 'undetermined' ? (
+                      <><AlertCircle className="w-3.5 h-3.5" /> Comparison Inconclusive</>
+                    ) : result.winner === 'tie' ? (
+                      <><Sparkles className="w-3.5 h-3.5 fill-blue-400" /> Healthy Tie</>
+                    ) : (
+                      <><Sparkles className="w-3.5 h-3.5 fill-emerald-400" /> Comparison Winner</>
+                    )}
                   </span>
                   <h3 className="text-2xl md:text-3xl font-black text-white mt-3">
                     {result.winner === 'A' 
-                      ? `${result.product_a.brand} ${result.product_a.name}`
+                      ? `${result.product_a.brand || ''} ${result.product_a.name || 'Product A'}`
                       : result.winner === 'B'
-                      ? `${result.product_b.brand} ${result.product_b.name}`
-                      : 'It is a Healthy Tie!'}
+                      ? `${result.product_b.brand || ''} ${result.product_b.name || 'Product B'}`
+                      : result.winner === 'tie'
+                      ? 'It is a Healthy Tie!'
+                      : 'Insufficient Evidence to Determine Winner'}
                   </h3>
                 </div>
 
@@ -551,7 +585,9 @@ export default function ComparePage() {
               </div>
 
               <div>
-                <p className="text-zinc-400 text-[10px] font-black uppercase tracking-wider mb-2 text-emerald-400">Personalized Health Rationale</p>
+                <p className={`text-[10px] font-black uppercase tracking-wider mb-2 ${
+                  result.winner === 'undetermined' ? 'text-amber-400' : 'text-emerald-400'
+                }`}>Personalized Health Rationale</p>
                 <p className="text-zinc-200 text-sm leading-relaxed font-medium md:text-base select-text">
                   {result.winner_reason}
                 </p>
@@ -572,8 +608,8 @@ export default function ComparePage() {
                 )}
                 
                 <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Product A</span>
-                <h4 className="text-xl font-black text-white mt-1.5">{result.product_a.brand}</h4>
-                <p className="text-zinc-450 text-xs truncate mb-5">{result.product_a.name}</p>
+                <h4 className="text-xl font-black text-white mt-1.5">{result.product_a.brand || 'Product A'}</h4>
+                <p className="text-zinc-450 text-xs truncate mb-5">{result.product_a.name || 'Food Item'}</p>
 
                 <div className="flex items-center gap-4 mb-6">
                   {/* Score badge */}
@@ -582,10 +618,12 @@ export default function ComparePage() {
                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                       : result.product_a.safety_level === 'moderate'
                       ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                      : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      : result.product_a.safety_level === 'danger'
+                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      : 'bg-zinc-800/40 text-zinc-300 border-zinc-700/50'
                   }`}>
                     <span className="text-[10px] uppercase font-bold leading-none mb-1 text-zinc-500">Score</span>
-                    <span className="text-2xl leading-none">{result.product_a.health_score}</span>
+                    <span className="text-2xl leading-none">{result.product_a.health_score != null ? result.product_a.health_score : '--'}</span>
                   </div>
 
                   <div>
@@ -595,9 +633,11 @@ export default function ComparePage() {
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                         : result.product_a.safety_level === 'moderate'
                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        : result.product_a.safety_level === 'danger'
+                        ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        : 'bg-zinc-800/40 text-zinc-300 border-zinc-700/50'
                     }`}>
-                      {result.product_a.safety_level}
+                      {result.product_a.safety_level === 'insufficient_evidence' ? 'Unrated' : result.product_a.safety_level}
                     </span>
                   </div>
                 </div>
@@ -625,8 +665,8 @@ export default function ComparePage() {
                 )}
                 
                 <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Product B</span>
-                <h4 className="text-xl font-black text-white mt-1.5">{result.product_b.brand}</h4>
-                <p className="text-zinc-450 text-xs truncate mb-5">{result.product_b.name}</p>
+                <h4 className="text-xl font-black text-white mt-1.5">{result.product_b.brand || 'Product B'}</h4>
+                <p className="text-zinc-450 text-xs truncate mb-5">{result.product_b.name || 'Food Item'}</p>
 
                 <div className="flex items-center gap-4 mb-6">
                   {/* Score badge */}
@@ -635,10 +675,12 @@ export default function ComparePage() {
                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                       : result.product_b.safety_level === 'moderate'
                       ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                      : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      : result.product_b.safety_level === 'danger'
+                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      : 'bg-zinc-800/40 text-zinc-300 border-zinc-700/50'
                   }`}>
                     <span className="text-[10px] uppercase font-bold leading-none mb-1 text-zinc-500">Score</span>
-                    <span className="text-2xl leading-none">{result.product_b.health_score}</span>
+                    <span className="text-2xl leading-none">{result.product_b.health_score != null ? result.product_b.health_score : '--'}</span>
                   </div>
 
                   <div>
@@ -648,9 +690,11 @@ export default function ComparePage() {
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                         : result.product_b.safety_level === 'moderate'
                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        : result.product_b.safety_level === 'danger'
+                        ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        : 'bg-zinc-800/40 text-zinc-300 border-zinc-700/50'
                     }`}>
-                      {result.product_b.safety_level}
+                      {result.product_b.safety_level === 'insufficient_evidence' ? 'Unrated' : result.product_b.safety_level}
                     </span>
                   </div>
                 </div>
@@ -670,30 +714,39 @@ export default function ComparePage() {
             </div>
 
             {/* HEAD-TO-HEAD COMPARISON TABLE */}
-            <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 md:p-8">
-              <h3 className="text-lg font-black text-white mb-6">Head-to-Head Nutrition Comparison</h3>
-              
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[500px] text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-zinc-900 text-zinc-500 uppercase font-black tracking-wider">
-                      <th className="pb-3 pr-2">Nutritional Field</th>
-                      <th className="pb-3 px-2">Product A ({result.product_a.brand})</th>
-                      <th className="pb-3 pl-2">Product B ({result.product_b.brand})</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(result.comparison_table).map(([field, values]: any) => (
-                      <tr key={field} className="border-b border-zinc-900/60 hover:bg-zinc-900/10 transition select-text">
-                        <td className="py-4 pr-2 font-bold text-zinc-400 capitalize">{field.replace('_', ' ')}</td>
-                        <td className="py-4 px-2 font-medium text-white">{values.a || 'N/A'}</td>
-                        <td className="py-4 pl-2 font-medium text-white">{values.b || 'N/A'}</td>
+            {result.comparison_table && (
+              <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 md:p-8">
+                <div className="flex justify-between items-baseline mb-6">
+                  <h3 className="text-lg font-black text-white">Head-to-Head Nutrition Comparison</h3>
+                  {result.comparison_table.basis && (
+                    <span className="text-xs text-zinc-400 font-medium">Basis: {result.comparison_table.basis}</span>
+                  )}
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[500px] text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-zinc-900 text-zinc-500 uppercase font-black tracking-wider">
+                        <th className="pb-3 pr-2">Nutritional Field</th>
+                        <th className="pb-3 px-2">Product A ({result.product_a.brand || 'Product A'})</th>
+                        <th className="pb-3 pl-2">Product B ({result.product_b.brand || 'Product B'})</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {Object.entries(result.comparison_table)
+                        .filter(([field]) => field !== 'basis')
+                        .map(([field, values]: any) => (
+                          <tr key={field} className="border-b border-zinc-900/60 hover:bg-zinc-900/10 transition select-text">
+                            <td className="py-4 pr-2 font-bold text-zinc-400 capitalize">{field.replace('_', ' ')}</td>
+                            <td className="py-4 px-2 font-medium text-white">{values?.a ?? 'N/A'}</td>
+                            <td className="py-4 pl-2 font-medium text-white">{values?.b ?? 'N/A'}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* HINDI & ENGLISH AI VERDICTS */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

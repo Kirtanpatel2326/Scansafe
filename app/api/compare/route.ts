@@ -1,5 +1,13 @@
 import { createClient } from "@/lib/supabase-server";
-import { reserveCredits, finalizeReservation, releaseReservation } from "@/lib/credits";
+import { 
+  reserveCredits, 
+  finalizeReservation, 
+  releaseReservation,
+  claimOperation,
+  saveOperationResultAndFinalize,
+  releaseOperationOnFailure,
+  recoverOperationAccounting
+} from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
 import { ComparisonResultSchema, calculateHealthScore, cleanNumericValue, normalizeNutrientsTo100g } from "@/lib/claude";
 import { evaluateDietaryCompatibility } from "@/lib/preferences";
@@ -35,6 +43,8 @@ function getBase64Data(base64Image: string) {
 export async function POST(request: Request) {
   let activeReservationOpId: string | null = null;
   let currentUserId: string | null = null;
+  let activeWorkerId: string | null = null;
+  let activeFencingToken: number | undefined = undefined;
 
   try {
     const supabase = await createClient();
@@ -67,80 +77,125 @@ export async function POST(request: Request) {
     }
 
     const { imageA, imageB, preferences } = parsed.data;
+
+    // Resolve user dietary preferences from profile if not passed in body BEFORE payload hashing
+    let finalPrefs = preferences || [];
+    if (!preferences || preferences.length === 0) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("dietary_profile")
+        .eq("id", user.id)
+        .single();
+      if (profile?.dietary_profile?.allergies) {
+        finalPrefs = profile.dietary_profile.allergies;
+      }
+    }
+
     const headerIdempotencyKey = request.headers.get("x-idempotency-key")?.trim() || "";
-    let idempotencyKey = parsed.data.idempotencyKey || headerIdempotencyKey;
+    const bodyIdempotencyKey = parsed.data.idempotencyKey?.trim() || "";
+    if (headerIdempotencyKey && bodyIdempotencyKey && headerIdempotencyKey !== bodyIdempotencyKey) {
+      return NextResponse.json({
+        error: "IDEMPOTENCY_KEY_MISMATCH",
+        message: "Conflicting idempotency keys provided in header and body."
+      }, { status: 400 });
+    }
+    let idempotencyKey = bodyIdempotencyKey || headerIdempotencyKey;
+
+    const cookieStore = await cookies();
+    const preferredLanguage = cookieStore.get("preferred_lang")?.value || "en";
+
+    const normalizedPayload = {
+      imageAHash: crypto.createHash("sha256").update(imageA).digest("hex"),
+      imageBHash: crypto.createHash("sha256").update(imageB).digest("hex"),
+      preferences: Array.isArray(finalPrefs) ? [...finalPrefs].sort() : [],
+      preferredLanguage
+    };
+
     if (!idempotencyKey) {
-      const normalizedPayload = {
-        imageAHash: crypto.createHash("sha256").update(imageA).digest("hex"),
-        imageBHash: crypto.createHash("sha256").update(imageB).digest("hex"),
-        preferences: Array.isArray(preferences) ? [...preferences].sort() : []
-      };
       const hash = crypto.createHash("sha256").update(`${user.id}:${JSON.stringify(normalizedPayload)}`).digest("hex").slice(0, 24);
       idempotencyKey = `det_${hash}`;
     }
 
     // 3. IDEMPOTENCY CHECK & ATOMIC CREDIT RESERVATION (2 credits for compare)
     const opId = `op_comp_${user.id.slice(0, 8)}_${idempotencyKey}`;
+    const payloadHash = crypto.createHash("sha256").update(JSON.stringify(normalizedPayload)).digest("hex");
 
-    // Check if comparison with this op_id already exists in history
-    const { data: existingScan } = await supabase
-      .from("scans")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("op_id", opId)
-      .maybeSingle();
+    const workerId = `w_${process.pid || 1}_${crypto.randomBytes(4).toString("hex")}`;
+    activeWorkerId = workerId;
 
-    if (existingScan) {
-      if (existingScan.accounting_status === "completed") {
-        return NextResponse.json({
-          success: true,
-          comparison: existingScan.result_json,
-          scanId: existingScan.id,
-          already_completed: true
-        });
-      } else if (existingScan.accounting_status === "accounting_pending") {
-        const finalization = await finalizeReservation(user.id, opId);
-        if (finalization.success) {
-          await supabase
-            .from("scans")
-            .update({ accounting_status: "completed" })
-            .eq("id", existingScan.id);
-
-          return NextResponse.json({
-            success: true,
-            comparison: existingScan.result_json,
-            scanId: existingScan.id,
-            remainingCredits: finalization.newBalance,
-            recovered: true
-          });
-        } else {
-          return NextResponse.json({
-            success: false,
-            status: "accounting_pending",
-            error: "ACCOUNTING_FINALIZATION_FAILED",
-            opId,
-            scanId: existingScan.id,
-            message: `Comparison analysis is saved, but credit finalization failed: ${finalization.error}. Please retry.`,
-            comparison: existingScan.result_json
-          }, { status: 500 });
-        }
-      }
-    }
-
-    const reservation = await reserveCredits(
+    // Atomically claim operation
+    const claim = await claimOperation(
       user.id,
-      CREDIT_COSTS.COMPARE,
-      "compare",
       opId,
-      "Side-by-side product comparison"
+      "compare",
+      CREDIT_COSTS.COMPARE,
+      payloadHash,
+      workerId,
+      120
     );
 
-    if (!reservation.success) {
+    if (!claim.success) {
+      if (claim.error === "IDEMPOTENCY_CONFLICT") {
+        return NextResponse.json({
+          error: "IDEMPOTENCY_CONFLICT",
+          message: "This idempotency key was previously used with different comparison inputs."
+        }, { status: 409 });
+      }
+      if (claim.error === "OPERATION_IN_PROGRESS") {
+        return NextResponse.json({
+          error: "OPERATION_IN_PROGRESS",
+          message: "This comparison is actively being processed by another worker. Please wait."
+        }, { status: 409 });
+      }
+      if (claim.error === "INSUFFICIENT_CREDITS") {
+        return NextResponse.json({
+          error: "INSUFFICIENT_CREDITS",
+          message: "You need at least 2 scan credits to compare products. Please refill your scan pack.",
+          availableCredits: claim.availableCredits ?? 0
+        }, { status: 403 });
+      }
       return NextResponse.json({
-        error: "INSUFFICIENT_CREDITS",
-        message: reservation.error || "You need at least 2 scan credits to compare products. Please refill your scan pack.",
-        availableCredits: reservation.availableCreditsAfter ?? 0
-      }, { status: 403 });
+        error: claim.error || "OPERATION_CLAIM_FAILED",
+        message: claim.message || "Failed to claim comparison operation."
+      }, { status: 500 });
+    }
+
+    activeFencingToken = claim.fencingToken;
+
+    if (claim.status === "completed" || claim.alreadyCompleted) {
+      const savedComparison = claim.result?.comparison || claim.result;
+      const savedScanId = claim.result?.scanId || opId;
+      return NextResponse.json({
+        success: true,
+        comparison: savedComparison,
+        scanId: savedScanId,
+        already_completed: true
+      });
+    }
+
+    if (claim.status === "accounting_pending" || claim.accountingPending) {
+      const recovery = await recoverOperationAccounting(user.id, opId);
+      const savedComparison = claim.result?.comparison || claim.result;
+      const savedScanId = claim.result?.scanId || opId;
+      if (recovery.success) {
+        return NextResponse.json({
+          success: true,
+          comparison: savedComparison,
+          scanId: savedScanId,
+          remainingCredits: recovery.newBalance,
+          recovered: true
+        });
+      } else {
+        return NextResponse.json({
+          success: false,
+          status: "accounting_pending",
+          error: "ACCOUNTING_FINALIZATION_FAILED",
+          opId,
+          scanId: savedScanId,
+          message: `Comparison analysis is saved, but credit finalization failed: ${recovery.error}. Please retry.`,
+          comparison: savedComparison
+        }, { status: 500 });
+      }
     }
 
     activeReservationOpId = opId;
@@ -153,8 +208,6 @@ export async function POST(request: Request) {
       throw new Error("AI service is not configured on server.");
     }
 
-    const cookieStore = await cookies();
-    const preferredLanguage = cookieStore.get("preferred_lang")?.value || "en";
     const langPrompt = preferredLanguage && preferredLanguage !== "en"
       ? "\nCRITICAL LANGUAGE REQUIREMENT: All user-facing explanations and rationale text fields (winner_reason, highlights, verdict_english) MUST be written in the language: " + preferredLanguage + "."
       : "";
@@ -403,14 +456,13 @@ JSON.stringify({
 
         if (existingSaved) {
           finalScanData = existingSaved;
-          activeReservationOpId = null; // Do NOT release winning reservation
         }
       }
 
       if (!finalScanData) {
         console.error("Failed to save comparison to history database:", dbErr);
-        if (activeReservationOpId && !reservation.alreadyReserved) {
-          await releaseReservation(user.id, activeReservationOpId, "Database save failure for comparison");
+        if (activeReservationOpId) {
+          await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for comparison", activeFencingToken);
           activeReservationOpId = null;
         }
         return NextResponse.json({
@@ -422,48 +474,46 @@ JSON.stringify({
 
     const scanId = finalScanData.id;
 
-    // Finalize 2 credits deduction
-    if (activeReservationOpId) {
-      const finalization = await finalizeReservation(user.id, activeReservationOpId);
-      if (finalization.success) {
-        if (scanId) {
-          await supabase
-            .from("scans")
-            .update({ accounting_status: "completed" })
-            .eq("id", scanId);
-        }
-        activeReservationOpId = null;
-
-        return NextResponse.json({
-          success: true,
-          comparison: comparisonData,
-          scanId,
-          remainingCredits: finalization.newBalance
-        });
-      } else {
-        console.error("Credit finalization failed in comparison:", finalization.error);
-        return NextResponse.json({
-          success: false,
-          status: "accounting_pending",
-          error: "ACCOUNTING_FINALIZATION_FAILED",
-          opId: activeReservationOpId,
-          scanId,
-          message: `Comparison succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
-          comparison: comparisonData
-        }, { status: 500 });
+    // Finalize 2 credits deduction atomically
+    const finalization = await saveOperationResultAndFinalize(
+      user.id, 
+      opId, 
+      workerId, 
+      { comparison: comparisonData, scanId }, 
+      activeFencingToken
+    );
+    if (finalization.success) {
+      if (scanId) {
+        await supabase
+          .from("scans")
+          .update({ accounting_status: "completed" })
+          .eq("id", scanId);
       }
-    }
+      activeReservationOpId = null;
 
-    return NextResponse.json({
-      success: true,
-      comparison: comparisonData,
-      scanId
-    });
+      return NextResponse.json({
+        success: true,
+        comparison: comparisonData,
+        scanId,
+        remainingCredits: finalization.newBalance
+      });
+    } else {
+      console.error("Credit finalization failed in comparison:", finalization.error);
+      return NextResponse.json({
+        success: false,
+        status: "accounting_pending",
+        error: "ACCOUNTING_FINALIZATION_FAILED",
+        opId: activeReservationOpId,
+        scanId,
+        message: `Comparison succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
+        comparison: comparisonData
+      }, { status: 500 });
+    }
 
   } catch (err: any) {
     console.error("Comparison API error:", err);
-    if (activeReservationOpId && currentUserId) {
-      await releaseReservation(currentUserId, activeReservationOpId, err.message || "Comparison processing error");
+    if (activeReservationOpId && currentUserId && activeWorkerId && typeof activeFencingToken === "number") {
+      await releaseOperationOnFailure(currentUserId, activeReservationOpId, activeWorkerId, err.message || "Comparison processing error", activeFencingToken);
     }
     return NextResponse.json({
       error: "COMPARISON_FAILED",

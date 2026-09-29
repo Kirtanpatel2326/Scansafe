@@ -6,6 +6,7 @@ export type CreditAction =
   | "scan"
   | "compare"
   | "meal_compose"
+  | "meal_composer"
   | "bonus"
   | "refund"
   | "initial_grant";
@@ -29,6 +30,7 @@ export interface CreditReservationResult {
   availableCreditsAfter?: number;
   error?: string;
   alreadyReserved?: boolean;
+  alreadyFinalized?: boolean;
 }
 
 export interface CreditFinalizeResult {
@@ -46,6 +48,32 @@ export interface CreditReleaseResult {
   opId: string;
   error?: string;
   alreadyReleased?: boolean;
+}
+
+export interface OperationClaimResult {
+  success: boolean;
+  opId: string;
+  status?: "pending" | "processing" | "completed" | "failed" | "accounting_pending";
+  claimed?: boolean;
+  alreadyCompleted?: boolean;
+  accountingPending?: boolean;
+  inProgress?: boolean;
+  conflict?: boolean;
+  result?: any;
+  accountingStatus?: string;
+  fencingToken?: number;
+  error?: string;
+  message?: string;
+  availableCredits?: number;
+}
+
+export interface OperationSaveResult {
+  success: boolean;
+  newBalance?: number;
+  alreadyCompleted?: boolean;
+  alreadyFinalized?: boolean;
+  error?: string;
+  message?: string;
 }
 
 /**
@@ -144,7 +172,6 @@ export async function reserveCredits(
     }
 
     if (!rpcData || !rpcData.success) {
-      const errCode = rpcData?.error || "RESERVATION_FAILED";
       const errMsg = rpcData?.error === "INSUFFICIENT_CREDITS"
         ? `Insufficient scan credits. Required: ${amount}, Available: ${rpcData.available_credits ?? 0}. Please refill your scan pack.`
         : (rpcData?.message || rpcData?.error || "Credit reservation failed");
@@ -164,7 +191,8 @@ export async function reserveCredits(
       userId,
       amount,
       availableCreditsAfter: rpcData.available_credits_after,
-      alreadyReserved: rpcData.already_reserved
+      alreadyReserved: rpcData.already_reserved,
+      alreadyFinalized: rpcData.already_finalized
     };
   } catch (err: any) {
     console.error("Credit reservation exception:", err);
@@ -219,7 +247,7 @@ export async function finalizeReservation(
         success: false,
         userId,
         opId,
-        error: rpcData?.error || "Failed to finalize credit deduction"
+        error: rpcData?.message || rpcData?.error || "Failed to finalize credit deduction"
       };
     }
 
@@ -300,6 +328,207 @@ export async function releaseReservation(
       userId,
       opId,
       error: err.message || "Failed to release reservation."
+    };
+  }
+}
+
+/**
+ * Atomically claims an operation lease before running expensive AI/OCR/Network work.
+ * Enforces payload hash binding (returns conflict on mismatch) and single worker execution.
+ */
+export async function claimOperation(
+  userId: string,
+  opId: string,
+  action: CreditAction,
+  creditCost: number,
+  payloadHash: string,
+  workerId: string,
+  leaseSeconds: number = 120
+): Promise<OperationClaimResult> {
+  const adminClient = createAdminClient();
+  try {
+    const { data: rpcData, error: rpcError } = await adminClient.rpc("claim_operation", {
+      p_user_id: userId,
+      p_op_id: opId,
+      p_action: action,
+      p_credit_cost: creditCost,
+      p_payload_hash: payloadHash,
+      p_worker_id: workerId,
+      p_lease_seconds: leaseSeconds
+    });
+
+    if (rpcError) {
+      console.error("claim_operation RPC error:", rpcError);
+      return {
+        success: false,
+        opId,
+        error: "CLAIM_RPC_ERROR",
+        message: rpcError.message
+      };
+    }
+
+    if (!rpcData || !rpcData.success) {
+      return {
+        success: false,
+        opId,
+        error: rpcData?.error || "OPERATION_CLAIM_FAILED",
+        conflict: rpcData?.error === "IDEMPOTENCY_CONFLICT",
+        message: rpcData?.message || rpcData?.error || "Failed to claim operation",
+        availableCredits: rpcData?.available_credits
+      };
+    }
+
+    return {
+      success: true,
+      opId,
+      status: rpcData.status,
+      claimed: rpcData.claimed,
+      alreadyCompleted: rpcData.already_completed,
+      accountingPending: rpcData.accounting_pending,
+      result: rpcData.result,
+      accountingStatus: rpcData.accounting_status,
+      fencingToken: rpcData.fencing_token
+    };
+  } catch (err: any) {
+    console.error("claimOperation exception:", err);
+    return {
+      success: false,
+      opId,
+      error: "CLAIM_EXCEPTION",
+      message: err.message || "Failed to claim operation"
+    };
+  }
+}
+
+/**
+ * Atomically stores durable operation result and finalizes credit accounting.
+ */
+export async function saveOperationResultAndFinalize(
+  userId: string,
+  opId: string,
+  workerId: string,
+  result: any,
+  fencingToken?: number | null
+): Promise<OperationSaveResult> {
+  if (!workerId || typeof fencingToken !== "number") {
+    return {
+      success: false,
+      error: "INVALID_WORKER_PARAMS",
+      message: "Worker ID and fencing token are strictly required for operation finalization."
+    };
+  }
+
+  const adminClient = createAdminClient();
+  try {
+    const { data: rpcData, error: rpcError } = await adminClient.rpc("save_operation_result_and_finalize", {
+      p_user_id: userId,
+      p_op_id: opId,
+      p_worker_id: workerId,
+      p_result: result,
+      p_fencing_token: fencingToken
+    });
+
+    if (rpcError) {
+      console.error("save_operation_result_and_finalize RPC error:", rpcError);
+      return {
+        success: false,
+        error: "SAVE_RPC_ERROR",
+        message: rpcError.message
+      };
+    }
+
+    if (!rpcData || !rpcData.success) {
+      return {
+        success: false,
+        error: rpcData?.error || "SAVE_FINALIZATION_FAILED",
+        message: rpcData?.message || rpcData?.error || "Failed to save result and finalize accounting"
+      };
+    }
+
+    return {
+      success: true,
+      newBalance: rpcData.new_balance,
+      alreadyCompleted: rpcData.already_completed,
+      alreadyFinalized: rpcData.already_finalized
+    };
+  } catch (err: any) {
+    console.error("saveOperationResultAndFinalize exception:", err);
+    return {
+      success: false,
+      error: "SAVE_EXCEPTION",
+      message: err.message || "Failed to save operation result"
+    };
+  }
+}
+
+/**
+ * Releases worker lease and operation reservation on processing failure.
+ */
+export async function releaseOperationOnFailure(
+  userId: string,
+  opId: string,
+  workerId: string,
+  errorMessage?: string,
+  fencingToken?: number | null
+): Promise<boolean> {
+  if (!workerId || typeof fencingToken !== "number") {
+    console.error("releaseOperationOnFailure: worker and sequence parameters required");
+    return false;
+  }
+
+  const adminClient = createAdminClient();
+  const finalError = errorMessage || "Operation failed";
+  try {
+    const { data: rpcData, error: rpcError } = await adminClient.rpc("release_operation_on_failure", {
+      p_user_id: userId,
+      p_op_id: opId,
+      p_worker_id: workerId,
+      p_error_message: finalError,
+      p_fencing_token: fencingToken
+    });
+
+    if (rpcError || !rpcData || !rpcData.success) {
+      console.error("release_operation_on_failure error:", rpcError || rpcData);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error("releaseOperationOnFailure exception:", err);
+    return false;
+  }
+}
+
+/**
+ * Recovers pending credit finalization for a durable saved result without rerunning AI.
+ */
+export async function recoverOperationAccounting(
+  userId: string,
+  opId: string
+): Promise<{ success: boolean; newBalance?: number; result?: any; error?: string }> {
+  const adminClient = createAdminClient();
+  try {
+    const { data: rpcData, error: rpcError } = await adminClient.rpc("recover_operation_accounting", {
+      p_user_id: userId,
+      p_op_id: opId
+    });
+
+    if (rpcError || !rpcData || !rpcData.success) {
+      return {
+        success: false,
+        error: rpcError?.message || rpcData?.error || "Accounting recovery failed"
+      };
+    }
+
+    return {
+      success: true,
+      newBalance: rpcData.new_balance,
+      result: rpcData.result
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || "Accounting recovery exception"
     };
   }
 }

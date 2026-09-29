@@ -42,8 +42,16 @@ CREATE TABLE IF NOT EXISTS public.pending_payments (
     plan_type TEXT NOT NULL,
     amount NUMERIC NOT NULL,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+    approved_by UUID REFERENCES public.profiles(id),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    rejection_reason TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_payments_utr 
+  ON public.pending_payments(utr) 
+  WHERE utr IS NOT NULL;
 
 ALTER TABLE public.pending_payments ENABLE ROW LEVEL SECURITY;
 
@@ -89,12 +97,21 @@ CREATE TABLE IF NOT EXISTS public.scans (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
-DELETE FROM public.scans a
-USING public.scans b
-WHERE a.id < b.id 
-  AND a.user_id = b.user_id 
-  AND a.op_id = b.op_id 
-  AND a.op_id IS NOT NULL;
+WITH ranked_scans AS (
+    SELECT id, user_id, op_id,
+           ROW_NUMBER() OVER (
+               PARTITION BY user_id, op_id 
+               ORDER BY 
+                   CASE WHEN accounting_status = 'completed' THEN 1 ELSE 2 END,
+                   created_at DESC
+           ) as rn
+    FROM public.scans
+    WHERE op_id IS NOT NULL
+)
+DELETE FROM public.scans
+WHERE id IN (
+    SELECT id FROM ranked_scans WHERE rn > 1
+);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_user_op_id_unique ON public.scans(user_id, op_id) WHERE op_id IS NOT NULL;
 ALTER TABLE public.scans ENABLE ROW LEVEL SECURITY;
@@ -117,12 +134,21 @@ CREATE TABLE IF NOT EXISTS public.meal_compositions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
-DELETE FROM public.meal_compositions a
-USING public.meal_compositions b
-WHERE a.id < b.id 
-  AND a.user_id = b.user_id 
-  AND a.op_id = b.op_id 
-  AND a.op_id IS NOT NULL;
+WITH ranked_meals AS (
+    SELECT id, user_id, op_id,
+           ROW_NUMBER() OVER (
+               PARTITION BY user_id, op_id 
+               ORDER BY 
+                   CASE WHEN accounting_status = 'completed' THEN 1 ELSE 2 END,
+                   created_at DESC
+           ) as rn
+    FROM public.meal_compositions
+    WHERE op_id IS NOT NULL
+)
+DELETE FROM public.meal_compositions
+WHERE id IN (
+    SELECT id FROM ranked_meals WHERE rn > 1
+);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_meal_compositions_user_op_id_unique ON public.meal_compositions(user_id, op_id) WHERE op_id IS NOT NULL;
 ALTER TABLE public.meal_compositions ENABLE ROW LEVEL SECURITY;
@@ -205,6 +231,17 @@ BEGIN
         'free',
         5
     ) ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO public.credit_ledger (user_id, amount, balance_after, action, reference_id, description)
+    VALUES (
+        new.id,
+        5,
+        5,
+        'initial_grant',
+        'signup_bonus',
+        'Initial 5 lifetime free scans on account registration'
+    ) ON CONFLICT DO NOTHING;
+
     RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

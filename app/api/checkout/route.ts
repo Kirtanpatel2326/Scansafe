@@ -1,6 +1,6 @@
 import { createClient, createAdminClient } from "@/lib/supabase-server";
 import { razorpay } from "@/lib/razorpay";
-import { getScanPack } from "@/lib/plans";
+import { getScanPack, LIVE_PAYMENTS_ENABLED } from "@/lib/plans";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -11,6 +11,14 @@ const CheckoutPayloadSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    // 0. Safe Submission Fallback: Check if live checkout is enabled
+    if (!LIVE_PAYMENTS_ENABLED) {
+      return NextResponse.json({
+        error: "PAYMENTS_AWAITING_VERIFICATION",
+        message: "Live payment checkout is currently disabled pending production gateway verification. Please use the zero-credit sample demo to test ScanSafe features."
+      }, { status: 503 });
+    }
+
     const supabase = await createClient();
     
     // Authenticate the user
@@ -43,9 +51,9 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const isUsd = pack.id.startsWith("usd_") || pack.id.startsWith("pack_usd_");
-    const amount = isUsd ? (pack.priceCents || 900) : pack.pricePaise;
-    const currency = isUsd ? "USD" : "INR";
+    // Always use canonical INR paise amount from server catalog
+    const amount = pack.pricePaise;
+    const currency = "INR";
 
     const options = {
       amount,

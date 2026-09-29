@@ -17,6 +17,15 @@ export interface ScanPack {
   features: string[]
 }
 
+/**
+ * Safe submission fallback:
+ * Live payments remain unverified against a real disposable database in this environment.
+ * Default is false (prototype demonstration mode) unless explicitly enabled via environment variable.
+ */
+export const LIVE_PAYMENTS_ENABLED = 
+  process.env.ENABLE_LIVE_PAYMENTS === "true" || 
+  process.env.NEXT_PUBLIC_ENABLE_LIVE_PAYMENTS === "true";
+
 export const SCAN_PACKS: Record<string, ScanPack> = {
   pack_10: {
     id: "pack_10",

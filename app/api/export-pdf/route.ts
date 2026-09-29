@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { NextResponse } from 'next/server'
+import { escapeHtml } from '@/lib/html'
 
 export async function GET(request: Request) {
   try {
@@ -34,22 +35,49 @@ export async function GET(request: Request) {
         return new Response('Report not found or permission denied.', { status: 404 })
       }
 
-      const res = scan.result_json
+      const res = scan.result_json || {}
       const isComparison = scan.barcode?.startsWith('COMPARE:')
 
       if (isComparison) {
-        title = `Comparison Report - ${res.product_a.brand} vs ${res.product_b.brand}`
+        const prodAName = escapeHtml(res.product_a?.name || 'Product A')
+        const prodABrand = escapeHtml(res.product_a?.brand || 'Brand A')
+        const prodBName = escapeHtml(res.product_b?.name || 'Product B')
+        const prodBBrand = escapeHtml(res.product_b?.brand || 'Brand B')
 
-        const tableRows = Object.entries(res.comparison_table || {}).map(([field, values]: any) => `
-          <tr>
-            <td style="font-weight:bold;text-transform:capitalize;">${field.replace('_', ' ')}</td>
-            <td>${values.a}</td>
-            <td>${values.b}</td>
-          </tr>
-        `).join('')
+        title = `Comparison Report - ${prodABrand} vs ${prodBBrand}`
 
-        const highlightsA = res.product_a.highlights.map((h: string) => `<li>${h}</li>`).join('')
-        const highlightsB = res.product_b.highlights.map((h: string) => `<li>${h}</li>`).join('')
+        const tableEntries = Object.entries(res.comparison_table || {})
+          .filter(([field]) => field !== 'basis')
+
+        const tableRows = tableEntries.length > 0
+          ? tableEntries.map(([field, values]: any) => `
+            <tr>
+              <td style="font-weight:bold;text-transform:capitalize;">${escapeHtml(field.replace(/_/g, ' '))}</td>
+              <td>${escapeHtml(values?.a ?? 'N/A')}</td>
+              <td>${escapeHtml(values?.b ?? 'N/A')}</td>
+            </tr>
+          `).join('')
+          : '<tr><td colspan="3" style="text-align:center;color:#666;">No nutrition comparison data available.</td></tr>'
+
+        const highlightsA = Array.isArray(res.product_a?.highlights)
+          ? res.product_a.highlights.map((h: string) => `<li>${escapeHtml(h)}</li>`).join('')
+          : ''
+        const highlightsB = Array.isArray(res.product_b?.highlights)
+          ? res.product_b.highlights.map((h: string) => `<li>${escapeHtml(h)}</li>`).join('')
+          : ''
+
+        const winnerLabel = res.winner === 'tie'
+          ? 'Healthy Tie'
+          : res.winner === 'undetermined'
+          ? 'Inconclusive / Undetermined'
+          : res.winner === 'A'
+          ? `Product A (${prodABrand})`
+          : `Product B (${prodBBrand})`
+
+        const scoreA = res.product_a?.health_score != null ? `${res.product_a.health_score} / 100` : 'Unrated'
+        const scoreB = res.product_b?.health_score != null ? `${res.product_b.health_score} / 100` : 'Unrated'
+        const safetyA = escapeHtml(res.product_a?.safety_level || 'insufficient_evidence')
+        const safetyB = escapeHtml(res.product_b?.safety_level || 'insufficient_evidence')
 
         dataHtml = `
           <div class="header-main">
@@ -61,8 +89,8 @@ export async function GET(request: Request) {
             <div class="grid-card">
               <h3>Subject Profile</h3>
               <table class="clinical-table-mini">
-                <tr><th>Account Email</th><td>${user.email}</td></tr>
-                <tr><th>Scan Timestamp</th><td>${new Date(scan.created_at).toLocaleString()}</td></tr>
+                <tr><th>Account Email</th><td>${escapeHtml(user.email)}</td></tr>
+                <tr><th>Scan Timestamp</th><td>${escapeHtml(new Date(scan.created_at).toLocaleString())}</td></tr>
                 <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
               </table>
             </div>
@@ -71,53 +99,57 @@ export async function GET(request: Request) {
               <h3>Winner Evaluation</h3>
               <table class="clinical-table-mini">
                 <tr><th>Evaluated Choice</th><td><strong>Product A vs Product B</strong></td></tr>
-                <tr><th>Winner Selected</th><td><strong>${res.winner === 'tie' ? 'Tie' : `Product ${res.winner}`}</strong></td></tr>
-                <tr><th>Verdict Title</th><td>${res.winner === 'A' ? `${res.product_a.brand} ${res.product_a.name}` : res.winner === 'B' ? `${res.product_b.brand} ${res.product_b.name}` : 'Equal Quality'}</td></tr>
+                <tr><th>Winner Selected</th><td><strong>${winnerLabel}</strong></td></tr>
+                <tr><th>Verdict Title</th><td>${res.winner === 'A' ? `${prodABrand} ${prodAName}` : res.winner === 'B' ? `${prodBBrand} ${prodBName}` : res.winner === 'tie' ? 'Equal Nutritional Quality' : 'Insufficient Evidence'}</td></tr>
               </table>
             </div>
           </div>
 
           <div class="section-main">
             <h3>Comparison Rationale</h3>
-            <p style="font-size:13px;line-height:1.6;color:#222;font-weight:500;">${res.winner_reason}</p>
+            <p style="font-size:13px;line-height:1.6;color:#222;font-weight:500;">${escapeHtml(res.winner_reason || 'No detailed rationale available.')}</p>
           </div>
 
           <div class="section-grid">
             <div class="grid-card">
-              <h3 class="risk-${res.product_a.safety_level}">Product A - ${res.product_a.brand}</h3>
-              <p style="font-size:12px;margin:4px 0 10px 0;color:#666;">${res.product_a.name}</p>
+              <h3 class="risk-${safetyA}">Product A - ${prodABrand}</h3>
+              <p style="font-size:12px;margin:4px 0 10px 0;color:#666;">${prodAName}</p>
               <table class="clinical-table-mini" style="margin-bottom:12px;">
-                <tr><th>Health Score</th><td><strong>${res.product_a.health_score} / 100</strong></td></tr>
-                <tr><th>Safety Level</th><td style="text-transform:uppercase;" class="risk-${res.product_a.safety_level}"><strong>${res.product_a.safety_level}</strong></td></tr>
+                <tr><th>Health Score</th><td><strong>${scoreA}</strong></td></tr>
+                <tr><th>Safety Level</th><td style="text-transform:uppercase;" class="risk-${safetyA}"><strong>${safetyA}</strong></td></tr>
               </table>
-              <h4 style="font-size:11px;text-transform:uppercase;color:#555;margin-bottom:6px;">Safety Highlights</h4>
-              <ul style="font-size:12px;padding-left:16px;margin:0;line-height:1.5;color:#444;">
-                ${highlightsA}
-              </ul>
+              ${highlightsA ? `
+                <h4 style="font-size:11px;text-transform:uppercase;color:#555;margin-bottom:6px;">Safety Highlights</h4>
+                <ul style="font-size:12px;padding-left:16px;margin:0;line-height:1.5;color:#444;">
+                  ${highlightsA}
+                </ul>
+              ` : ''}
             </div>
 
             <div class="grid-card">
-              <h3 class="risk-${res.product_b.safety_level}">Product B - ${res.product_b.brand}</h3>
-              <p style="font-size:12px;margin:4px 0 10px 0;color:#666;">${res.product_b.name}</p>
+              <h3 class="risk-${safetyB}">Product B - ${prodBBrand}</h3>
+              <p style="font-size:12px;margin:4px 0 10px 0;color:#666;">${prodBName}</p>
               <table class="clinical-table-mini" style="margin-bottom:12px;">
-                <tr><th>Health Score</th><td><strong>${res.product_b.health_score} / 100</strong></td></tr>
-                <tr><th>Safety Level</th><td style="text-transform:uppercase;" class="risk-${res.product_b.safety_level}"><strong>${res.product_b.safety_level}</strong></td></tr>
+                <tr><th>Health Score</th><td><strong>${scoreB}</strong></td></tr>
+                <tr><th>Safety Level</th><td style="text-transform:uppercase;" class="risk-${safetyB}"><strong>${safetyB}</strong></td></tr>
               </table>
-              <h4 style="font-size:11px;text-transform:uppercase;color:#555;margin-bottom:6px;">Safety Highlights</h4>
-              <ul style="font-size:12px;padding-left:16px;margin:0;line-height:1.5;color:#444;">
-                ${highlightsB}
-              </ul>
+              ${highlightsB ? `
+                <h4 style="font-size:11px;text-transform:uppercase;color:#555;margin-bottom:6px;">Safety Highlights</h4>
+                <ul style="font-size:12px;padding-left:16px;margin:0;line-height:1.5;color:#444;">
+                  ${highlightsB}
+                </ul>
+              ` : ''}
             </div>
           </div>
 
           <div class="section-main">
-            <h3>Head-to-Head Nutrition Comparison</h3>
+            <h3>Head-to-Head Nutrition Comparison ${res.comparison_table?.basis ? `<span style="font-size:12px;font-weight:normal;color:#666;">(Basis: ${escapeHtml(res.comparison_table.basis)})</span>` : ''}</h3>
             <table class="clinical-table">
               <thead>
                 <tr>
                   <th>Metric / Field</th>
-                  <th>Product A (${res.product_a.brand})</th>
-                  <th>Product B (${res.product_b.brand})</th>
+                  <th>Product A (${prodABrand})</th>
+                  <th>Product B (${prodBBrand})</th>
                 </tr>
               </thead>
               <tbody>
@@ -129,35 +161,41 @@ export async function GET(request: Request) {
           <div class="section-grid">
             <div class="grid-card">
               <h3 style="font-size:11px;color:#555;text-transform:uppercase;">English Verdict</h3>
-              <p style="font-size:11.5px;line-height:1.5;color:#333;">${res.verdict_english}</p>
+              <p style="font-size:11.5px;line-height:1.5;color:#333;">${escapeHtml(res.verdict_english || 'N/A')}</p>
             </div>
             <div class="grid-card">
               <h3 style="font-size:11px;color:#555;text-transform:uppercase;">Hindi Verdict</h3>
-              <p style="font-size:11.5px;line-height:1.5;color:#333;">${res.verdict_hindi}</p>
+              <p style="font-size:11.5px;line-height:1.5;color:#333;">${escapeHtml(res.verdict_hindi || 'N/A')}</p>
             </div>
           </div>
         `
       } else {
-        title = `Report - ${res.product_name || 'Scan'}`
+        const prodName = escapeHtml(res.product_name || 'Food Product')
+        const brandName = escapeHtml(res.brand || 'Unbranded')
+        title = `Report - ${prodName}`
 
         const additivesRows = Array.isArray(res.additives) && res.additives.length > 0 
           ? res.additives.map((add: any) => `
             <tr>
-              <td style="font-weight:bold;">${add.name} ${add.code ? `(${add.code})` : ''}</td>
-              <td class="badge risk-${add.risk}">${add.risk.toUpperCase()}</td>
-              <td>${add.description}</td>
-              <td style="font-size:11px;color:#555;">${add.source || 'Standard Reference'}</td>
+              <td style="font-weight:bold;">${escapeHtml(add.name)} ${add.code ? `(${escapeHtml(add.code)})` : ''}</td>
+              <td class="badge risk-${escapeHtml(add.risk || 'low')}">${escapeHtml((add.risk || 'low').toUpperCase())}</td>
+              <td>${escapeHtml(add.description || '')}</td>
+              <td style="font-size:11px;color:#555;">${escapeHtml(add.source || 'Standard Reference')}</td>
             </tr>
           `).join('')
           : '<tr><td colspan="4" style="text-align:center;color:#666;">No chemical additives or E-numbers identified.</td></tr>'
 
-        const ingredientsList = Array.isArray(res.ingredients)
+        const ingredientsList = Array.isArray(res.ingredients) && res.ingredients.length > 0
           ? res.ingredients.map((ing: any) => `
-            <span class="ing-item status-${ing.status}">
-              ${ing.name} ${ing.status !== 'safe' ? `(${ing.status})` : ''}
+            <span class="ing-item status-${escapeHtml(ing.status || 'safe')}">
+              ${escapeHtml(ing.name)} ${ing.status && ing.status !== 'safe' ? `(${escapeHtml(ing.status)})` : ''}
             </span>
           `).join(', ')
           : 'Not parsed'
+
+        const healthScoreDisplay = res.health_score != null ? res.health_score : '--'
+        const safetyLevel = escapeHtml(res.safety_level || 'insufficient_evidence')
+        const upfScore = res.upf_score ? `NOVA Group ${res.upf_score}` : 'Not classified'
 
         dataHtml = `
           <div class="header-main">
@@ -169,8 +207,8 @@ export async function GET(request: Request) {
             <div class="grid-card">
               <h3>Subject Profile</h3>
               <table class="clinical-table-mini">
-                <tr><th>Account Email</th><td>${user.email}</td></tr>
-                <tr><th>Scan Timestamp</th><td>${new Date(scan.created_at).toLocaleString()}</td></tr>
+                <tr><th>Account Email</th><td>${escapeHtml(user.email)}</td></tr>
+                <tr><th>Scan Timestamp</th><td>${escapeHtml(new Date(scan.created_at).toLocaleString())}</td></tr>
                 <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
               </table>
             </div>
@@ -178,9 +216,9 @@ export async function GET(request: Request) {
             <div class="grid-card">
               <h3>Product Overview</h3>
               <table class="clinical-table-mini">
-                <tr><th>Product Name</th><td><strong>${res.product_name}</strong></td></tr>
-                <tr><th>Manufacturer / Brand</th><td>${res.brand}</td></tr>
-                <tr><th>UPF NOVA Classification</th><td><strong>NOVA Group ${res.upf_score || '4 (Ultra-Processed)'}</strong></td></tr>
+                <tr><th>Product Name</th><td><strong>${prodName}</strong></td></tr>
+                <tr><th>Manufacturer / Brand</th><td>${brandName}</td></tr>
+                <tr><th>UPF NOVA Classification</th><td><strong>${escapeHtml(upfScore)}</strong></td></tr>
               </table>
             </div>
           </div>
@@ -188,13 +226,13 @@ export async function GET(request: Request) {
           <div class="section-main">
             <div class="score-container">
               <div class="score-circle">
-                <span class="score-num">${res.health_score}</span>
-                <span class="score-lbl">Score / 100</span>
+                <span class="score-num">${healthScoreDisplay}</span>
+                <span class="score-lbl">${res.health_score != null ? 'Score / 100' : 'Unrated'}</span>
               </div>
               <div class="score-summary">
                 <h3>Diagnostic Summary</h3>
-                <p>Safety Evaluation Status: <strong style="text-transform:uppercase;" class="risk-${res.safety_level}">${res.safety_level}</strong></p>
-                <p>${res.description}</p>
+                <p>Safety Evaluation Status: <strong style="text-transform:uppercase;" class="risk-${safetyLevel}">${safetyLevel}</strong></p>
+                <p>${escapeHtml(res.health_score_reason || res.description || 'This product was analyzed by ScanSafe Food Intelligence.')}</p>
               </div>
             </div>
           </div>
@@ -223,28 +261,30 @@ export async function GET(request: Request) {
             </table>
           </div>
 
+          ${(res.glycemic_index_estimate || res.upf_reason) ? `
           <div class="section-grid">
+            ${res.glycemic_index_estimate ? `
             <div class="grid-card">
-              <h3>Toxicological Hazard Summary</h3>
+              <h3>Glycemic & Metabolic Impact</h3>
               <table class="clinical-table-mini">
-                <tr><th>Microplastics Exposure Risk</th><td class="risk-${res.microplastics_risk || 'medium'}">${(res.microplastics_risk || 'medium').toUpperCase()}</td></tr>
-                <tr><th>Packaging Concern Details</th><td>${res.microplastics_reason || 'Polyethylene packaging material assessment.'}</td></tr>
-                <tr><th>Soluble Carbon footprint</th><td>${res.sustainability_grade || 'C'} (${res.sustainability_reason || 'Estimated packaging footprint.'})</td></tr>
+                <tr><th>Glycemic Index Estimate</th><td class="risk-${escapeHtml(res.glycemic_index_estimate)}">${escapeHtml(res.glycemic_index_estimate.toUpperCase())}</td></tr>
+                ${res.glycemic_reason ? `<tr><th>Rationale</th><td>${escapeHtml(res.glycemic_reason)}</td></tr>` : ''}
               </table>
-            </div>
+            </div>` : ''}
 
+            ${res.upf_reason ? `
             <div class="grid-card">
-              <h3>Metabolic Impact</h3>
+              <h3>Processing Level Details</h3>
               <table class="clinical-table-mini">
-                <tr><th>Glycemic Index Rating</th><td class="risk-${res.glycemic_index_estimate || 'medium'}">${(res.glycemic_index_estimate || 'medium').toUpperCase()}</td></tr>
-                <tr><th>Cardiovascular risk (Heart)</th><td>${res.health_risk_breakdown?.heart || 'low'}</td></tr>
-                <tr><th>Diabetes risk (Metabolic)</th><td>${res.health_risk_breakdown?.diabetes || 'low'}</td></tr>
-                <tr><th>Gut Inflammatory Index</th><td>${res.health_risk_breakdown?.gut_health || 'low'}</td></tr>
+                <tr><th>NOVA Rating</th><td><strong>${escapeHtml(upfScore)}</strong></td></tr>
+                <tr><th>Processing Rationale</th><td>${escapeHtml(res.upf_reason)}</td></tr>
               </table>
-            </div>
+            </div>` : ''}
           </div>
+          ` : ''}
         `
-      }} else if (mealId) {
+      }
+    } else if (mealId) {
       const { data: meal, error } = await supabase
         .from('meal_compositions')
         .select('*')
@@ -256,14 +296,19 @@ export async function GET(request: Request) {
         return new Response('Meal report not found.', { status: 404 })
       }
 
-      const res = meal.analysis_json
-      title = `Meal Report - ${meal.name}`
+      const res = meal.analysis_json || {}
+      const mealName = escapeHtml(meal.name || 'Composite Meal')
+      title = `Meal Report - ${mealName}`
 
-      const productRows = res.products_scanned.map((p: string) => `<li>${p}</li>`).join('')
+      const productRows = Array.isArray(res.products_scanned)
+        ? res.products_scanned.map((p: string) => `<li>${escapeHtml(p)}</li>`).join('')
+        : '<li>None</li>'
 
-      const additivesList = res.additives.length > 0
-        ? res.additives.map((a: any) => `<li><strong>${a.name} ${a.code ? `(${a.code})` : ''}</strong> - ${a.description}</li>`).join('')
+      const additivesList = Array.isArray(res.additives) && res.additives.length > 0
+        ? res.additives.map((a: any) => `<li><strong>${escapeHtml(a.name)} ${a.code ? `(${escapeHtml(a.code)})` : ''}</strong> - ${escapeHtml(a.description || '')}</li>`).join('')
         : '<li>No chemical additives identified.</li>'
+
+      const nut = res.nutrition_summary || {}
 
       dataHtml = `
         <div class="header-main">
@@ -275,8 +320,8 @@ export async function GET(request: Request) {
           <div class="grid-card">
             <h3>Subject Profile</h3>
             <table class="clinical-table-mini">
-              <tr><th>Account Email</th><td>${user.email}</td></tr>
-              <tr><th>Composite Timestamp</th><td>${new Date(meal.created_at).toLocaleString()}</td></tr>
+              <tr><th>Account Email</th><td>${escapeHtml(user.email)}</td></tr>
+              <tr><th>Composite Timestamp</th><td>${escapeHtml(new Date(meal.created_at).toLocaleString())}</td></tr>
               <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
             </table>
           </div>
@@ -284,9 +329,9 @@ export async function GET(request: Request) {
           <div class="grid-card">
             <h3>Meal Details</h3>
             <table class="clinical-table-mini">
-              <tr><th>Meal Name</th><td><strong>${meal.name}</strong></td></tr>
-              <tr><th>Scanned Items Count</th><td>${res.product_count} products</td></tr>
-              <tr><th>Combined Health Score</th><td><strong>${res.health_score} / 100</strong></td></tr>
+              <tr><th>Meal Name</th><td><strong>${mealName}</strong></td></tr>
+              <tr><th>Scanned Items Count</th><td>${escapeHtml(res.product_count ?? 0)} products</td></tr>
+              <tr><th>Combined Health Score</th><td><strong>${res.health_score != null ? `${res.health_score} / 100` : 'Unrated'}</strong></td></tr>
             </table>
           </div>
         </div>
@@ -294,7 +339,7 @@ export async function GET(request: Request) {
         <div class="section-main">
           <h3>Diagnostic Meal Summary</h3>
           <p style="font-size:15px;line-height:1.6;font-style:italic;color:#333;background:#f5f5f5;padding:15px;border-left:4px solid #10b981;border-radius:4px;">
-            "${res.composite_verdict}"
+            "${escapeHtml(res.composite_verdict || 'Meal nutrition calculated successfully.')}"
           </p>
         </div>
 
@@ -305,14 +350,14 @@ export async function GET(request: Request) {
               <tr><th>Nutrient</th><th>Combined Quantity</th></tr>
             </thead>
             <tbody>
-              <tr><td>Calories</td><td><strong>${res.nutrition_summary.calories} kcal</strong></td></tr>
-              <tr><td>Total Fats</td><td>${res.nutrition_summary.fat}</td></tr>
-              <tr><td>Saturated Fats</td><td>${res.nutrition_summary.saturated_fat}</td></tr>
-              <tr><td>Total Carbohydrates</td><td>${res.nutrition_summary.carbs}</td></tr>
-              <tr><td>Simple Sugars</td><td><strong>${res.nutrition_summary.sugar}</strong></td></tr>
-              <tr><td>Dietary Fiber</td><td>${res.nutrition_summary.fiber || '0g'}</td></tr>
-              <tr><td>Dietary Proteins</td><td><strong>${res.nutrition_summary.protein}</strong></td></tr>
-              <tr><td>Sodium Load</td><td>${res.nutrition_summary.sodium}</td></tr>
+              <tr><td>Calories</td><td><strong>${escapeHtml(nut.calories != null ? `${nut.calories} kcal` : 'N/A')}</strong></td></tr>
+              <tr><td>Total Fats</td><td>${escapeHtml(nut.fat ?? 'N/A')}</td></tr>
+              <tr><td>Saturated Fats</td><td>${escapeHtml(nut.saturated_fat ?? 'N/A')}</td></tr>
+              <tr><td>Total Carbohydrates</td><td>${escapeHtml(nut.carbs ?? 'N/A')}</td></tr>
+              <tr><td>Simple Sugars</td><td><strong>${escapeHtml(nut.sugar ?? 'N/A')}</strong></td></tr>
+              <tr><td>Dietary Fiber</td><td>${escapeHtml(nut.fiber ?? 'N/A')}</td></tr>
+              <tr><td>Dietary Proteins</td><td><strong>${escapeHtml(nut.protein ?? 'N/A')}</strong></td></tr>
+              <tr><td>Sodium Load</td><td>${escapeHtml(nut.sodium ?? 'N/A')}</td></tr>
             </tbody>
           </table>
         </div>

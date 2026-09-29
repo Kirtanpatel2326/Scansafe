@@ -1,5 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase-server'
-import { getScanPack } from '@/lib/plans'
+import { getScanPack, LIVE_PAYMENTS_ENABLED } from '@/lib/plans'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -12,6 +12,14 @@ const ManualCheckoutSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    // 0. Safe Submission Fallback: Check if manual submissions are enabled
+    if (!LIVE_PAYMENTS_ENABLED) {
+      return NextResponse.json({
+        error: "PAYMENTS_AWAITING_VERIFICATION",
+        message: "Manual payment submissions are currently disabled pending production verification."
+      }, { status: 503 });
+    }
+
     const sessionClient = await createClient();
     const { data: { user }, error: authError } = await sessionClient.auth.getUser();
     

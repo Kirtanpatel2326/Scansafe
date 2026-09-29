@@ -25,9 +25,9 @@ export interface IngredientAnalysisResult {
   id?: string
   product_name: string
   brand: string
-  health_score: number
+  health_score?: number | null
   health_score_reason?: string
-  safety_level: "safe" | "moderate" | "danger"
+  safety_level: "safe" | "moderate" | "danger" | "insufficient_evidence"
   description: string
   image_url?: string
   image?: string
@@ -174,14 +174,17 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
   } = result
 
   const reportId = scanId || result.id
+  const hasScore = health_score !== null && health_score !== undefined
 
-  const getScoreColor = (score: number) => {
+  const getScoreColor = (score: number | null | undefined) => {
+    if (score == null) return "text-zinc-400 stroke-zinc-600"
     if (score >= 70) return "text-emerald-400 stroke-emerald-400"
     if (score >= 40) return "text-amber-400 stroke-amber-400"
     return "text-rose-500 stroke-rose-500"
   }
 
-  const getScoreBg = (score: number) => {
+  const getScoreBg = (score: number | null | undefined) => {
+    if (score == null) return "bg-zinc-900/40 border-zinc-800"
     if (score >= 70) return "bg-emerald-500/10 border-emerald-500/20"
     if (score >= 40) return "bg-amber-500/10 border-amber-500/20"
     return "bg-rose-500/10 border-rose-500/20"
@@ -202,10 +205,15 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
       colorClass: "bg-rose-500/20 text-rose-300 border-rose-500/30",
       icon: <ShieldAlert className="w-4 h-4 text-rose-400" />,
       text: "High Health Concern"
+    },
+    insufficient_evidence: {
+      colorClass: "bg-zinc-800/40 text-zinc-300 border-zinc-700/50",
+      icon: <AlertTriangle className="w-4 h-4 text-zinc-400" />,
+      text: "Unrated / Insufficient Evidence"
     }
   }
 
-  const currentSafety = safetyConfig[safety_level] || safetyConfig.moderate
+  const currentSafety = safetyConfig[safety_level] || safetyConfig.insufficient_evidence
 
   const statusConfig = {
     safe: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
@@ -221,7 +229,7 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
 
   const radius = 40
   const circumference = 2 * Math.PI * radius
-  const strokeDashoffset = circumference - (health_score / 100) * circumference
+  const strokeDashoffset = hasScore ? circumference - ((health_score as number) / 100) * circumference : circumference
 
   const handleListen = () => {
     if (isSpeaking) {
@@ -234,7 +242,8 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
 
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel()
-      const textToSpeak = `${product_name || "This product"} scored ${health_score} out of 100. ${health_score_reason || description || ""}`
+      const scoreSpeech = hasScore ? `scored ${health_score} out of 100` : "is unrated due to insufficient evidence"
+      const textToSpeak = `${product_name || "This product"} ${scoreSpeech}. ${health_score_reason || description || ""}`
       const utterance = new SpeechSynthesisUtterance(textToSpeak)
       utterance.rate = 1.0
       utterance.onend = () => setIsSpeaking(false)
@@ -280,9 +289,10 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
 
     try {
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        const shareScoreText = hasScore ? `Score ${health_score}/100.` : "Nutrition unrated."
         await navigator.share({
           title: `ScanSafe Health Breakdown: ${product_name || "Product"}`,
-          text: `Health analysis for ${product_name || "this product"}: Score ${health_score}/100.`,
+          text: `Health analysis for ${product_name || "this product"}: ${shareScoreText}`,
           files: [file]
         })
       } else {
@@ -378,8 +388,8 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
                   />
                 </svg>
                 <div className="absolute flex flex-col items-center justify-center">
-                  <span className="text-2xl font-black text-white">{health_score}</span>
-                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest leading-none">Score</span>
+                  <span className="text-2xl font-black text-white">{hasScore ? health_score : "--"}</span>
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest leading-none">{hasScore ? "Score" : "Unrated"}</span>
                 </div>
               </div>
 

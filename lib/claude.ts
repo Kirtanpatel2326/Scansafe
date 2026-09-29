@@ -188,8 +188,148 @@ export interface IngredientAnalysis {
 
 
 
+export interface MeasurementQuantity {
+  value: number | null;
+  unit: string | null;
+  dimension: "mass" | "volume" | "count" | "unknown";
+  standardValue: number | null; // normalized to grams (for mass) or milliliters (for volume)
+  standardUnit: "g" | "ml" | "count" | null;
+}
+
+/**
+ * Defined quantity grammar and structured measurement parser.
+ * Supports leading decimals (e.g. ".5g" -> 0.5g), standard decimals ("0.5g"),
+ * punctuation abbreviations ("8 fl. oz.", "1.5 oz.", "250 ml.", "1 kg."),
+ * and explicit separation of mass vs volume dimensions.
+ * Rejects negative quantities ("-20g"), malformed numbers ("1.2.3g", "1..5g"), and unitless quantities.
+ */
+export function parseMeasurementQuantity(input?: string | null): MeasurementQuantity {
+  const invalid: MeasurementQuantity = {
+    value: null,
+    unit: null,
+    dimension: "unknown",
+    standardValue: null,
+    standardUnit: null
+  };
+
+  if (!input || typeof input !== "string") return invalid;
+  let str = input.trim();
+  if (str.length === 0) return invalid;
+
+  // Reject explicit negative values
+  if (/-\s*[\d.]/.test(str)) return invalid;
+
+  // If input contains packaging details like "1 bar (45g)" or "1 can (330ml)", extract the parenthetical measurement
+  const parenMatch = str.match(/\(([^)]+)\)/);
+  if (parenMatch) {
+    const inside = parenMatch[1].trim();
+    if (/[a-zA-Z]/.test(inside) && /\d/.test(inside)) {
+      str = inside;
+    }
+  }
+
+  // Check for supported fluid ounces first (handles "8 fl oz", "8 fl. oz.", "8 fl.oz.", "8 fluid ounces", "8 floz")
+  const flOzMatch = str.match(/^(\d*\.?\d+)\s*(?:fl\.?\s*oz\.?|fluid\s+ounces?|floz)\b/i);
+  if (flOzMatch) {
+    const rawValStr = flOzMatch[1];
+    if (rawValStr === "." || (rawValStr.match(/\./g) || []).length > 1) return invalid;
+    const num = parseFloat(rawValStr);
+    if (!isNaN(num) && isFinite(num) && num > 0) {
+      return {
+        value: num,
+        unit: "fl oz",
+        dimension: "volume",
+        standardValue: num * 29.5735,
+        standardUnit: "ml"
+      };
+    }
+  }
+
+  // Normalize other abbreviation dots on unit words while preserving decimal points in numbers
+  // e.g. "250 ml." -> "250 ml", "1.5 oz." -> "1.5 oz", "2 kg." -> "2 kg", "10 g." -> "10 g"
+  const cleanStr = str.replace(/\b([a-zA-Z]+)\./g, "$1");
+
+  // Regex to extract numeric part and unit part
+  const numMatch = cleanStr.match(/^(\d*\.?\d+)\s*([a-zA-Z%]+)?$/);
+  if (!numMatch) {
+    // Check if format is like "1 liter", "250 milliliters"
+    const wordsMatch = cleanStr.match(/^(\d*\.?\d+)\s+([a-zA-Z\s]+)$/);
+    if (!wordsMatch) return invalid;
+    const rawNumStr = wordsMatch[1];
+    if (rawNumStr === "." || (rawNumStr.match(/\./g) || []).length > 1) return invalid;
+    const num = parseFloat(rawNumStr);
+    if (isNaN(num) || !isFinite(num) || num <= 0) return invalid;
+    const uStr = wordsMatch[2].trim().toLowerCase();
+
+    if (/^(?:milliliters?|millilitres?|ml)$/i.test(uStr)) {
+      return { value: num, unit: "ml", dimension: "volume", standardValue: num, standardUnit: "ml" };
+    }
+    if (/^(?:liters?|litres?|l)$/i.test(uStr)) {
+      return { value: num, unit: "l", dimension: "volume", standardValue: num * 1000, standardUnit: "ml" };
+    }
+    if (/^(?:grams?|gm|g)$/i.test(uStr)) {
+      return { value: num, unit: "g", dimension: "mass", standardValue: num, standardUnit: "g" };
+    }
+    if (/^(?:kilograms?|kg)$/i.test(uStr)) {
+      return { value: num, unit: "kg", dimension: "mass", standardValue: num * 1000, standardUnit: "g" };
+    }
+    if (/^(?:milligrams?|mg)$/i.test(uStr)) {
+      return { value: num, unit: "mg", dimension: "mass", standardValue: num * 0.001, standardUnit: "g" };
+    }
+    if (/^(?:ounces?|oz)$/i.test(uStr)) {
+      return { value: num, unit: "oz", dimension: "mass", standardValue: num * 28.3495, standardUnit: "g" };
+    }
+    if (/^(?:pounds?|lbs?)$/i.test(uStr)) {
+      return { value: num, unit: "lb", dimension: "mass", standardValue: num * 453.592, standardUnit: "g" };
+    }
+    return invalid;
+  }
+
+  const rawNumStr = numMatch[1];
+  const unitStr = (numMatch[2] || "").toLowerCase().trim();
+
+  // Unitless quantities (e.g. "20") MUST be rejected unless unit supplied
+  if (!unitStr) return invalid;
+  if (rawNumStr === "." || (rawNumStr.match(/\./g) || []).length > 1) return invalid;
+
+  const num = parseFloat(rawNumStr);
+  if (isNaN(num) || !isFinite(num) || num <= 0) return invalid;
+
+  // Mass units
+  if (unitStr === "g" || unitStr === "gm" || unitStr === "gram" || unitStr === "grams") {
+    return { value: num, unit: "g", dimension: "mass", standardValue: num, standardUnit: "g" };
+  }
+  if (unitStr === "kg" || unitStr === "kilogram" || unitStr === "kilograms") {
+    return { value: num, unit: "kg", dimension: "mass", standardValue: num * 1000, standardUnit: "g" };
+  }
+  if (unitStr === "mg" || unitStr === "milligram" || unitStr === "milligrams") {
+    return { value: num, unit: "mg", dimension: "mass", standardValue: num * 0.001, standardUnit: "g" };
+  }
+  if (unitStr === "oz" || unitStr === "ounce" || unitStr === "ounces") {
+    return { value: num, unit: "oz", dimension: "mass", standardValue: num * 28.3495, standardUnit: "g" };
+  }
+  if (unitStr === "lb" || unitStr === "lbs" || unitStr === "pound" || unitStr === "pounds") {
+    return { value: num, unit: "lb", dimension: "mass", standardValue: num * 453.592, standardUnit: "g" };
+  }
+
+  // Volume units
+  if (unitStr === "ml" || unitStr === "milliliter" || unitStr === "milliliters" || unitStr === "millilitre" || unitStr === "millilitres") {
+    return { value: num, unit: "ml", dimension: "volume", standardValue: num, standardUnit: "ml" };
+  }
+  if (unitStr === "l" || unitStr === "liter" || unitStr === "liters" || unitStr === "litre" || unitStr === "litres") {
+    return { value: num, unit: "l", dimension: "volume", standardValue: num * 1000, standardUnit: "ml" };
+  }
+  if (unitStr === "floz") {
+    return { value: num, unit: "fl oz", dimension: "volume", standardValue: num * 29.5735, standardUnit: "ml" };
+  }
+
+  return invalid;
+}
+
 /**
  * Cleans and validates a numeric nutrient measurement.
+ * Supports leading decimals (e.g. ".5", ".5g" -> 0.5), standard decimals ("0.5g"),
+ * and units with punctuation abbreviations ("8 fl. oz.", "1.5 oz.").
  * Rejects negative, non-finite, NaN, and malformed values (e.g. "1.2.3g"). Preserves true zeros.
  */
 export function cleanNumericValue(val: any): number | null {
@@ -203,12 +343,18 @@ export function cleanNumericValue(val: any): number | null {
     if (trimmed.length === 0 || trimmed.toLowerCase() === "null" || trimmed.toLowerCase() === "undefined") return null;
     if (/-\s*[\d.]/.test(trimmed)) return null; // Explicitly reject negative strings like "-20g"
     
-    // Reject malformed strings with multiple decimal points (e.g. "1.2.3", "1.2.3g")
-    if ((trimmed.match(/\./g) || []).length > 1) return null;
+    // Normalize unit abbreviations (e.g. "fl. oz.", "oz.", "ml.", "g.")
+    const normalizedUnits = trimmed.replace(/\b([a-zA-Z]+)\./g, "$1");
 
-    // Match valid non-negative float or integer with optional unit
-    const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:[a-zA-Z%]*)$/);
-    if (match) {
+    // Check multiple decimal points in number part
+    const numPartMatch = normalizedUnits.match(/^([^\s[a-zA-Z%]+)/);
+    if (numPartMatch) {
+      if ((numPartMatch[1].match(/\./g) || []).length > 1) return null;
+    }
+
+    // Match valid non-negative float or integer with optional leading decimal and optional unit
+    const match = normalizedUnits.match(/^(\d*\.?\d+)\s*(?:[a-zA-Z%]*)$/);
+    if (match && match[1] && match[1] !== ".") {
       const parsed = parseFloat(match[1]);
       if (isNaN(parsed) || !isFinite(parsed) || parsed < 0) return null;
       return parsed;
@@ -219,81 +365,25 @@ export function cleanNumericValue(val: any): number | null {
 
 /**
  * Extracts serving size in grams or milliliters from a string.
- * Supports "20g", "40 grams", "100ml", "1l", "1 liter", "1 bar (45g)", "1.5 oz", "8 fl oz", etc.
+ * Supports "20g", ".5g", "40 grams", "100ml", "1l", "1 liter", "1 bar (45g)", "1.5 oz", "8 fl oz", "8 fl. oz.", etc.
  * Strictly rejects negative values, malformed strings (e.g. "1.2.3g"), and ambiguous unitless sizes (e.g. "20").
  */
-export function parseServingSizeGrams(servingSizeStr?: string | null): { grams: number | null; isLiquid: boolean; unit: string | null } {
-  if (!servingSizeStr || typeof servingSizeStr !== "string") {
-    return { grams: null, isLiquid: false, unit: null };
+export function parseServingSizeGrams(servingSizeStr?: string | null): { 
+  grams: number | null; 
+  isLiquid: boolean; 
+  unit: string | null;
+  dimension: "mass" | "volume" | "unknown";
+} {
+  const measurement = parseMeasurementQuantity(servingSizeStr);
+  if (measurement.standardValue !== null) {
+    return {
+      grams: measurement.standardValue,
+      isLiquid: measurement.dimension === "volume",
+      unit: measurement.unit,
+      dimension: measurement.dimension as "mass" | "volume"
+    };
   }
-  const str = servingSizeStr.trim().toLowerCase();
-
-  // Reject negative quantities (e.g. "-20g", "-5ml")
-  if (/-\s*[\d.]/.test(str)) {
-    return { grams: null, isLiquid: false, unit: null };
-  }
-
-  // Reject malformed multiple decimal points (e.g. "1.2.3g")
-  if ((str.match(/\./g) || []).length > 1) {
-    return { grams: null, isLiquid: false, unit: null };
-  }
-
-  // 1. Milliliters (e.g. "100ml", "250 ml", "100 millilitres", "100 milliliters")
-  const matchMl = str.match(/(\d+(?:\.\d+)?)\s*(?:ml|milliliters?|millilitres?)\b/i);
-  if (matchMl) {
-    const val = parseFloat(matchMl[1]);
-    if (!isNaN(val) && isFinite(val) && val > 0) {
-      return { grams: val, isLiquid: true, unit: "ml" };
-    }
-  }
-
-  // 2. Liters (e.g. "1l", "1.5 l", "1 liter", "1 litre", "2 liters")
-  const matchLiter = str.match(/(\d+(?:\.\d+)?)\s*(?:liters?|litres?|l)\b/i);
-  if (matchLiter) {
-    const val = parseFloat(matchLiter[1]);
-    if (!isNaN(val) && isFinite(val) && val > 0) {
-      return { grams: val * 1000, isLiquid: true, unit: "l" };
-    }
-  }
-
-  // 3. Fluid Ounces (e.g. "8 fl oz", "8 fl. oz.", "8 floz")
-  const matchFlOz = str.match(/(\d+(?:\.\d+)?)\s*(?:fl\.?\s*oz\.?|fluid\s+ounces?)\b/i);
-  if (matchFlOz) {
-    const val = parseFloat(matchFlOz[1]);
-    if (!isNaN(val) && isFinite(val) && val > 0) {
-      return { grams: val * 29.5735, isLiquid: true, unit: "fl oz" };
-    }
-  }
-
-  // 4. Kilograms (e.g. "1kg", "1.5 kg")
-  const matchKg = str.match(/(\d+(?:\.\d+)?)\s*(?:kg|kilograms?)\b/i);
-  if (matchKg) {
-    const val = parseFloat(matchKg[1]);
-    if (!isNaN(val) && isFinite(val) && val > 0) {
-      return { grams: val * 1000, isLiquid: false, unit: "kg" };
-    }
-  }
-
-  // 5. Grams (e.g. "20g", "20.5 g", "20 grams", "20 gm")
-  const matchGrams = str.match(/(\d+(?:\.\d+)?)\s*(?:grams?|gm|g)\b/i);
-  if (matchGrams) {
-    const val = parseFloat(matchGrams[1]);
-    if (!isNaN(val) && isFinite(val) && val > 0) {
-      return { grams: val, isLiquid: false, unit: "g" };
-    }
-  }
-
-  // 6. Ounces (e.g. "1.5 oz", "2 ounces")
-  const matchOz = str.match(/(\d+(?:\.\d+)?)\s*(?:ounces?|oz)\b/i);
-  if (matchOz) {
-    const val = parseFloat(matchOz[1]);
-    if (!isNaN(val) && isFinite(val) && val > 0) {
-      return { grams: val * 28.3495, isLiquid: false, unit: "oz" };
-    }
-  }
-
-  // Standalone numbers without units MUST be rejected (e.g. "20" cannot be assumed to be grams)
-  return { grams: null, isLiquid: false, unit: null };
+  return { grams: null, isLiquid: false, unit: null, dimension: "unknown" };
 }
 
 export interface Normalized100gNutrients {
@@ -342,41 +432,82 @@ export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
 
   if (!nf) return emptyResult;
 
-  const p100 = nf.per_100ml || nf.per_100g || {};
+  const p100ml = nf.per_100ml || {};
+  const p100g = nf.per_100g || {};
   const ps = nf.per_serving || {};
   const rawServingSize = nf.serving_size || nf.serving_size_text || (nf.serving_size_g ? `${nf.serving_size_g}g` : null) || (nf.serving_size_ml ? `${nf.serving_size_ml}ml` : null);
   const servingInfo = parseServingSizeGrams(rawServingSize);
   const servingSizeGrams = servingInfo.grams ?? (typeof nf.serving_size_g === "number" && nf.serving_size_g > 0 ? nf.serving_size_g : null);
   
   // Distinguish nutrition table basis from serving size units
-  const isExplicit100ml = nf.basis === "per_100ml" || !!nf.per_100ml;
-  const isExplicit100g = nf.basis === "per_100g" || !!nf.per_100g;
-  const isLiquid = isExplicit100ml ? true : (isExplicit100g ? false : servingInfo.isLiquid);
+  const isExplicit100ml = nf.basis === "per_100ml" || (Object.keys(p100ml).length > 0 && Object.keys(p100g).length === 0);
+  const isExplicit100g = nf.basis === "per_100g" || (Object.keys(p100g).length > 0 && Object.keys(p100ml).length === 0);
+  
+  const targetDimension: "mass" | "volume" | "unknown" = 
+    isExplicit100ml ? "volume" :
+    isExplicit100g ? "mass" :
+    servingInfo.dimension === "volume" ? "volume" :
+    servingInfo.dimension === "mass" ? "mass" : "unknown";
+
+  const isLiquid = targetDimension === "volume";
 
   const scaleFactor = (servingSizeGrams && servingSizeGrams > 0) ? (100 / servingSizeGrams) : null;
 
+  // Dimension matching: only allow scaling if serving dimension matches target dimension
+  const canScaleFromServing = Boolean(
+    scaleFactor !== null &&
+    targetDimension !== "unknown" &&
+    servingInfo.dimension === targetDimension
+  );
+
   // Helper to normalize a single nutrient independently
   const normalizeSingleNutrient = (
-    p100Vals: any[],
+    p100mlVals: any[],
+    p100gVals: any[],
     psVals: any[],
     flatVals: any[]
   ): { value: number | null; fromDirect: boolean } => {
-    // 1. Direct per 100g/100ml check
-    for (const v of p100Vals) {
-      const clean = cleanNumericValue(v);
-      if (clean !== null) return { value: clean, fromDirect: true };
+    // 1. Direct basis-matched per 100ml/100g check
+    if (isLiquid || isExplicit100ml) {
+      for (const v of p100mlVals) {
+        const clean = cleanNumericValue(v);
+        if (clean !== null) return { value: clean, fromDirect: true };
+      }
+    } else {
+      for (const v of p100gVals) {
+        const clean = cleanNumericValue(v);
+        if (clean !== null) return { value: clean, fromDirect: true };
+      }
     }
 
-    // If flat vals are explicitly labeled as 100g/100ml basis
-    if (nf.basis === "per_100g" || nf.basis === "per_100ml") {
+    // Fallback direct check on general p100
+    if (isExplicit100ml) {
+      for (const v of p100mlVals) {
+        const clean = cleanNumericValue(v);
+        if (clean !== null) return { value: clean, fromDirect: true };
+      }
+    } else if (isExplicit100g) {
+      for (const v of p100gVals) {
+        const clean = cleanNumericValue(v);
+        if (clean !== null) return { value: clean, fromDirect: true };
+      }
+    }
+
+    // If flat vals are explicitly labeled with matching basis
+    if (nf.basis === "per_100g" && !isLiquid) {
+      for (const v of flatVals) {
+        const clean = cleanNumericValue(v);
+        if (clean !== null) return { value: clean, fromDirect: true };
+      }
+    } else if (nf.basis === "per_100ml" && isLiquid) {
       for (const v of flatVals) {
         const clean = cleanNumericValue(v);
         if (clean !== null) return { value: clean, fromDirect: true };
       }
     }
 
-    // 2. Scaled from per-serving
-    if (scaleFactor !== null) {
+    // 2. Scaled from per-serving (only if dimension matches: volume -> per_100ml, mass -> per_100g)
+    if (canScaleFromServing && scaleFactor !== null) {
       for (const v of psVals) {
         const clean = cleanNumericValue(v);
         if (clean !== null) return { value: clean * scaleFactor, fromDirect: false };
@@ -393,52 +524,62 @@ export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
   };
 
   const normCalories = normalizeSingleNutrient(
-    [p100.calories, nf.per_100ml?.calories, nf.per_100g?.calories, nf.calories_100ml, nf.calories_100g],
+    [p100ml.calories, nf.calories_100ml],
+    [p100g.calories, nf.calories_100g],
     [ps.calories],
     [nf.calories]
   );
   const normFat = normalizeSingleNutrient(
-    [p100.fat_g, nf.per_100ml?.fat_g, nf.per_100g?.fat_g, nf.fat_100ml, nf.fat_100g],
+    [p100ml.fat_g, nf.fat_100ml],
+    [p100g.fat_g, nf.fat_100g],
     [ps.fat_g],
     [nf.fat_g, nf.fat]
   );
   const normSatFat = normalizeSingleNutrient(
-    [p100.saturated_fat_g, nf.per_100ml?.saturated_fat_g, nf.per_100g?.saturated_fat_g, nf.saturated_fat_100ml, nf.saturated_fat_100g],
+    [p100ml.saturated_fat_g, nf.saturated_fat_100ml],
+    [p100g.saturated_fat_g, nf.saturated_fat_100g],
     [ps.saturated_fat_g],
     [nf.saturated_fat_g, nf.saturated_fat]
   );
   const normTransFat = normalizeSingleNutrient(
-    [p100.trans_fat_g, nf.per_100ml?.trans_fat_g, nf.per_100g?.trans_fat_g, nf.trans_fat_100ml, nf.trans_fat_100g],
+    [p100ml.trans_fat_g, nf.trans_fat_100ml],
+    [p100g.trans_fat_g, nf.trans_fat_100g],
     [ps.trans_fat_g],
     [nf.trans_fat_g, nf.trans_fat]
   );
   const normCholesterol = normalizeSingleNutrient(
-    [p100.cholesterol_mg, nf.per_100ml?.cholesterol_mg, nf.per_100g?.cholesterol_mg, nf.cholesterol_100ml, nf.cholesterol_100g],
+    [p100ml.cholesterol_mg, nf.cholesterol_100ml],
+    [p100g.cholesterol_mg, nf.cholesterol_100g],
     [ps.cholesterol_mg],
     [nf.cholesterol_mg, nf.cholesterol]
   );
   const normSodium = normalizeSingleNutrient(
-    [p100.sodium_mg, nf.per_100ml?.sodium_mg, nf.per_100g?.sodium_mg, nf.sodium_100ml, nf.sodium_100g],
+    [p100ml.sodium_mg, nf.sodium_100ml],
+    [p100g.sodium_mg, nf.sodium_100g],
     [ps.sodium_mg],
     [nf.sodium_mg, nf.sodium]
   );
   const normCarbs = normalizeSingleNutrient(
-    [p100.carbs_g, nf.per_100ml?.carbs_g, nf.per_100g?.carbs_g, nf.carbs_100ml, nf.carbs_100g],
+    [p100ml.carbs_g, nf.carbs_100ml],
+    [p100g.carbs_g, nf.carbs_100g],
     [ps.carbs_g],
     [nf.carbs_g, nf.carbs]
   );
   const normFiber = normalizeSingleNutrient(
-    [p100.fiber_g, nf.per_100ml?.fiber_g, nf.per_100g?.fiber_g, nf.fiber_100ml, nf.fiber_100g],
+    [p100ml.fiber_g, nf.fiber_100ml],
+    [p100g.fiber_g, nf.fiber_100g],
     [ps.fiber_g],
     [nf.fiber_g, nf.fiber]
   );
   const normSugar = normalizeSingleNutrient(
-    [p100.sugar_g, nf.per_100ml?.sugar_g, nf.per_100g?.sugar_g, nf.sugar_100ml, nf.sugar_100g],
+    [p100ml.sugar_g, nf.sugar_100ml],
+    [p100g.sugar_g, nf.sugar_100g],
     [ps.sugar_g],
     [nf.sugar_g, nf.sugar]
   );
   const normProtein = normalizeSingleNutrient(
-    [p100.protein_g, nf.per_100ml?.protein_g, nf.per_100g?.protein_g, nf.protein_100ml, nf.protein_100g],
+    [p100ml.protein_g, nf.protein_100ml],
+    [p100g.protein_g, nf.protein_100g],
     [ps.protein_g],
     [nf.protein_g, nf.protein]
   );
@@ -452,7 +593,7 @@ export function normalizeNutrientsTo100g(nf?: any): Normalized100gNutrients {
 
   const hasDirect = nutrientList.some(n => n.fromDirect && n.value !== null);
   let basis: "per_100g" | "per_100ml" | "normalized_from_serving" = "normalized_from_serving";
-  if (isExplicit100ml) {
+  if (isExplicit100ml || isLiquid) {
     basis = "per_100ml";
   } else if (isExplicit100g || hasDirect) {
     basis = "per_100g";

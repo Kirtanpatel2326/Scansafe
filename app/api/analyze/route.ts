@@ -1,6 +1,14 @@
 import { createClient, createAdminClient } from "@/lib/supabase-server";
 import { analyzeLabel, enrichIngredientsText, applyPreferences, SAMPLE_PRODUCTS, IngredientAnalysis, RawProductFactsSchema, calculateHealthScore } from "@/lib/claude";
-import { reserveCredits, finalizeReservation, releaseReservation } from "@/lib/credits";
+import { 
+  reserveCredits, 
+  finalizeReservation, 
+  releaseReservation,
+  claimOperation,
+  saveOperationResultAndFinalize,
+  releaseOperationOnFailure,
+  recoverOperationAccounting
+} from "@/lib/credits";
 import { CREDIT_COSTS } from "@/lib/plans";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -66,6 +74,8 @@ function checkRateLimit(ip: string): boolean {
 export async function POST(request: Request) {
   let activeReservationOpId: string | null = null;
   let currentUserId: string | null = null;
+  let activeWorkerId: string | null = null;
+  let activeFencingToken: number | undefined = undefined;
 
   try {
     const forwardedFor = request.headers.get("x-forwarded-for");
@@ -127,89 +137,7 @@ export async function POST(request: Request) {
       }, { status: 401 });
     }
 
-    // 3. IDEMPOTENCY CHECK & ATOMIC CREDIT RESERVATION (1 Credit per single scan)
-    const headerIdempotencyKey = request.headers.get("x-idempotency-key")?.trim() || "";
-    let idempotencyKey = parsedBody.data.idempotencyKey || headerIdempotencyKey;
-    if (!idempotencyKey) {
-      const normalizedPayload = {
-        barcode: barcode || null,
-        imageHash: image ? crypto.createHash("sha256").update(image).digest("hex") : null,
-        preferences: Array.isArray(preferences) ? [...preferences].sort() : [],
-        productName: productName || null,
-        filename: filename || null
-      };
-      const hash = crypto.createHash("sha256").update(`${user.id}:${JSON.stringify(normalizedPayload)}`).digest("hex").slice(0, 24);
-      idempotencyKey = `det_${hash}`;
-    }
-
-    const opId = `op_scan_${user.id.slice(0, 8)}_${idempotencyKey}`;
-
-    // Check if a scan with this op_id already exists in user's scans
-    const { data: existingScan } = await supabase
-      .from("scans")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("op_id", opId)
-      .maybeSingle();
-
-    if (existingScan) {
-      if (existingScan.accounting_status === "completed") {
-        return NextResponse.json({
-          success: true,
-          analysis: existingScan.result_json,
-          scanId: existingScan.id,
-          source: "idempotent_retry",
-          already_completed: true
-        });
-      } else if (existingScan.accounting_status === "accounting_pending") {
-        // Attempt finalization recovery
-        const finalization = await finalizeReservation(user.id, opId);
-        if (finalization.success) {
-          await supabase
-            .from("scans")
-            .update({ accounting_status: "completed" })
-            .eq("id", existingScan.id);
-
-          return NextResponse.json({
-            success: true,
-            analysis: existingScan.result_json,
-            scanId: existingScan.id,
-            remainingCredits: finalization.newBalance,
-            recovered: true
-          });
-        } else {
-          return NextResponse.json({
-            success: false,
-            status: "accounting_pending",
-            error: "ACCOUNTING_FINALIZATION_FAILED",
-            opId,
-            scanId: existingScan.id,
-            message: `Scan analysis is saved, but credit finalization failed: ${finalization.error}. Please retry.`,
-            analysis: existingScan.result_json
-          }, { status: 500 });
-        }
-      }
-    }
-
-    const reservation = await reserveCredits(
-      user.id,
-      CREDIT_COSTS.SCAN,
-      "scan",
-      opId,
-      `Food label scan: ${productName || filename || barcode || "Image Scan"}`
-    );
-
-    if (!reservation.success) {
-      return NextResponse.json({
-        error: "INSUFFICIENT_CREDITS",
-        message: reservation.error || "You do not have enough scan credits. Please purchase a scan pack to continue.",
-        availableCredits: reservation.availableCreditsAfter ?? 0
-      }, { status: 403 });
-    }
-
-    activeReservationOpId = opId;
-
-    // Fetch user dietary preferences from profile if not passed in body
+    // 2.1 Resolve user dietary preferences from profile if not passed in body BEFORE payload hashing
     let finalPrefs = preferences || [];
     if (!preferences || preferences.length === 0) {
       const { data: profile } = await supabase
@@ -222,8 +150,119 @@ export async function POST(request: Request) {
       }
     }
 
+    // 3. IDEMPOTENCY CHECK & ATOMIC CREDIT RESERVATION (1 Credit per single scan)
+    const headerIdempotencyKey = request.headers.get("x-idempotency-key")?.trim() || "";
+    const bodyIdempotencyKey = parsedBody.data.idempotencyKey?.trim() || "";
+    if (headerIdempotencyKey && bodyIdempotencyKey && headerIdempotencyKey !== bodyIdempotencyKey) {
+      return NextResponse.json({
+        error: "IDEMPOTENCY_KEY_MISMATCH",
+        message: "Conflicting idempotency keys provided in header and body."
+      }, { status: 400 });
+    }
+    let idempotencyKey = bodyIdempotencyKey || headerIdempotencyKey;
+
     const cookieStore = await cookies();
     const preferredLanguage = cookieStore.get("preferred_lang")?.value || "en";
+
+    const normalizedPayload = {
+      barcode: barcode || null,
+      imageHash: image ? crypto.createHash("sha256").update(image).digest("hex") : null,
+      preferences: Array.isArray(finalPrefs) ? [...finalPrefs].sort() : [],
+      productName: productName || null,
+      filename: filename || null,
+      preferredLanguage
+    };
+
+    if (!idempotencyKey) {
+      const hash = crypto.createHash("sha256").update(`${user.id}:${JSON.stringify(normalizedPayload)}`).digest("hex").slice(0, 24);
+      idempotencyKey = `det_${hash}`;
+    }
+
+    const opId = `op_scan_${user.id.slice(0, 8)}_${idempotencyKey}`;
+    const payloadHash = crypto.createHash("sha256").update(JSON.stringify(normalizedPayload)).digest("hex");
+
+    const workerId = `w_${process.pid || 1}_${crypto.randomBytes(4).toString("hex")}`;
+    activeWorkerId = workerId;
+
+    // Atomically claim operation
+    const claim = await claimOperation(
+      user.id,
+      opId,
+      "scan",
+      CREDIT_COSTS.SCAN,
+      payloadHash,
+      workerId,
+      120
+    );
+
+    if (!claim.success) {
+      if (claim.error === "IDEMPOTENCY_CONFLICT") {
+        return NextResponse.json({
+          error: "IDEMPOTENCY_CONFLICT",
+          message: "This idempotency key was previously used with a different request payload."
+        }, { status: 409 });
+      }
+      if (claim.error === "OPERATION_IN_PROGRESS") {
+        return NextResponse.json({
+          error: "OPERATION_IN_PROGRESS",
+          message: "This scan is actively being processed by another worker. Please wait."
+        }, { status: 409 });
+      }
+      if (claim.error === "INSUFFICIENT_CREDITS") {
+        return NextResponse.json({
+          error: "INSUFFICIENT_CREDITS",
+          message: "You do not have enough scan credits. Please purchase a scan pack to continue.",
+          availableCredits: claim.availableCredits ?? 0
+        }, { status: 403 });
+      }
+      return NextResponse.json({
+        error: claim.error || "OPERATION_CLAIM_FAILED",
+        message: claim.message || "Failed to claim operation."
+      }, { status: 500 });
+    }
+
+    activeFencingToken = claim.fencingToken;
+
+    // If operation was already completed, return durable result with exact saved scanId
+    if (claim.status === "completed" || claim.alreadyCompleted) {
+      const savedAnalysis = claim.result?.analysis || claim.result;
+      const savedScanId = claim.result?.scanId || opId;
+      return NextResponse.json({
+        success: true,
+        analysis: savedAnalysis,
+        scanId: savedScanId,
+        source: "idempotent_retry",
+        already_completed: true
+      });
+    }
+
+    // If operation was in accounting_pending, recover accounting
+    if (claim.status === "accounting_pending" || claim.accountingPending) {
+      const recovery = await recoverOperationAccounting(user.id, opId);
+      const savedAnalysis = claim.result?.analysis || claim.result;
+      const savedScanId = claim.result?.scanId || opId;
+      if (recovery.success) {
+        return NextResponse.json({
+          success: true,
+          analysis: savedAnalysis,
+          scanId: savedScanId,
+          remainingCredits: recovery.newBalance,
+          recovered: true
+        });
+      } else {
+        return NextResponse.json({
+          success: false,
+          status: "accounting_pending",
+          error: "ACCOUNTING_FINALIZATION_FAILED",
+          opId,
+          scanId: savedScanId,
+          message: `Scan analysis is saved, but credit finalization failed: ${recovery.error}. Please retry.`,
+          analysis: savedAnalysis
+        }, { status: 500 });
+      }
+    }
+
+    activeReservationOpId = opId;
 
     // 4. BARCODE LOOKUP (CACHE OR OPEN FOOD FACTS)
     if (barcode) {
@@ -294,14 +333,13 @@ export async function POST(request: Request) {
 
               if (existingSaved) {
                 finalScanData = existingSaved;
-                activeReservationOpId = null;
               }
             }
 
             if (!finalScanData) {
               console.error("Failed to save cached scan to database:", scanInsertErr);
-              if (activeReservationOpId && !reservation.alreadyReserved) {
-                await releaseReservation(user.id, activeReservationOpId, "Database save failure for cached scan");
+              if (activeReservationOpId) {
+                await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for cached scan", activeFencingToken);
                 activeReservationOpId = null;
               }
               return NextResponse.json({
@@ -313,43 +351,40 @@ export async function POST(request: Request) {
 
           const scanId = finalScanData.id;
 
-          // Finalize credit deduction on successful scan
-          if (activeReservationOpId) {
-            const finalization = await finalizeReservation(user.id, activeReservationOpId);
-            if (finalization.success) {
-              await supabase
-                .from("scans")
-                .update({ accounting_status: "completed" })
-                .eq("id", scanId);
-              activeReservationOpId = null;
+          // Finalize credit deduction via atomic saveOperationResultAndFinalize
+          const finalization = await saveOperationResultAndFinalize(
+            user.id, 
+            opId, 
+            workerId, 
+            { analysis: personalizedAnalysis, scanId }, 
+            activeFencingToken
+          );
+          if (finalization.success) {
+            await supabase
+              .from("scans")
+              .update({ accounting_status: "completed" })
+              .eq("id", scanId);
+            activeReservationOpId = null;
 
-              return NextResponse.json({
-                success: true,
-                analysis: personalizedAnalysis,
-                scanId,
-                source: "cache",
-                remainingCredits: finalization.newBalance
-              });
-            } else {
-              console.error("Credit finalization failed after cached scan:", finalization.error);
-              return NextResponse.json({
-                success: false,
-                status: "accounting_pending",
-                error: "ACCOUNTING_FINALIZATION_FAILED",
-                opId: activeReservationOpId,
-                scanId,
-                message: `Scan analysis succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
-                analysis: personalizedAnalysis
-              }, { status: 500 });
-            }
+            return NextResponse.json({
+              success: true,
+              analysis: personalizedAnalysis,
+              scanId,
+              source: "cache",
+              remainingCredits: finalization.newBalance
+            });
+          } else {
+            console.error("Credit finalization failed after cached scan:", finalization.error);
+            return NextResponse.json({
+              success: false,
+              status: "accounting_pending",
+              error: "ACCOUNTING_FINALIZATION_FAILED",
+              opId: activeReservationOpId,
+              scanId,
+              message: `Scan analysis succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
+              analysis: personalizedAnalysis
+            }, { status: 500 });
           }
-
-          return NextResponse.json({
-            success: true,
-            analysis: personalizedAnalysis,
-            scanId,
-            source: "cache"
-          });
         }
       }
 
@@ -441,14 +476,13 @@ export async function POST(request: Request) {
 
                 if (existingSaved) {
                   finalScanData = existingSaved;
-                  activeReservationOpId = null;
                 }
               }
 
               if (!finalScanData) {
                 console.error("Failed to save OFF scan to database:", offScanErr);
-                if (activeReservationOpId && !reservation.alreadyReserved) {
-                  await releaseReservation(user.id, activeReservationOpId, "Database save failure for OFF scan");
+                if (activeReservationOpId) {
+                  await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for OFF scan", activeFencingToken);
                   activeReservationOpId = null;
                 }
                 return NextResponse.json({
@@ -460,42 +494,39 @@ export async function POST(request: Request) {
 
             const scanId = finalScanData.id;
 
-            if (activeReservationOpId) {
-              const finalization = await finalizeReservation(user.id, activeReservationOpId);
-              if (finalization.success) {
-                await supabase
-                  .from("scans")
-                  .update({ accounting_status: "completed" })
-                  .eq("id", scanId);
-                activeReservationOpId = null;
+            const finalization = await saveOperationResultAndFinalize(
+              user.id, 
+              opId, 
+              workerId, 
+              { analysis: personalizedAnalysis, scanId }, 
+              activeFencingToken
+            );
+            if (finalization.success) {
+              await supabase
+                .from("scans")
+                .update({ accounting_status: "completed" })
+                .eq("id", scanId);
+              activeReservationOpId = null;
 
-                return NextResponse.json({
-                  success: true,
-                  analysis: personalizedAnalysis,
-                  scanId,
-                  source: "openfoodfacts",
-                  remainingCredits: finalization.newBalance
-                });
-              } else {
-                console.error("Credit finalization failed after OpenFoodFacts scan:", finalization.error);
-                return NextResponse.json({
-                  success: false,
-                  status: "accounting_pending",
-                  error: "ACCOUNTING_FINALIZATION_FAILED",
-                  opId: activeReservationOpId,
-                  scanId,
-                  message: `Scan analysis succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
-                  analysis: personalizedAnalysis
-                }, { status: 500 });
-              }
+              return NextResponse.json({
+                success: true,
+                analysis: personalizedAnalysis,
+                scanId,
+                source: "openfoodfacts",
+                remainingCredits: finalization.newBalance
+              });
+            } else {
+              console.error("Credit finalization failed after OpenFoodFacts scan:", finalization.error);
+              return NextResponse.json({
+                success: false,
+                status: "accounting_pending",
+                error: "ACCOUNTING_FINALIZATION_FAILED",
+                opId: activeReservationOpId,
+                scanId,
+                message: `Scan analysis succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
+                analysis: personalizedAnalysis
+              }, { status: 500 });
             }
-
-            return NextResponse.json({
-              success: true,
-              analysis: personalizedAnalysis,
-              scanId,
-              source: "openfoodfacts"
-            });
           }
         }
       } catch (offErr) {
@@ -505,8 +536,8 @@ export async function POST(request: Request) {
 
     // 5. OCR VISION SCANNING VIA GEMINI
     if (!image) {
-      if (activeReservationOpId && currentUserId) {
-        await releaseReservation(currentUserId, activeReservationOpId, "Missing product image or barcode");
+      if (activeReservationOpId && currentUserId && activeWorkerId && typeof activeFencingToken === "number") {
+        await releaseOperationOnFailure(currentUserId, activeReservationOpId, activeWorkerId, "Missing product image or barcode", activeFencingToken);
         activeReservationOpId = null;
       }
       return NextResponse.json({
@@ -560,14 +591,13 @@ export async function POST(request: Request) {
 
         if (existingSaved) {
           finalScanData = existingSaved;
-          activeReservationOpId = null;
         }
       }
 
       if (!finalScanData) {
         console.error("Failed to save vision scan to database:", scanInsertErr);
-        if (activeReservationOpId && !reservation.alreadyReserved) {
-          await releaseReservation(user.id, activeReservationOpId, "Database save failure for vision scan");
+        if (activeReservationOpId) {
+          await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for vision scan", activeFencingToken);
           activeReservationOpId = null;
         }
         return NextResponse.json({
@@ -610,52 +640,49 @@ export async function POST(request: Request) {
         }, { onConflict: "barcode" });
     }
 
-    // Finalize credit deduction
-    if (activeReservationOpId) {
-      const finalization = await finalizeReservation(user.id, activeReservationOpId);
-      if (finalization.success) {
-        if (scanId) {
-          await supabase
-            .from("scans")
-            .update({ accounting_status: "completed" })
-            .eq("id", scanId);
-        }
-        activeReservationOpId = null;
-
-        return NextResponse.json({
-          success: true,
-          analysis: personalizedAnalysis,
-          scanId,
-          source: "gemini_vision",
-          remainingCredits: finalization.newBalance
-        });
-      } else {
-        console.error("Credit finalization failed after scan analysis:", finalization.error);
-        return NextResponse.json({
-          success: false,
-          status: "accounting_pending",
-          error: "ACCOUNTING_FINALIZATION_FAILED",
-          opId: activeReservationOpId,
-          scanId,
-          message: `Scan analysis succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
-          analysis: personalizedAnalysis
-        }, { status: 500 });
+    // Finalize credit deduction atomically
+    const finalization = await saveOperationResultAndFinalize(
+      user.id, 
+      opId, 
+      workerId, 
+      { analysis: personalizedAnalysis, scanId }, 
+      activeFencingToken
+    );
+    if (finalization.success) {
+      if (scanId) {
+        await supabase
+          .from("scans")
+          .update({ accounting_status: "completed" })
+          .eq("id", scanId);
       }
-    }
+      activeReservationOpId = null;
 
-    return NextResponse.json({
-      success: true,
-      analysis: personalizedAnalysis,
-      scanId,
-      source: "gemini_vision"
-    });
+      return NextResponse.json({
+        success: true,
+        analysis: personalizedAnalysis,
+        scanId,
+        source: "gemini_vision",
+        remainingCredits: finalization.newBalance
+      });
+    } else {
+      console.error("Credit finalization failed after scan analysis:", finalization.error);
+      return NextResponse.json({
+        success: false,
+        status: "accounting_pending",
+        error: "ACCOUNTING_FINALIZATION_FAILED",
+        opId: activeReservationOpId,
+        scanId,
+        message: `Scan analysis succeeded, but credit accounting could not be finalized: ${finalization.error}. Please retry.`,
+        analysis: personalizedAnalysis
+      }, { status: 500 });
+    }
 
   } catch (error: any) {
     console.error("Scan analysis failed:", error);
 
     // Release reserved credit on failure
-    if (activeReservationOpId && currentUserId) {
-      await releaseReservation(currentUserId, activeReservationOpId, error.message || "Scan execution error");
+    if (activeReservationOpId && currentUserId && activeWorkerId && typeof activeFencingToken === "number") {
+      await releaseOperationOnFailure(currentUserId, activeReservationOpId, activeWorkerId, error.message || "Scan execution error", activeFencingToken);
     }
 
     return NextResponse.json({
