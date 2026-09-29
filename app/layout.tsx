@@ -22,7 +22,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "ScanSafe - AI Food & Ingredient Scanner",
-  description: "Scan ingredients instantly to decode chemical additives and identify hidden health risks with superhuman AI vision.",
+  description: "Scan packaged-food labels to understand listed ingredients, nutrition facts, and potential allergens with AI vision.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

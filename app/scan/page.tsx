@@ -98,6 +98,9 @@ export default function ScanPage() {
         await fetchBlacklist(currentUser.id)
       }
       setLoadingSession(false)
+      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true') {
+        router.push('/demo')
+      }
     })
 
     // 2. Listen for auth changes (token refreshes, sign ins, sign outs)
@@ -563,14 +566,22 @@ export default function ScanPage() {
                 <Camera className="w-12 h-12 text-zinc-500 mx-auto mb-4 animate-pulse" />
                 <h3 className="text-xl font-bold text-white mb-2">Scan Food Ingredients</h3>
                 <p className="text-zinc-400 text-sm max-w-md mx-auto mb-6">
-                  You can browse our website and review dashboard statistics, but you must sign in to scan product ingredients.
+                  Explore our interactive zero-credit guest demo freely, or sign in to scan packaged food labels with your camera.
                 </p>
-                <Link
-                  href="/auth"
-                  className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl transition cursor-pointer"
-                >
-                  Sign In to Scan
-                </Link>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <Link
+                    href="/demo"
+                    className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl transition cursor-pointer"
+                  >
+                    Try Guest Demo (No Login)
+                  </Link>
+                  <Link
+                    href="/auth"
+                    className="inline-flex items-center gap-2 border border-zinc-750 hover:bg-zinc-900 text-white font-bold px-6 py-2.5 rounded-xl transition cursor-pointer"
+                  >
+                    Sign In to Scan
+                  </Link>
+                </div>
               </div>
             ) : !scanResult ? (
               <div className="max-w-2xl mx-auto w-full">
@@ -1127,18 +1138,18 @@ export default function ScanPage() {
               </div>
             </div>
 
-            {/* Toxin Tracking Engine Coming Soon Card */}
-            <div className="col-span-full border border-rose-500/20 bg-rose-500/5 rounded-3xl p-8 relative overflow-hidden group">
+            {/* Dietary Patterns & Habits Card */}
+            <div className="col-span-full border border-indigo-500/20 bg-indigo-500/5 rounded-3xl p-8 relative overflow-hidden group">
               <div className="absolute right-10 top-1/2 -translate-y-1/2 opacity-10 group-hover:rotate-12 transition-transform duration-700">
-                <Zap className="w-32 h-32 text-rose-500" />
+                <Zap className="w-32 h-32 text-indigo-500" />
               </div>
               <div className="relative z-10">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/20 border border-rose-500/30 px-3 py-1 text-[10px] font-bold text-rose-400 uppercase tracking-widest mb-4">
-                  Feature Coming Soon
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/20 border border-indigo-500/30 px-3 py-1 text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-4">
+                  Feature In Development
                 </span>
-                <h3 className="text-2xl font-black text-white mb-2">Toxin Tracking Engine</h3>
+                <h3 className="text-2xl font-black text-white mb-2">Nutritional Habit Tracking</h3>
                 <p className="text-zinc-400 text-sm leading-relaxed max-w-2xl">
-                  We are building a ruthless tracking engine to monitor your cumulative toxic intake over time, warning you before irreversible damage occurs.
+                  We are developing tools to monitor your dietary choices and scanned food patterns over time to provide longitudinal nutritional insights.
                 </p>
               </div>
             </div>

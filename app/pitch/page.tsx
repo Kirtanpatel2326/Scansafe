@@ -780,14 +780,14 @@ export default function PitchDeckPage() {
               <div className="flow-num">1</div>
               <div className="flow-body">
                 <div className="flow-title">Snap any product photo</div>
-                <div className="flow-desc">No barcode required. Works on damaged labels, imported products, homemade packages. Claude Vision reads it all.</div>
+                <div className="flow-desc">No barcode required. Works on visible packaged-food labels. AI extracts listed ingredients and nutrition facts.</div>
               </div>
             </div>
             <div className="flow-step">
               <div className="flow-num">2</div>
               <div className="flow-body">
                 <div className="flow-title">AI reads every ingredient</div>
-                <div className="flow-desc">Claude Vision + our proprietary FSSAI database decodes nutrition per 100g, every additive E-number, all 8 allergens.</div>
+                <div className="flow-desc">AI Vision + standardized nutritional guidelines decodes nutrition per 100g, listed additive E-numbers, and declared allergens.</div>
               </div>
             </div>
             <div className="flow-step">
@@ -807,18 +807,18 @@ export default function PitchDeckPage() {
           </div>
 
           <div className="solution-moats">
-            <div style={{ fontSize: '11px', fontWeight: '600', letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,.4)', marginBottom: '8px' }}>Our 3 Unfair Advantages</div>
+            <div style={{ fontSize: '11px', fontWeight: '600', letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,.4)', marginBottom: '8px' }}>Our 3 Key Differentiators</div>
             <div className="moat">
               <span className="moat-badge">Moat 1</span>
-              <span className="moat-text"><strong>Photo scan without barcode.</strong> Yuka can't do this. We work on any label in any condition.</span>
+              <span className="moat-text"><strong>Photo scan without barcode.</strong> Direct OCR extraction from printed ingredient panels.</span>
             </div>
             <div className="moat">
               <span className="moat-badge">Moat 2</span>
-              <span className="moat-text"><strong>FSSAI India compliance layer.</strong> First product ever to automatically flag Indian food law violations. No competitor has this.</span>
+              <span className="moat-text"><strong>Regional ingredient standards layer.</strong> Automatically flags ingredients restricted by Indian food regulations.</span>
             </div>
             <div className="moat">
               <span className="moat-badge">Moat 3</span>
-              <span className="moat-text"><strong>Personalised scoring for India.</strong> Diabetic users, Jain users, gym users — all get different scores for the same product.</span>
+              <span className="moat-text"><strong>Personalised scoring for India.</strong> Diabetic users, Jain users, gym users — tailored compatibility for the same product.</span>
             </div>
           </div>
         </div>
@@ -893,7 +893,7 @@ export default function PitchDeckPage() {
                 <td className="you-col you-tick">✓</td>
               </tr>
               <tr>
-                <td>FSSAI India compliance check</td>
+                <td>Indian ingredient standards check</td>
                 <td className="no-cross">✗</td>
                 <td className="no-cross">✗</td>
                 <td className="no-cross">✗</td>
@@ -1016,7 +1016,7 @@ export default function PitchDeckPage() {
                 <span className="feat-badge fb-now">Live</span>
                 <div className="feat-info">
                   <div className="feat-name">AI Photo Scan (no barcode)</div>
-                  <div className="feat-why">Claude/Gemini Vision reads any label. Per-100g nutrition, every ingredient rated, FSSAI flags, Hindi verdict, shareable cards.</div>
+                  <div className="feat-why">AI Vision extracts visible labels. Per-100g nutrition, listed ingredients evaluated, Hindi verdict, shareable breakdown cards.</div>
                 </div>
               </div>
               <div className="feat-item">
@@ -1029,8 +1029,8 @@ export default function PitchDeckPage() {
               <div className="feat-item">
                 <span className="feat-badge fb-now">Live</span>
                 <div className="feat-info">
-                  <div className="feat-name">FSSAI Compliance Layer</div>
-                  <div className="feat-why">Flags Potassium Bromate, trans fat &gt;2%, Sudan dyes, banned colours. First product in India to do this.</div>
+                  <div className="feat-name">Ingredient Standards Layer</div>
+                  <div className="feat-why">Flags Potassium Bromate, trans fat &gt;2%, Sudan dyes, and restricted colours based on food safety standards.</div>
                 </div>
               </div>
               <div className="feat-item">

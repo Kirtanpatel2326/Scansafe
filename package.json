@@ -8,10 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "security-audit": "node scripts/security-audit.js",
-    "test": "npx tsx scripts/test-regression-failures.ts && npx tsx scripts/test-all-gates.ts && npx tsx scripts/test-db-integration.ts && npx tsx scripts/test-postgres-integration.ts",
+    "test": "npx tsx scripts/test-regression-failures.ts && npx tsx scripts/test-all-gates.ts && npx tsx scripts/test-db-integration.ts && npx tsx scripts/verify-submission-flows.ts",
     "test:regression": "npx tsx scripts/test-regression-failures.ts",
     "test:gates": "npx tsx scripts/test-all-gates.ts",
     "test:simulator": "npx tsx scripts/test-db-integration.ts",
+    "test:flows": "npx tsx scripts/verify-submission-flows.ts",
     "test:postgres": "npx tsx scripts/test-postgres-integration.ts"
   },
   "dependencies": {

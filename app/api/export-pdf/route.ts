@@ -91,7 +91,7 @@ export async function GET(request: Request) {
               <table class="clinical-table-mini">
                 <tr><th>Account Email</th><td>${escapeHtml(user.email)}</td></tr>
                 <tr><th>Scan Timestamp</th><td>${escapeHtml(new Date(scan.created_at).toLocaleString())}</td></tr>
-                <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
+                <tr><th>Regional Context</th><td>India (IN)</td></tr>
               </table>
             </div>
 
@@ -209,7 +209,7 @@ export async function GET(request: Request) {
               <table class="clinical-table-mini">
                 <tr><th>Account Email</th><td>${escapeHtml(user.email)}</td></tr>
                 <tr><th>Scan Timestamp</th><td>${escapeHtml(new Date(scan.created_at).toLocaleString())}</td></tr>
-                <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
+                <tr><th>Regional Context</th><td>India (IN)</td></tr>
               </table>
             </div>
 
@@ -322,7 +322,7 @@ export async function GET(request: Request) {
             <table class="clinical-table-mini">
               <tr><th>Account Email</th><td>${escapeHtml(user.email)}</td></tr>
               <tr><th>Composite Timestamp</th><td>${escapeHtml(new Date(meal.created_at).toLocaleString())}</td></tr>
-              <tr><th>FSSAI Jurisdiction</th><td>India (IN)</td></tr>
+              <tr><th>Regional Context</th><td>India (IN)</td></tr>
             </table>
           </div>
 
@@ -495,6 +495,10 @@ export async function GET(request: Request) {
         </div>
 
         ${dataHtml}
+
+        <div style="margin-top: 30px; padding: 14px 18px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; font-size: 11px; color: #6b7280; line-height: 1.6;">
+          <strong>Notice & Methodological Limitations:</strong> This report provides nutritional estimates based on printed packaging declarations and extracted ingredients. It does not certify chemical purity, product safety, legal compliance, or medical suitability. AI models can misread damaged, curved, or blurry labels; missing or unreadable information is marked as unknown. This report is for educational and informational purposes only and does not constitute clinical or medical advice.
+        </div>
       </body>
       </html>
     `

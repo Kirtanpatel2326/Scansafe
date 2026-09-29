@@ -1430,3 +1430,51 @@ export const MOCK_PRODUCTS: IngredientAnalysis[] = [
   SAMPLE_PRODUCTS.sample_cookies,
   SAMPLE_PRODUCTS.sample_oats
 ];
+
+export function evaluateComparison(
+  productA: IngredientAnalysis | any,
+  productB: IngredientAnalysis | any
+): {
+  winner: "A" | "B" | "tie" | "undetermined";
+  winner_reason: string;
+} {
+  const scoreResultA = calculateHealthScore(productA);
+  const scoreResultB = calculateHealthScore(productB);
+
+  const nameA = productA.name || productA.product_name || "Product A";
+  const nameB = productB.name || productB.product_name || "Product B";
+
+  if (scoreResultA.score === null || scoreResultB.score === null) {
+    if (scoreResultA.score === null && scoreResultB.score === null) {
+      return {
+        winner: "undetermined",
+        winner_reason: "Both products lack sufficient readable label evidence to perform an objective comparison."
+      };
+    } else if (scoreResultA.score === null) {
+      return {
+        winner: "undetermined",
+        winner_reason: `Undetermined comparison: ${nameA} lacks sufficient readable label evidence for a fair comparison with ${nameB}.`
+      };
+    } else {
+      return {
+        winner: "undetermined",
+        winner_reason: `Undetermined comparison: ${nameB} lacks sufficient readable label evidence for a fair comparison with ${nameA}.`
+      };
+    }
+  } else if (Math.abs(scoreResultA.score - scoreResultB.score) <= 3) {
+    return {
+      winner: "tie",
+      winner_reason: `Both products receive comparable nutritional health scores (${scoreResultA.score} vs ${scoreResultB.score}/100).`
+    };
+  } else if (scoreResultA.score > scoreResultB.score) {
+    return {
+      winner: "A",
+      winner_reason: `${nameA} achieves a higher health score (${scoreResultA.score} vs ${scoreResultB.score}) based on better macronutrient balance.`
+    };
+  } else {
+    return {
+      winner: "B",
+      winner_reason: `${nameB} achieves a higher health score (${scoreResultB.score} vs ${scoreResultA.score}) based on better macronutrient balance.`
+    };
+  }
+}

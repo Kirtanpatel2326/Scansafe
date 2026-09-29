@@ -263,11 +263,11 @@ export default function PricingPage() {
               <div className="mb-8 w-full max-w-3xl rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-center text-xs text-amber-200 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
                 <div className="text-left">
-                  <span className="font-bold text-amber-300">Prototype Demonstration Mode:</span> Live payment gateway processing is awaiting production database verification. New paid checkouts are temporarily disabled for this submission. You can test all scanning, comparison, and nutrition features freely using our zero-credit sample demo.
+                  <span className="font-bold text-amber-300">Prototype Demonstration Mode:</span> Live payment gateway processing is awaiting production database verification. New paid checkouts are temporarily disabled for this submission. You can test our zero-credit sample label analysis freely without signing in.
                 </div>
                 <button
-                  onClick={() => router.push('/scan')}
-                  className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-black hover:bg-amber-300 transition"
+                  onClick={() => router.push('/demo')}
+                  className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold text-black hover:bg-amber-300 transition cursor-pointer"
                 >
                   Try Sample Demo
                 </button>
