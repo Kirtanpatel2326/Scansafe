@@ -26,8 +26,11 @@ import {
   FileText,
   X,
   Zap,
-  GitCompare
+  GitCompare,
+  ScanBarcode
 } from 'lucide-react'
+import BarcodeScannerModal from '@/components/BarcodeScannerModal'
+import { VariantSelectorModal, ProductVariantItem } from '@/components/VariantSelectorModal'
 
 export default function ScanPage() {
   const router = useRouter()
@@ -56,6 +59,83 @@ export default function ScanPage() {
   const [scanId, setScanId] = useState<string>('')
   const [scanImageUrl, setScanImageUrl] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  // Barcode & Reviewed Catalog State
+  const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false)
+  const [isVariantModalOpen, setIsVariantModalOpen] = useState(false)
+  const [variantsList, setVariantsList] = useState<ProductVariantItem[]>([])
+  const [variantQuery, setVariantQuery] = useState('')
+  const [isLookingUpBarcode, setIsLookingUpBarcode] = useState(false)
+
+  const handleBarcodeDetected = async (barcode: string) => {
+    setIsBarcodeModalOpen(false)
+    setIsLookingUpBarcode(true)
+    setErrorMsg(null)
+    try {
+      const res = await fetch(`/api/products/lookup?barcode=${encodeURIComponent(barcode)}`)
+      const data = await res.json()
+
+      if (data.is_ambiguous && data.variants) {
+        setVariantQuery(barcode)
+        setVariantsList(data.variants)
+        setIsVariantModalOpen(true)
+        return
+      }
+
+      if (data.found && data.product) {
+        const prod = data.product
+        const mappedResult: IngredientAnalysisResult = {
+          id: prod.barcode || `catalog_${Date.now()}`,
+          product_name: prod.product_name,
+          brand: prod.brand || 'Unbranded',
+          health_score: prod.health_score,
+          health_score_reason: prod.health_score_reason,
+          safety_level: prod.safety_level || 'moderate',
+          description: prod.raw_data?.description || `Catalog record for ${prod.product_name}.`,
+          image_url: prod.evidence_images?.[0] || undefined,
+          evidence_images: prod.evidence_images || [],
+          panel_status: 'extracted',
+          review_status: prod.review_status,
+          last_reviewed_at: prod.last_reviewed_at,
+          version: prod.version,
+          variant: prod.variant,
+          pack_size: prod.pack_size,
+          nutrition_basis: prod.nutrition_basis,
+          ingredients: prod.ingredients || [],
+          additives: prod.additives || [],
+          allergens: prod.allergens || [],
+          allergens_declared: prod.allergens_declared || [],
+          recommendations: prod.recommendations || [],
+          nutrition_facts: prod.nutrition_facts || undefined,
+          upf_score: prod.upf_score || 3,
+          glycemic_index_estimate: prod.glycemic_index_estimate || 'medium',
+          dietary_compatibility: prod.dietary_compatibility || undefined
+        }
+        setScanResult(mappedResult)
+        setScanId(mappedResult.id || '')
+        setScanImageUrl(mappedResult.image_url || null)
+        fetch('/api/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_name: 'result_reviewed',
+            metadata: { source: 'barcode_catalog', review_status: prod.review_status }
+          })
+        }).catch(() => {})
+      } else {
+        setErrorMsg(`Barcode "${barcode}" not yet in reviewed catalog. Please take a photo of the label to scan.`)
+      }
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Error looking up barcode')
+    } finally {
+      setIsLookingUpBarcode(false)
+    }
+  }
+
+  const handleSelectVariant = async (variant: ProductVariantItem) => {
+    setIsVariantModalOpen(false)
+    handleBarcodeDetected(variant.id)
+  }
 
   // History / Recent scans
   const [recentScans, setRecentScans] = useState<any[]>([])
@@ -585,10 +665,53 @@ export default function ScanPage() {
               </div>
             ) : !scanResult ? (
               <div className="max-w-2xl mx-auto w-full">
+                {/* Barcode Quick Lookup CTA */}
+                <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                      <ScanBarcode className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-white">Scan Barcode / Reviewed Catalog</h4>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono font-bold">
+                          0 Credits
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        Instant lookup of reviewed records, formulations, and version history.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsBarcodeModalOpen(true)}
+                    disabled={isLookingUpBarcode}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-lg shrink-0 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <ScanBarcode className="w-4 h-4" /> {isLookingUpBarcode ? "Looking up..." : "Scan Barcode"}
+                  </button>
+                </div>
+
                 <ScanUpload
                   onScanStart={handleScanStart}
                   onScanSuccess={handleScanComplete}
                   onScanError={handleScanError}
+                />
+
+                <BarcodeScannerModal
+                  isOpen={isBarcodeModalOpen}
+                  onClose={() => setIsBarcodeModalOpen(false)}
+                  onBarcodeDetected={handleBarcodeDetected}
+                  onFallbackToCameraScan={() => setIsBarcodeModalOpen(false)}
+                />
+
+                <VariantSelectorModal
+                  isOpen={isVariantModalOpen}
+                  onClose={() => setIsVariantModalOpen(false)}
+                  query={variantQuery}
+                  variants={variantsList}
+                  onSelectVariant={handleSelectVariant}
                 />
               </div>
             ) : (

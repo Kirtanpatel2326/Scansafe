@@ -18,19 +18,44 @@ import {
   XCircle,
   Share2,
   Lock,
-  Plus
+  Plus,
+  Bookmark,
+  Scale,
+  Layers,
+  ShieldCheck,
+  AlertTriangle,
+  X
 } from 'lucide-react'
-import Image from 'next/image'
 
 interface ComparisonResult {
   winner: 'A' | 'B' | 'tie' | 'undetermined'
   winner_reason: string
+  is_basis_compatible?: boolean
+  concrete_differences?: Array<{
+    nutrient: string
+    unit: string
+    valA: number
+    valB: number
+    diff: number
+    interpretation: string
+  }>
   product_a: {
     name: string
     brand: string
     health_score?: number | null
     safety_level: 'safe' | 'moderate' | 'danger' | 'insufficient_evidence'
     highlights: string[]
+    pack_size?: string
+    variant?: string
+    review_status?: string
+    last_reviewed_at?: string
+    dietary_alerts?: Array<{
+      preference_label: string
+      state: string
+      title: string
+      explanation: string
+      source_label_text?: string
+    }>
   }
   product_b: {
     name: string
@@ -38,17 +63,32 @@ interface ComparisonResult {
     health_score?: number | null
     safety_level: 'safe' | 'moderate' | 'danger' | 'insufficient_evidence'
     highlights: string[]
+    pack_size?: string
+    variant?: string
+    review_status?: string
+    last_reviewed_at?: string
+    dietary_alerts?: Array<{
+      preference_label: string
+      state: string
+      title: string
+      explanation: string
+      source_label_text?: string
+    }>
   }
   comparison_table?: {
     calories?: { a?: string | null; b?: string | null }
     sugar?: { a?: string | null; b?: string | null }
+    added_sugar?: { a?: string | null; b?: string | null }
     sodium?: { a?: string | null; b?: string | null }
     protein?: { a?: string | null; b?: string | null }
     fat?: { a?: string | null; b?: string | null }
+    saturated_fat?: { a?: string | null; b?: string | null }
     fiber?: { a?: string | null; b?: string | null }
     additives?: { a?: string | null; b?: string | null }
     fssai_status?: { a?: string | null; b?: string | null }
     basis?: string
+    basis_a?: string
+    basis_b?: string
     [key: string]: any
   }
   verdict_english?: string
@@ -83,6 +123,16 @@ export default function ComparePage() {
   const [fileA, setFileA] = useState<File | null>(null)
   const [fileB, setFileB] = useState<File | null>(null)
 
+  // Saved Catalog product states (0 credit direct comparison)
+  const [savedProductA, setSavedProductA] = useState<any | null>(null)
+  const [savedProductB, setSavedProductB] = useState<any | null>(null)
+
+  // Saved picker modal state
+  const [isSavedPickerOpen, setIsSavedPickerOpen] = useState(false)
+  const [pickerTarget, setPickerTarget] = useState<'A' | 'B' | null>(null)
+  const [savedItems, setSavedItems] = useState<any[]>([])
+  const [loadingSaved, setLoadingSaved] = useState(false)
+
   // Camera states
   const [cameraActive, setCameraActive] = useState<'A' | 'B' | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -96,7 +146,7 @@ export default function ComparePage() {
     typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
   )
 
-  // Check auth session
+  // Check auth session & load any saved items from session storage
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
@@ -106,6 +156,24 @@ export default function ComparePage() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
     })
+
+    // Check for saved items stored in session
+    if (typeof window !== 'undefined') {
+      try {
+        const itemA = sessionStorage.getItem('scansafe_compare_saved_A')
+        const itemB = sessionStorage.getItem('scansafe_compare_saved_B')
+        if (itemA) {
+          setSavedProductA(JSON.parse(itemA))
+          sessionStorage.removeItem('scansafe_compare_saved_A')
+        }
+        if (itemB) {
+          setSavedProductB(JSON.parse(itemB))
+          sessionStorage.removeItem('scansafe_compare_saved_B')
+        }
+      } catch (e) {
+        console.error('Error loading session compare items:', e)
+      }
+    }
 
     // Load persisted preferences
     const saved = localStorage.getItem('scansafe_compare_prefs')
@@ -122,6 +190,38 @@ export default function ComparePage() {
       stopCamera()
     }
   }, [])
+
+  // Open saved item picker
+  const openSavedPicker = async (target: 'A' | 'B') => {
+    setPickerTarget(target)
+    setIsSavedPickerOpen(true)
+    setLoadingSaved(true)
+    try {
+      const res = await fetch('/api/saved')
+      if (res.ok) {
+        const data = await res.json()
+        setSavedItems(data.items || [])
+      }
+    } catch (e) {
+      console.error('Error fetching saved items:', e)
+    } finally {
+      setLoadingSaved(false)
+    }
+  }
+
+  const selectSavedItem = (item: any) => {
+    if (pickerTarget === 'A') {
+      setSavedProductA(item.result_json)
+      setImageA(null)
+      setFileA(null)
+    } else if (pickerTarget === 'B') {
+      setSavedProductB(item.result_json)
+      setImageB(null)
+      setFileB(null)
+    }
+    setIsSavedPickerOpen(false)
+    setPickerTarget(null)
+  }
 
   // Toggle Preferences
   const handleTogglePref = (prefId: string) => {
@@ -142,8 +242,13 @@ export default function ComparePage() {
     if (!file) return
 
     setCompareOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
-    if (target === 'A') setFileA(file)
-    else setFileB(file)
+    if (target === 'A') {
+      setFileA(file)
+      setSavedProductA(null)
+    } else {
+      setFileB(file)
+      setSavedProductB(null)
+    }
 
     const reader = new FileReader()
     reader.onloadend = () => {
@@ -193,8 +298,13 @@ export default function ComparePage() {
     if (ctx && videoRef.current) {
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
       const dataUrl = canvas.toDataURL('image/jpeg')
-      if (target === 'A') setImageA(dataUrl)
-      else setImageB(dataUrl)
+      if (target === 'A') {
+        setImageA(dataUrl)
+        setSavedProductA(null)
+      } else {
+        setImageB(dataUrl)
+        setSavedProductB(null)
+      }
     }
     stopCamera()
   }
@@ -203,11 +313,16 @@ export default function ComparePage() {
     if (target === 'A') {
       setImageA(null)
       setFileA(null)
+      setSavedProductA(null)
     } else {
       setImageB(null)
       setFileB(null)
+      setSavedProductB(null)
     }
   }
+
+  // Determine if this comparison is 0-credit or requires credits
+  const isDirectSavedComparison = Boolean(savedProductA && savedProductB)
 
   // Start Comparison API Call
   const handleCompare = async () => {
@@ -216,8 +331,11 @@ export default function ComparePage() {
       return
     }
 
-    if (!imageA || !imageB) {
-      setErrorMsg('Please upload label images for both Product A and Product B.')
+    const hasA = Boolean(imageA || savedProductA)
+    const hasB = Boolean(imageB || savedProductB)
+
+    if (!hasA || !hasB) {
+      setErrorMsg('Please select or upload details for both Product A and Product B.')
       return
     }
 
@@ -231,29 +349,37 @@ export default function ComparePage() {
       )
 
       const idempotencyKey = compareOpKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
+      
+      const payload: any = {
+        preferences: mappedPrefs,
+        idempotencyKey
+      }
+
+      if (isDirectSavedComparison) {
+        payload.productA = savedProductA
+        payload.productB = savedProductB
+      } else {
+        payload.imageA = imageA
+        payload.imageB = imageB
+      }
+
       const res = await fetch('/api/compare', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'X-Idempotency-Key': idempotencyKey
         },
-        body: JSON.stringify({
-          imageA,
-          imageB,
-          preferences: mappedPrefs,
-          idempotencyKey
-        })
+        body: JSON.stringify(payload)
       })
 
       const data = await res.json()
       if (!res.ok || !data.success) {
-        throw new Error(data.message || 'Comparison failed to process.')
+        throw new Error(data.message || data.error || 'Comparison failed to process.')
       }
 
-      // Refresh compare op key for next comparison
       setCompareOpKey(typeof crypto !== 'undefined' && crypto.randomUUID ? `cmp_${crypto.randomUUID()}` : `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`)
       setResult(data.comparison)
-      // Scroll to result section
+      
       setTimeout(() => {
         document.getElementById('comparison-results')?.scrollIntoView({ behavior: 'smooth' })
       }, 300)
@@ -270,7 +396,7 @@ export default function ComparePage() {
   const getWhatsAppShareUrl = () => {
     if (!result) return '#'
     if (result.winner === 'undetermined') {
-      const text = `ScanSafe Comparison Alert! 🔍\n\nComparison inconclusive due to unreadable or missing nutrition information.\n\nProduct A: ${result.product_a.brand || ''} ${result.product_a.name || ''}\nProduct B: ${result.product_b.brand || ''} ${result.product_b.name || ''}\n\nReason: ${result.winner_reason}\n\nCompare your foods at https://scansafe.co.in/compare`
+      const text = `ScanSafe Comparison Alert! 🔍\n\nComparison inconclusive due to different nutrition bases or unreadable packaging facts.\n\nProduct A: ${result.product_a.brand || ''} ${result.product_a.name || ''}\nProduct B: ${result.product_b.brand || ''} ${result.product_b.name || ''}\n\nReason: ${result.winner_reason}\n\nCompare your foods safely at https://scansafe.co.in/compare`
       return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`
     }
     if (result.winner === 'tie') {
@@ -299,14 +425,67 @@ export default function ComparePage() {
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-emerald-500 selection:text-black">
-      <style>{`
-        @keyframes scan-line {
-          0% { top: 0%; opacity: 0.3; }
-          50% { top: 100%; opacity: 1; }
-          100% { top: 0%; opacity: 0.3; }
-        }
-      `}</style>
       <Header />
+
+      {/* Saved Item Picker Modal */}
+      {isSavedPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-zinc-850 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-white">Select from Saved Products</h3>
+                <p className="text-xs text-zinc-400">Choose a product for Slot {pickerTarget} (0 Credits)</p>
+              </div>
+              <button
+                onClick={() => setIsSavedPickerOpen(false)}
+                className="p-1.5 text-zinc-400 hover:text-white rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-2.5 pr-1">
+              {loadingSaved ? (
+                <div className="py-12 text-center text-xs text-zinc-500">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-400" />
+                  Loading your saved pantry...
+                </div>
+              ) : savedItems.length === 0 ? (
+                <div className="py-10 text-center text-xs text-zinc-400">
+                  No saved products found. Scan a product or browse the catalog first!
+                </div>
+              ) : (
+                savedItems.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => selectSavedItem(item)}
+                    className="w-full text-left p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-850 hover:border-emerald-500/50 transition flex items-center justify-between gap-3 group cursor-pointer"
+                  >
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase block">
+                        {item.brand || item.result_json?.brand || "Unbranded"}
+                      </span>
+                      <h4 className="text-sm font-bold text-white group-hover:text-emerald-300 transition truncate">
+                        {item.product_name}
+                      </h4>
+                      {item.pack_size && (
+                        <span className="text-[10px] text-zinc-400 font-mono mt-0.5 block">
+                          Pack: {item.pack_size}
+                        </span>
+                      )}
+                    </div>
+                    {item.result_json?.health_score != null && (
+                      <span className="text-xs font-black px-2 py-1 rounded bg-zinc-800 text-emerald-400 shrink-0">
+                        Score {item.result_json.health_score}
+                      </span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Banner Details */}
@@ -316,7 +495,7 @@ export default function ComparePage() {
               Side-by-Side <span className="text-emerald-400">Compare</span> <GitCompare className="w-6 h-6 text-emerald-400" />
             </h1>
             <p className="text-zinc-400 text-sm mt-1">
-              Select your health profile, upload details for two foods, and let AI analyze which is better for your body.
+              Strict same-basis nutritional comparison, concrete macro differences, and separated dietary safety alerts.
             </p>
           </div>
           
@@ -360,25 +539,80 @@ export default function ComparePage() {
           </div>
         </section>
 
-        {/* 2. DUAL UPLOADS */}
+        {/* Upfront Credit Disclosure Notice */}
+        <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-zinc-300">
+            <Scale className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              {isDirectSavedComparison ? (
+                <strong className="text-emerald-400 font-bold">
+                  Zero Credits Used — Comparing 2 verified saved pantry records.
+                </strong>
+              ) : (
+                <span>
+                  <strong>Credit Policy:</strong> Comparing saved pantry records costs <strong className="text-emerald-400">0 credits</strong>. New photo OCR analysis consumes <strong>2 credits</strong>.
+                </span>
+              )}
+            </span>
+          </div>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-zinc-750 bg-zinc-900 text-zinc-400">
+            {isDirectSavedComparison ? "0 Credits" : "2 Credits for Photos"}
+          </span>
+        </div>
+
+        {/* 2. DUAL UPLOADS / SAVED SELECTORS */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
           
           {/* Product A */}
           <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 flex flex-col justify-between">
             <div>
               <div className="flex justify-between items-center mb-4">
-                <h4 className="text-sm font-black uppercase tracking-wider text-zinc-400">Product A (Label/Ingredients)</h4>
-                {imageA && (
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-black uppercase tracking-wider text-zinc-400">Product A</h4>
+                  {savedProductA && (
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono font-bold">
+                      Saved Item
+                    </span>
+                  )}
+                </div>
+                {(imageA || savedProductA) && (
                   <button 
                     onClick={() => removePhoto('A')}
-                    className="text-rose-400 hover:text-rose-300 text-xs font-bold flex items-center gap-1 transition"
+                    className="text-rose-400 hover:text-rose-300 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Remove
                   </button>
                 )}
               </div>
 
-              {imageA ? (
+              {savedProductA ? (
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/10 p-5 flex flex-col gap-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase">
+                        {savedProductA.brand || 'Unbranded'}
+                      </span>
+                      <h4 className="text-base font-bold text-white mt-0.5">
+                        {savedProductA.product_name}
+                      </h4>
+                      {savedProductA.pack_size && (
+                        <span className="text-xs text-zinc-400 font-mono mt-0.5 block">
+                          Pack: {savedProductA.pack_size}
+                        </span>
+                      )}
+                    </div>
+                    {savedProductA.health_score != null && (
+                      <span className="text-xs font-black px-2.5 py-1 rounded bg-zinc-900 text-emerald-400 border border-emerald-500/20">
+                        Score {savedProductA.health_score}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-zinc-400">
+                    <Layers className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Basis: {savedProductA.nutrition_basis || 'per_100g'}</span>
+                  </div>
+                </div>
+              ) : imageA ? (
                 <div className="relative aspect-video rounded-2xl overflow-hidden border border-zinc-850 bg-black flex items-center justify-center">
                   <img src={imageA} alt="Product A Label" className="h-full object-contain" />
                   {analyzing && (
@@ -407,11 +641,17 @@ export default function ComparePage() {
                   </div>
                 </div>
               ) : (
-                <div className="border border-dashed border-zinc-800 rounded-2xl aspect-video flex flex-col items-center justify-center bg-zinc-950/40 p-6 text-center">
+                <div className="border border-dashed border-zinc-800 rounded-2xl p-6 text-center flex flex-col items-center justify-center bg-zinc-950/40">
                   <Upload className="w-8 h-8 text-zinc-650 mb-3" />
-                  <p className="text-xs text-zinc-400 font-semibold mb-4">Upload or snapshot Product A ingredients list</p>
+                  <p className="text-xs text-zinc-400 font-semibold mb-4">Select from saved items or upload label photo</p>
                   
-                  <div className="flex flex-wrap gap-3 justify-center">
+                  <div className="flex flex-wrap gap-2.5 justify-center">
+                    <button
+                      onClick={() => openSavedPicker('A')}
+                      className="bg-emerald-600/20 border border-emerald-500/40 hover:bg-emerald-600/30 text-emerald-300 text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" /> Pick from Saved (0 Credits)
+                    </button>
                     <label className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition">
                       <input 
                         type="file" 
@@ -425,7 +665,7 @@ export default function ComparePage() {
                       onClick={() => startCamera('A')}
                       className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition"
                     >
-                      <Camera className="w-4 h-4 text-emerald-400" /> Open Camera
+                      <Camera className="w-4 h-4 text-emerald-400" /> Camera
                     </button>
                   </div>
                 </div>
@@ -437,18 +677,52 @@ export default function ComparePage() {
           <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 flex flex-col justify-between">
             <div>
               <div className="flex justify-between items-center mb-4">
-                <h4 className="text-sm font-black uppercase tracking-wider text-zinc-400">Product B (Label/Ingredients)</h4>
-                {imageB && (
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-black uppercase tracking-wider text-zinc-400">Product B</h4>
+                  {savedProductB && (
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono font-bold">
+                      Saved Item
+                    </span>
+                  )}
+                </div>
+                {(imageB || savedProductB) && (
                   <button 
                     onClick={() => removePhoto('B')}
-                    className="text-rose-400 hover:text-rose-300 text-xs font-bold flex items-center gap-1 transition"
+                    className="text-rose-400 hover:text-rose-300 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Remove
                   </button>
                 )}
               </div>
 
-              {imageB ? (
+              {savedProductB ? (
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/10 p-5 flex flex-col gap-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase">
+                        {savedProductB.brand || 'Unbranded'}
+                      </span>
+                      <h4 className="text-base font-bold text-white mt-0.5">
+                        {savedProductB.product_name}
+                      </h4>
+                      {savedProductB.pack_size && (
+                        <span className="text-xs text-zinc-400 font-mono mt-0.5 block">
+                          Pack: {savedProductB.pack_size}
+                        </span>
+                      )}
+                    </div>
+                    {savedProductB.health_score != null && (
+                      <span className="text-xs font-black px-2.5 py-1 rounded bg-zinc-900 text-emerald-400 border border-emerald-500/20">
+                        Score {savedProductB.health_score}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-zinc-400">
+                    <Layers className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Basis: {savedProductB.nutrition_basis || 'per_100g'}</span>
+                  </div>
+                </div>
+              ) : imageB ? (
                 <div className="relative aspect-video rounded-2xl overflow-hidden border border-zinc-850 bg-black flex items-center justify-center">
                   <img src={imageB} alt="Product B Label" className="h-full object-contain" />
                   {analyzing && (
@@ -477,11 +751,17 @@ export default function ComparePage() {
                   </div>
                 </div>
               ) : (
-                <div className="border border-dashed border-zinc-800 rounded-2xl aspect-video flex flex-col items-center justify-center bg-zinc-950/40 p-6 text-center">
+                <div className="border border-dashed border-zinc-800 rounded-2xl p-6 text-center flex flex-col items-center justify-center bg-zinc-950/40">
                   <Upload className="w-8 h-8 text-zinc-650 mb-3" />
-                  <p className="text-xs text-zinc-400 font-semibold mb-4">Upload or snapshot Product B ingredients list</p>
+                  <p className="text-xs text-zinc-400 font-semibold mb-4">Select from saved items or upload label photo</p>
                   
-                  <div className="flex flex-wrap gap-3 justify-center">
+                  <div className="flex flex-wrap gap-2.5 justify-center">
+                    <button
+                      onClick={() => openSavedPicker('B')}
+                      className="bg-emerald-600/20 border border-emerald-500/40 hover:bg-emerald-600/30 text-emerald-300 text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" /> Pick from Saved (0 Credits)
+                    </button>
                     <label className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition">
                       <input 
                         type="file" 
@@ -495,7 +775,7 @@ export default function ComparePage() {
                       onClick={() => startCamera('B')}
                       className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition"
                     >
-                      <Camera className="w-4 h-4 text-emerald-400" /> Open Camera
+                      <Camera className="w-4 h-4 text-emerald-400" /> Camera
                     </button>
                   </div>
                 </div>
@@ -525,7 +805,7 @@ export default function ComparePage() {
               </>
             ) : (
               <>
-                <GitCompare className="w-5 h-5" /> Compare These Products
+                <GitCompare className="w-5 h-5" /> Compare These Products ({isDirectSavedComparison ? "0 Credits" : "2 Credits"})
               </>
             )}
           </button>
@@ -535,6 +815,21 @@ export default function ComparePage() {
         {result && (
           <section id="comparison-results" className="scroll-mt-6 flex flex-col gap-8 mb-16">
             
+            {/* INCOMPATIBLE BASIS ALERT */}
+            {result.is_basis_compatible === false && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-5 flex items-start gap-3 text-amber-200">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-bold text-amber-300">
+                    Different Nutrition Bases (Non-Comparable on Equal Terms)
+                  </h4>
+                  <p className="text-xs text-amber-400/90 mt-1 leading-relaxed">
+                    One product is measured in solid mass (e.g. per 100g) while the other is measured in liquid volume (e.g. per 100ml). Without verified density data, direct mathematical ranking is prohibited. ScanSafe evaluates differences qualitatively rather than declaring a false winner.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* WINNER / VERDICT CONTAINER */}
             <div className={`relative rounded-3xl border p-6 md:p-8 overflow-hidden shadow-xl ${
               result.winner === 'undetermined'
@@ -569,7 +864,7 @@ export default function ComparePage() {
                       ? `${result.product_b.brand || ''} ${result.product_b.name || 'Product B'}`
                       : result.winner === 'tie'
                       ? 'It is a Healthy Tie!'
-                      : 'Insufficient Evidence to Determine Winner'}
+                      : 'Undetermined (Incompatible Bases or Trade-Offs)'}
                   </h3>
                 </div>
 
@@ -594,6 +889,35 @@ export default function ComparePage() {
               </div>
             </div>
 
+            {/* CONCRETE FACTUAL DIFFERENCES TABLE */}
+            {result.concrete_differences && result.concrete_differences.length > 0 && (
+              <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 md:p-8">
+                <div className="flex justify-between items-baseline mb-4">
+                  <h3 className="text-base font-black text-white">Concrete Factual Differences</h3>
+                  <span className="text-[10px] text-zinc-500 font-mono">Strict Same-Basis Math</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {result.concrete_differences.map((diff, idx) => (
+                    <div key={idx} className="rounded-xl border border-zinc-850 bg-zinc-900/40 p-3.5 flex flex-col justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase block">
+                          {diff.nutrient}
+                        </span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-white font-bold">A: {diff.valA}{diff.unit}</span>
+                          <span className="text-zinc-600">vs</span>
+                          <span className="text-xs text-white font-bold">B: {diff.valB}{diff.unit}</span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-emerald-400 font-medium mt-2">
+                        {diff.interpretation}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* SIDE-BY-SIDE CARDS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               
@@ -609,7 +933,12 @@ export default function ComparePage() {
                 
                 <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Product A</span>
                 <h4 className="text-xl font-black text-white mt-1.5">{result.product_a.brand || 'Product A'}</h4>
-                <p className="text-zinc-450 text-xs truncate mb-5">{result.product_a.name || 'Food Item'}</p>
+                <p className="text-zinc-450 text-xs truncate mb-2">{result.product_a.name || 'Food Item'}</p>
+                {result.product_a.pack_size && (
+                  <span className="text-[10px] text-zinc-500 font-mono block mb-4">
+                    Pack: {result.product_a.pack_size}
+                  </span>
+                )}
 
                 <div className="flex items-center gap-4 mb-6">
                   {/* Score badge */}
@@ -642,6 +971,20 @@ export default function ComparePage() {
                   </div>
                 </div>
 
+                {/* Dietary Alerts for Product A */}
+                {result.product_a.dietary_alerts && result.product_a.dietary_alerts.length > 0 && (
+                  <div className="mb-4 space-y-1.5 border-t border-zinc-900 pt-3">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-rose-400 block">
+                      Dietary Safety Warnings:
+                    </span>
+                    {result.product_a.dietary_alerts.map((al, idx) => (
+                      <p key={idx} className="text-xs text-rose-300/90 leading-tight">
+                        • <strong>{al.preference_label}:</strong> {al.explanation}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
                 <div className="h-[1px] bg-zinc-900 my-4" />
                 <p className="text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-3">Highlights</p>
                 <ul className="space-y-2">
@@ -666,7 +1009,12 @@ export default function ComparePage() {
                 
                 <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Product B</span>
                 <h4 className="text-xl font-black text-white mt-1.5">{result.product_b.brand || 'Product B'}</h4>
-                <p className="text-zinc-450 text-xs truncate mb-5">{result.product_b.name || 'Food Item'}</p>
+                <p className="text-zinc-450 text-xs truncate mb-2">{result.product_b.name || 'Food Item'}</p>
+                {result.product_b.pack_size && (
+                  <span className="text-[10px] text-zinc-500 font-mono block mb-4">
+                    Pack: {result.product_b.pack_size}
+                  </span>
+                )}
 
                 <div className="flex items-center gap-4 mb-6">
                   {/* Score badge */}
@@ -699,6 +1047,20 @@ export default function ComparePage() {
                   </div>
                 </div>
 
+                {/* Dietary Alerts for Product B */}
+                {result.product_b.dietary_alerts && result.product_b.dietary_alerts.length > 0 && (
+                  <div className="mb-4 space-y-1.5 border-t border-zinc-900 pt-3">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-rose-400 block">
+                      Dietary Safety Warnings:
+                    </span>
+                    {result.product_b.dietary_alerts.map((al, idx) => (
+                      <p key={idx} className="text-xs text-rose-300/90 leading-tight">
+                        • <strong>{al.preference_label}:</strong> {al.explanation}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
                 <div className="h-[1px] bg-zinc-900 my-4" />
                 <p className="text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-3">Highlights</p>
                 <ul className="space-y-2">
@@ -717,10 +1079,15 @@ export default function ComparePage() {
             {result.comparison_table && (
               <div className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 md:p-8">
                 <div className="flex justify-between items-baseline mb-6">
-                  <h3 className="text-lg font-black text-white">Head-to-Head Nutrition Comparison</h3>
-                  {result.comparison_table.basis && (
-                    <span className="text-xs text-zinc-400 font-medium">Basis: {result.comparison_table.basis}</span>
-                  )}
+                  <div>
+                    <h3 className="text-lg font-black text-white">Head-to-Head Nutrition Comparison</h3>
+                    {result.comparison_table.basis && (
+                      <span className="text-xs text-zinc-400 font-medium">Standardized Basis: {result.comparison_table.basis}</span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    Missing = Unknown (Not 0)
+                  </span>
                 </div>
                 
                 <div className="overflow-x-auto">
@@ -734,12 +1101,12 @@ export default function ComparePage() {
                     </thead>
                     <tbody>
                       {Object.entries(result.comparison_table)
-                        .filter(([field]) => field !== 'basis')
+                        .filter(([field]) => !['basis', 'basis_a', 'basis_b'].includes(field))
                         .map(([field, values]: any) => (
                           <tr key={field} className="border-b border-zinc-900/60 hover:bg-zinc-900/10 transition select-text">
                             <td className="py-4 pr-2 font-bold text-zinc-400 capitalize">{field.replace('_', ' ')}</td>
-                            <td className="py-4 px-2 font-medium text-white">{values?.a ?? 'N/A'}</td>
-                            <td className="py-4 pl-2 font-medium text-white">{values?.b ?? 'N/A'}</td>
+                            <td className="py-4 px-2 font-medium text-white">{values?.a ?? <span className="text-zinc-500 italic">Unknown</span>}</td>
+                            <td className="py-4 pl-2 font-medium text-white">{values?.b ?? <span className="text-zinc-500 italic">Unknown</span>}</td>
                           </tr>
                         ))}
                     </tbody>

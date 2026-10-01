@@ -136,6 +136,8 @@ export const ComparisonResultSchema = z.object({
     additives: z.object({ a: z.string().nullable().optional(), b: z.string().nullable().optional() }).optional(),
     basis: z.string().default("per 100g")
   }).optional(),
+  concrete_differences: z.array(z.string()).default([]),
+  is_basis_compatible: z.boolean().default(true),
   verdict_english: z.string().default("")
 });
 
@@ -1437,6 +1439,10 @@ export function evaluateComparison(
 ): {
   winner: "A" | "B" | "tie" | "undetermined";
   winner_reason: string;
+  is_basis_compatible?: boolean;
+  basis_a?: string;
+  basis_b?: string;
+  concrete_differences?: string[];
 } {
   const scoreResultA = calculateHealthScore(productA);
   const scoreResultB = calculateHealthScore(productB);
@@ -1444,37 +1450,148 @@ export function evaluateComparison(
   const nameA = productA.name || productA.product_name || "Product A";
   const nameB = productB.name || productB.product_name || "Product B";
 
+  // Check basis compatibility
+  const normA = normalizeNutrientsTo100g(productA.nutrition_facts);
+  const normB = normalizeNutrientsTo100g(productB.nutrition_facts);
+  const basisA = normA?.basis === "per_100ml" ? "per_100ml" : "per_100g";
+  const basisB = normB?.basis === "per_100ml" ? "per_100ml" : "per_100g";
+
+  const isLiquidA = normA?.is_liquid || normA?.basis === "per_100ml";
+  const isLiquidB = normB?.is_liquid || normB?.basis === "per_100ml";
+  const hasIncompatibleBasis = isLiquidA !== isLiquidB && !!productA.nutrition_facts && !!productB.nutrition_facts;
+
+  if (hasIncompatibleBasis) {
+    return {
+      winner: "undetermined",
+      winner_reason: `Incompatible nutrition basis: cannot directly rank solid (${basisA.replace('_', ' ')}) against liquid (${basisB.replace('_', ' ')}). Nutritional facts are compared side-by-side without declaring a single winner.`,
+      is_basis_compatible: false,
+      basis_a: basisA,
+      basis_b: basisB,
+      concrete_differences: []
+    };
+  }
+
+  // Compute concrete factual differences
+  const differences: string[] = [];
+  if (normA && normB && !hasIncompatibleBasis) {
+    const basisUnit = basisA === "per_100ml" ? "per 100ml" : "per 100g";
+
+    // Total sugars
+    if (normA.sugar_100g != null && normB.sugar_100g != null) {
+      const diff = Number((normA.sugar_100g - normB.sugar_100g).toFixed(1));
+      if (Math.abs(diff) >= 0.5) {
+        if (diff < 0) {
+          differences.push(`${nameA} contains ${Math.abs(diff)}g less total sugars ${basisUnit} than ${nameB}.`);
+        } else {
+          differences.push(`${nameB} contains ${diff}g less total sugars ${basisUnit} than ${nameA}.`);
+        }
+      }
+    }
+
+    // Saturated fat
+    if (normA.saturated_fat_100g != null && normB.saturated_fat_100g != null) {
+      const diff = Number((normA.saturated_fat_100g - normB.saturated_fat_100g).toFixed(1));
+      if (Math.abs(diff) >= 0.5) {
+        if (diff < 0) {
+          differences.push(`${nameA} contains ${Math.abs(diff)}g less saturated fat ${basisUnit}.`);
+        } else {
+          differences.push(`${nameB} contains ${diff}g less saturated fat ${basisUnit}.`);
+        }
+      }
+    }
+
+    // Sodium
+    if (normA.sodium_100g != null && normB.sodium_100g != null) {
+      const diff = Math.round(normA.sodium_100g - normB.sodium_100g);
+      if (Math.abs(diff) >= 20) {
+        if (diff < 0) {
+          differences.push(`${nameA} contains ${Math.abs(diff)}mg less sodium ${basisUnit}.`);
+        } else {
+          differences.push(`${nameB} contains ${diff}mg less sodium ${basisUnit}.`);
+        }
+      }
+    }
+
+    // Fiber
+    if (normA.fiber_100g != null && normB.fiber_100g != null) {
+      const diff = Number((normA.fiber_100g - normB.fiber_100g).toFixed(1));
+      if (Math.abs(diff) >= 0.5) {
+        if (diff > 0) {
+          differences.push(`${nameA} provides ${diff}g more dietary fiber ${basisUnit}.`);
+        } else {
+          differences.push(`${nameB} provides ${Math.abs(diff)}g more dietary fiber ${basisUnit}.`);
+        }
+      }
+    }
+
+    // Protein
+    if (normA.protein_100g != null && normB.protein_100g != null) {
+      const diff = Number((normA.protein_100g - normB.protein_100g).toFixed(1));
+      if (Math.abs(diff) >= 0.5) {
+        if (diff > 0) {
+          differences.push(`${nameA} provides ${diff}g more protein ${basisUnit}.`);
+        } else {
+          differences.push(`${nameB} provides ${Math.abs(diff)}g more protein ${basisUnit}.`);
+        }
+      }
+    }
+  }
+
   if (scoreResultA.score === null || scoreResultB.score === null) {
     if (scoreResultA.score === null && scoreResultB.score === null) {
       return {
         winner: "undetermined",
-        winner_reason: "Both products lack sufficient readable label evidence to perform an objective comparison."
+        winner_reason: "Both products lack sufficient readable label evidence to perform an objective comparison.",
+        is_basis_compatible: true,
+        basis_a: basisA,
+        basis_b: basisB,
+        concrete_differences: differences
       };
     } else if (scoreResultA.score === null) {
       return {
         winner: "undetermined",
-        winner_reason: `Undetermined comparison: ${nameA} lacks sufficient readable label evidence for a fair comparison with ${nameB}.`
+        winner_reason: `Undetermined comparison: ${nameA} lacks sufficient readable label evidence for a fair comparison with ${nameB}.`,
+        is_basis_compatible: true,
+        basis_a: basisA,
+        basis_b: basisB,
+        concrete_differences: differences
       };
     } else {
       return {
         winner: "undetermined",
-        winner_reason: `Undetermined comparison: ${nameB} lacks sufficient readable label evidence for a fair comparison with ${nameA}.`
+        winner_reason: `Undetermined comparison: ${nameB} lacks sufficient readable label evidence for a fair comparison with ${nameA}.`,
+        is_basis_compatible: true,
+        basis_a: basisA,
+        basis_b: basisB,
+        concrete_differences: differences
       };
     }
   } else if (Math.abs(scoreResultA.score - scoreResultB.score) <= 3) {
     return {
       winner: "tie",
-      winner_reason: `Both products receive comparable nutritional health scores (${scoreResultA.score} vs ${scoreResultB.score}/100).`
+      winner_reason: `Both products receive comparable nutritional health scores (${scoreResultA.score} vs ${scoreResultB.score}/100).`,
+      is_basis_compatible: true,
+      basis_a: basisA,
+      basis_b: basisB,
+      concrete_differences: differences
     };
   } else if (scoreResultA.score > scoreResultB.score) {
     return {
       winner: "A",
-      winner_reason: `${nameA} achieves a higher health score (${scoreResultA.score} vs ${scoreResultB.score}) based on better macronutrient balance.`
+      winner_reason: `${nameA} achieves a higher health score (${scoreResultA.score} vs ${scoreResultB.score}) based on better macronutrient balance.`,
+      is_basis_compatible: true,
+      basis_a: basisA,
+      basis_b: basisB,
+      concrete_differences: differences
     };
   } else {
     return {
       winner: "B",
-      winner_reason: `${nameB} achieves a higher health score (${scoreResultB.score} vs ${scoreResultA.score}) based on better macronutrient balance.`
+      winner_reason: `${nameB} achieves a higher health score (${scoreResultB.score} vs ${scoreResultA.score}) based on better macronutrient balance.`,
+      is_basis_compatible: true,
+      basis_a: basisA,
+      basis_b: basisB,
+      concrete_differences: differences
     };
   }
 }

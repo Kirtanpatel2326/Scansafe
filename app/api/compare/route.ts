@@ -21,9 +21,13 @@ export const maxDuration = 60; // Prevent Vercel execution timeouts
 
 const ComparePayloadSchema = z.object({
   idempotencyKey: z.string().trim().max(128).optional(),
-  imageA: z.string().min(50, "Product image A is required"),
-  imageB: z.string().min(50, "Product image B is required"),
+  imageA: z.string().min(50, "Product image A is required").optional().nullable(),
+  imageB: z.string().min(50, "Product image B is required").optional().nullable(),
+  productA: z.any().optional().nullable(),
+  productB: z.any().optional().nullable(),
   preferences: z.array(z.string()).optional().default([])
+}).refine(data => (!!data.imageA && !!data.imageB) || (!!data.productA && !!data.productB), {
+  message: "Either (imageA and imageB) or (productA and productB) must be provided."
 });
 
 function getBase64Data(base64Image: string) {
@@ -76,7 +80,7 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const { imageA, imageB, preferences } = parsed.data;
+    const { imageA, imageB, productA, productB, preferences } = parsed.data;
 
     // Resolve user dietary preferences from profile if not passed in body BEFORE payload hashing
     let finalPrefs = preferences || [];
@@ -89,6 +93,87 @@ export async function POST(request: Request) {
       if (profile?.dietary_profile?.allergies) {
         finalPrefs = profile.dietary_profile.allergies;
       }
+    }
+
+    // Direct Pre-Analyzed Products Comparison (0 credits, no vision calls required)
+    if (productA && productB) {
+      const pA = productA;
+      const pB = productB;
+
+      const scoreResultA = calculateHealthScore(pA);
+      const scoreResultB = calculateHealthScore(pB);
+
+      const normNutA = normalizeNutrientsTo100g(pA.nutrition_facts);
+      const normNutB = normalizeNutrientsTo100g(pB.nutrition_facts);
+      const basisA = normNutA.basis === "per_100ml" ? "per 100ml" : "per 100g";
+      const basisB = normNutB.basis === "per_100ml" ? "per 100ml" : "per 100g";
+      const nameA = pA.name || pA.product_name || "Product A";
+      const nameB = pB.name || pB.product_name || "Product B";
+      const basisLabel = basisA === basisB ? basisA : `${nameA} (${basisA}) vs ${nameB} (${basisB})`;
+
+      const evalResult = evaluateComparison(pA, pB);
+
+      const comparisonData = {
+        winner: evalResult.winner,
+        winner_reason: evalResult.winner_reason,
+        verdict_english: evalResult.winner_reason,
+        concrete_differences: evalResult.concrete_differences || [],
+        is_basis_compatible: evalResult.is_basis_compatible ?? true,
+        product_a: {
+          ...pA,
+          name: nameA,
+          health_score: scoreResultA.score,
+          safety_level: scoreResultA.safetyLevel,
+          highlights: pA.highlights || [],
+          dietary_compatibility: evaluateDietaryCompatibility(pA.ingredients || [], pA.allergens_declared || [], finalPrefs)
+        },
+        product_b: {
+          ...pB,
+          name: nameB,
+          health_score: scoreResultB.score,
+          safety_level: scoreResultB.safetyLevel,
+          highlights: pB.highlights || [],
+          dietary_compatibility: evaluateDietaryCompatibility(pB.ingredients || [], pB.allergens_declared || [], finalPrefs)
+        },
+        comparison_table: {
+          calories: {
+            a: normNutA.calories_100g != null ? `${normNutA.calories_100g} kcal` : null,
+            b: normNutB.calories_100g != null ? `${normNutB.calories_100g} kcal` : null
+          },
+          sugar: {
+            a: normNutA.sugar_100g != null ? `${normNutA.sugar_100g}g` : null,
+            b: normNutB.sugar_100g != null ? `${normNutB.sugar_100g}g` : null
+          },
+          sodium: {
+            a: normNutA.sodium_100g != null ? `${normNutA.sodium_100g}mg` : null,
+            b: normNutB.sodium_100g != null ? `${normNutB.sodium_100g}mg` : null
+          },
+          protein: {
+            a: normNutA.protein_100g != null ? `${normNutA.protein_100g}g` : null,
+            b: normNutB.protein_100g != null ? `${normNutB.protein_100g}g` : null
+          },
+          fat: {
+            a: normNutA.fat_100g != null ? `${normNutA.fat_100g}g` : null,
+            b: normNutB.fat_100g != null ? `${normNutB.fat_100g}g` : null
+          },
+          fiber: {
+            a: normNutA.fiber_100g != null ? `${normNutA.fiber_100g}g` : null,
+            b: normNutB.fiber_100g != null ? `${normNutB.fiber_100g}g` : null
+          },
+          additives: {
+            a: `${pA.additives?.length || 0} additives`,
+            b: `${pB.additives?.length || 0} additives`
+          },
+          basis: basisLabel
+        }
+      };
+
+      return NextResponse.json({
+        success: true,
+        comparison: comparisonData,
+        creditsCost: 0,
+        source: "saved_catalog"
+      });
     }
 
     const headerIdempotencyKey = request.headers.get("x-idempotency-key")?.trim() || "";
@@ -104,9 +189,11 @@ export async function POST(request: Request) {
     const cookieStore = await cookies();
     const preferredLanguage = cookieStore.get("preferred_lang")?.value || "en";
 
+    const imgA = imageA || "";
+    const imgB = imageB || "";
     const normalizedPayload = {
-      imageAHash: crypto.createHash("sha256").update(imageA).digest("hex"),
-      imageBHash: crypto.createHash("sha256").update(imageB).digest("hex"),
+      imageAHash: crypto.createHash("sha256").update(imgA).digest("hex"),
+      imageBHash: crypto.createHash("sha256").update(imgB).digest("hex"),
       preferences: Array.isArray(finalPrefs) ? [...finalPrefs].sort() : [],
       preferredLanguage
     };
@@ -200,8 +287,8 @@ export async function POST(request: Request) {
 
     activeReservationOpId = opId;
 
-    const { mediaType: typeA, base64Data: dataA } = getBase64Data(imageA);
-    const { mediaType: typeB, base64Data: dataB } = getBase64Data(imageB);
+    const { mediaType: typeA, base64Data: dataA } = getBase64Data(imgA);
+    const { mediaType: typeB, base64Data: dataB } = getBase64Data(imgB);
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -387,6 +474,8 @@ JSON.stringify({
     comparisonData.winner = evalResult.winner;
     comparisonData.winner_reason = evalResult.winner_reason;
     comparisonData.verdict_english = evalResult.winner_reason;
+    comparisonData.concrete_differences = evalResult.concrete_differences || [];
+    comparisonData.is_basis_compatible = evalResult.is_basis_compatible ?? true;
 
     // Determine representative health score and safety level
     let representativeScore: number | null = null;
