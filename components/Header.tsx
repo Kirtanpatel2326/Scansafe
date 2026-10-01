@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
-import { LogOut, User as UserIcon, ShieldAlert, Sparkles, History, Camera, CreditCard, ChevronDown, FileText, Zap, Crown, GitCompare, Menu, X } from 'lucide-react'
+import { LogOut, User as UserIcon, ShieldAlert, Sparkles, History, Camera, CreditCard, ChevronDown, FileText, Zap, Crown, GitCompare, Menu, X, Bookmark } from 'lucide-react'
 import LanguageSwitcher from './LanguageSwitcher'
 import { useTranslation } from '@/lib/translations'
 
@@ -118,6 +118,15 @@ export default function Header() {
               {t.navCompare}
             </a>
             <a
+              href="/saved"
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:text-white ${
+                isActive('/saved') ? 'text-emerald-400 bg-emerald-950/10' : ''
+              }`}
+            >
+              <Bookmark className="w-4 h-4" />
+              Saved
+            </a>
+            <a
               href="/history"
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:text-white ${
                 isActive('/history') ? 'text-emerald-400 bg-emerald-950/10' : ''
@@ -198,6 +207,17 @@ export default function Header() {
                     </div>
                   </div>
 
+                  <div className="border-b border-zinc-800 pb-1.5 mb-1.5 px-1.5 flex flex-col gap-1">
+                    <a
+                      href="/saved"
+                      onClick={() => setIsDropdownOpen(false)}
+                      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-white transition"
+                    >
+                      <Bookmark className="w-3.5 h-3.5 text-emerald-400" />
+                      Saved Shopping List
+                    </a>
+                  </div>
+
                   {user.email?.toLowerCase() === 'kirtanpatel2326@gmail.com' && (
                     <div className="border-b border-zinc-800 pb-1.5 mb-1.5 px-1.5 flex flex-col gap-1">
                       <a
@@ -207,6 +227,14 @@ export default function Header() {
                       >
                         <Camera className="w-3.5 h-3.5 text-emerald-400" />
                         Use App (Scanner)
+                      </a>
+                      <a
+                        href="/admin/reviews"
+                        onClick={() => setIsDropdownOpen(false)}
+                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-white transition"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
+                        Reviewer Queue
                       </a>
                       <a
                         href="/admin"
@@ -277,6 +305,16 @@ export default function Header() {
           >
             <GitCompare className="w-4 h-4" />
             {t.navCompare}
+          </a>
+          <a
+            href="/saved"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl transition text-sm font-bold ${
+              isActive('/saved') ? 'text-emerald-400 bg-emerald-950/10' : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
+            }`}
+          >
+            <Bookmark className="w-4 h-4" />
+            Saved List
           </a>
           <a
             href="/history"

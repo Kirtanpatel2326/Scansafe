@@ -282,6 +282,19 @@ export const CANONICAL_PREFERENCES: PreferenceDefinition[] = [
   }
 ];
 
+export const DietaryAlertStateSchema = z.enum(["declared", "cross_contact", "potential_match", "insufficient_info"]);
+export type DietaryAlertState = z.infer<typeof DietaryAlertStateSchema>;
+
+export const DietaryAlertSchema = z.object({
+  preference_id: z.string(),
+  preference_label: z.string(),
+  state: DietaryAlertStateSchema,
+  title: z.string(),
+  explanation: z.string(),
+  source_label_text: z.string().optional()
+});
+export type DietaryAlert = z.infer<typeof DietaryAlertSchema>;
+
 export const DietaryCompatibilitySchema = z.object({
   is_compatible: z.boolean(),
   status: z.enum(["compatible", "incompatible", "precautionary_warning", "insufficient_data", "unsupported_preference"]).default("compatible"),
@@ -294,6 +307,8 @@ export const DietaryCompatibilitySchema = z.object({
     })
   ),
   allergen_warnings: z.array(z.string()),
+  dietary_alerts: z.array(DietaryAlertSchema).optional(),
+  medical_disclaimer: z.string().optional(),
   unsupported_preferences: z.array(z.string()).optional(),
   disclaimers: z.array(z.string()).optional()
 });
@@ -379,6 +394,9 @@ export function evaluateDietaryCompatibility(
   const unsupportedPreferences: string[] = [];
   const disclaimers: string[] = [];
   const activeDefs: PreferenceDefinition[] = [];
+  const dietaryAlerts: DietaryAlert[] = [];
+
+  const medicalDisclaimer = "ScanSafe dietary alerts are for informational shopping assistance only and do not constitute clinical or medical advice. Always inspect physical packaging prior to consumption, especially for severe allergies.";
 
   // Step 1: Resolve all requested preferences against registry
   for (const p of userPreferences) {
@@ -399,6 +417,16 @@ export function evaluateDietaryCompatibility(
     if (!allergenWarnings.includes(unsuppWarn)) {
       allergenWarnings.push(unsuppWarn);
     }
+    for (const unsupp of unsupportedPreferences) {
+      dietaryAlerts.push({
+        preference_id: unsupp.toLowerCase().replace(/\s+/g, '-'),
+        preference_label: unsupp,
+        state: "insufficient_info",
+        title: "Unsupported Dietary Preference",
+        explanation: `Preference '${unsupp}' is not in the verified allergen registry. Packaging cannot be safely verified.`,
+        source_label_text: unsupp
+      });
+    }
     if (!disclaimers.includes("Please verify packaging directly for custom or unverified dietary restrictions.")) {
       disclaimers.push("Please verify packaging directly for custom or unverified dietary restrictions.");
     }
@@ -409,12 +437,25 @@ export function evaluateDietaryCompatibility(
   const hasDeclaredAllergens = declaredAllergens && declaredAllergens.length > 0;
 
   if (!hasIngredients && !hasDeclaredAllergens) {
+    for (const def of activeDefs) {
+      dietaryAlerts.push({
+        preference_id: def.id,
+        preference_label: def.label,
+        state: "insufficient_info",
+        title: "Insufficient Label Evidence",
+        explanation: `Packaging lacks readable ingredient panel or declared allergen statements to verify ${def.label}.`,
+        source_label_text: "Missing/Unreadable label evidence"
+      });
+    }
+
     return {
       is_compatible: false,
       status: unsupportedPreferences.length > 0 && activeDefs.length === 0 ? "unsupported_preference" : "insufficient_data",
       matched_preferences: userPreferences,
       violations: [],
       allergen_warnings: ["Insufficient ingredient or allergen data on packaging to verify dietary compatibility."],
+      dietary_alerts: dietaryAlerts,
+      medical_disclaimer: medicalDisclaimer,
       unsupported_preferences: unsupportedPreferences.length > 0 ? unsupportedPreferences : undefined,
       disclaimers: disclaimers.length > 0 ? disclaimers : undefined
     };
@@ -438,7 +479,7 @@ export function evaluateDietaryCompatibility(
             if (regex.test(tokenLower) || tokenLower.includes(termLower)) {
               // Check if this specific token is explicitly and legitimately excluded
               // Guard: exclusions (e.g. "pasteurized milk") CANNOT suppress negation/hazard prefixes (e.g. "unpasteurized", "non-pasteurized", "raw")
-              const isExcluded = def.exclusions.some(ex => {
+              let isExcluded = def.exclusions.some(ex => {
                 const exLower = ex.toLowerCase().trim();
                 
                 // If token contains unpasteurized/raw hazard, exclusion for pasteurized does not apply
@@ -450,11 +491,27 @@ export function evaluateDietaryCompatibility(
                 return exRegex.test(tokenLower) || tokenLower === exLower;
               });
 
+              // Special qualification check for lactose-free: ingredients explicitly modified by "lactose-free" or "lactase"
+              if (!isExcluded && def.id === "lactose-free") {
+                if (/\blactose[- ]free\b/i.test(tokenLower) || /\blactase\b/i.test(tokenLower)) {
+                  isExcluded = true;
+                }
+              }
+
               if (!isExcluded) {
                 violations.push({
                   preference: def.label,
                   ingredient: rawName,
                   reason: `${token} contains ${term} (${def.label}).`
+                });
+
+                dietaryAlerts.push({
+                  preference_id: def.id,
+                  preference_label: def.label,
+                  state: "potential_match",
+                  title: "Potential Match Requiring Review",
+                  explanation: `Ingredient "${rawName}" contains "${token}" matching ${def.label} criteria.`,
+                  source_label_text: token
                 });
                 break; // avoid duplicate violations for same token & def
               }
@@ -470,7 +527,12 @@ export function evaluateDietaryCompatibility(
   if (hasDeclaredAllergens) {
     for (const decl of declaredAllergens) {
       const declLower = decl.toLowerCase();
-      const isPrecautionary = declLower.includes("may contain") || declLower.includes("facility") || declLower.includes("trace");
+      const isPrecautionary = 
+        declLower.includes("may contain") || 
+        declLower.includes("facility") || 
+        declLower.includes("trace") ||
+        declLower.includes("equipment") ||
+        declLower.includes("shared");
 
       for (const def of activeDefs) {
         const matchesDeclared = def.declaredAllergenTriggers.some(t => {
@@ -484,25 +546,43 @@ export function evaluateDietaryCompatibility(
             allergenWarnings.push(warnText);
           }
           if (isPrecautionary) hasPrecautionary = true;
+
+          const existingIdx = dietaryAlerts.findIndex(a => a.preference_id === def.id);
+          const newAlert: DietaryAlert = {
+            preference_id: def.id,
+            preference_label: def.label,
+            state: isPrecautionary ? "cross_contact" : "declared",
+            title: isPrecautionary ? "Cross-Contact / 'May Contain' Advisory" : "Allergen Explicitly Declared",
+            explanation: isPrecautionary
+              ? `Packaging lists precautionary advisory: "${decl}"`
+              : `Packaging explicitly declares allergen: "${decl}"`,
+            source_label_text: decl
+          };
+
+          if (existingIdx >= 0) {
+            // "declared" overrides "potential_match" or "cross_contact"
+            if (!isPrecautionary || dietaryAlerts[existingIdx].state === "potential_match" || dietaryAlerts[existingIdx].state === "insufficient_info") {
+              dietaryAlerts[existingIdx] = newAlert;
+            }
+          } else {
+            dietaryAlerts.push(newAlert);
+          }
         }
       }
     }
   }
 
   // Step 5: If ingredients list is EMPTY, declared allergens only certify what is specifically listed!
-  // An unrelated declared allergen (e.g. "Gluten-Free") CANNOT prove soy-free, nut-free, or dairy-free status!
   if (!hasIngredients) {
     for (const def of activeDefs) {
       const isAddressed = declaredAllergens.some(d => {
         const dl = d.toLowerCase().trim();
         
-        // 1. Explicit mention of allergen trigger for this specific preference
         const mentionsTrigger = def.declaredAllergenTriggers.some(t => {
           const reg = new RegExp(`\\b${escapeRegex(t.toLowerCase())}\\b`, "i");
           return reg.test(dl);
         });
 
-        // 2. Explicit verified negative/free claim for THIS specific preference
         const mentionsDirectClaim = def.aliases.some(a => {
           const reg = new RegExp(`\\b${escapeRegex(a.toLowerCase())}\\b`, "i");
           return reg.test(dl);
@@ -512,6 +592,15 @@ export function evaluateDietaryCompatibility(
       });
 
       if (!isAddressed && (def.category === "allergen" || def.category === "diet" || def.category === "health_condition")) {
+        dietaryAlerts.push({
+          preference_id: def.id,
+          preference_label: def.label,
+          state: "insufficient_info",
+          title: `Insufficient Evidence for ${def.label}`,
+          explanation: `Packaging lacks full ingredient list to verify absence of ${def.label}.`,
+          source_label_text: "Omitted ingredient list"
+        });
+
         return {
           is_compatible: false,
           status: "insufficient_data",
@@ -521,6 +610,8 @@ export function evaluateDietaryCompatibility(
             ...allergenWarnings,
             `Packaging lacks full ingredient list to verify absence of ${def.label}.`
           ],
+          dietary_alerts: dietaryAlerts,
+          medical_disclaimer: medicalDisclaimer,
           unsupported_preferences: unsupportedPreferences.length > 0 ? unsupportedPreferences : undefined,
           disclaimers: disclaimers.length > 0 ? disclaimers : undefined
         };
@@ -529,7 +620,6 @@ export function evaluateDietaryCompatibility(
   }
 
   // Step 6: Compute final compatibility status
-  // Fail-closed: unsupported preferences, violations, or active declared allergens disqualify compatibility
   let status: "compatible" | "incompatible" | "precautionary_warning" | "insufficient_data" | "unsupported_preference" = "compatible";
   let isCompatible = true;
 
@@ -544,12 +634,20 @@ export function evaluateDietaryCompatibility(
     isCompatible = false;
   }
 
+  // Absence of detected evidence disclaimer: Never declare as 100% allergen-free
+  if (isCompatible && activeDefs.length > 0) {
+    const verifiedLabels = activeDefs.map(d => d.label).join(", ");
+    disclaimers.push(`No detected ${verifiedLabels} ingredients from readable packaging facts. Absence of detected ingredients does not certify complete absence or clinical allergen-free status.`);
+  }
+
   return {
     is_compatible: isCompatible,
     status,
     matched_preferences: userPreferences,
     violations,
     allergen_warnings: allergenWarnings,
+    dietary_alerts: dietaryAlerts,
+    medical_disclaimer: medicalDisclaimer,
     unsupported_preferences: unsupportedPreferences.length > 0 ? unsupportedPreferences : undefined,
     disclaimers: disclaimers.length > 0 ? disclaimers : undefined
   };

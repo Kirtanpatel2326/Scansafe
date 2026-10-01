@@ -142,3 +142,47 @@ npm run build
 1. **Label Extraction Quality**: Optical character recognition depends on label print clarity. Blurry, folded, or poorly lit packaging photos may yield unreadable text; missing fields are strictly reported as unknown.
 2. **Nutritional Estimates**: Health scores are nutritional estimates based on declared nutrition tables and ingredient lists. ScanSafe does **not** certify food purity, chemical contamination, laboratory safety, or statutory regulatory compliance.
 3. **Medical Advice**: ScanSafe does not offer clinical diagnosis or medical treatment guidance. Always consult licensed medical professionals for allergy and dietary health management.
+
+---
+
+## 9. Measuring Product Journey & Adoption Truthfully
+
+ScanSafe implements privacy-preserving milestone telemetry via `/api/track` and the `analytics_events` table. Telemetry strictly excludes PII, raw ingredient texts, label photos, and personal dietary restriction profiles.
+
+### Primary Journey Milestones
+- `demo_opened`: Guest evaluates zero-credit interactive demo at `/demo`.
+- `scan_started`: User initiates camera or photo upload.
+- `scan_completed`: OCR extraction and fact normalization completes successfully.
+- `scan_failed`: Photo was unreadable or network failed (captures failure category).
+- `result_reviewed`: User inspects evidence, nutrition panel, or reviewed catalog entry.
+- `correction_submitted`: User submits verified correction with provenance (0 credits).
+- `comparison_completed`: Head-to-head comparison finished (same-basis enforced).
+- `product_saved`: User adds verified item to saved pantry shopping list (0 credits).
+
+### Telemetry Queries & Key Metrics
+1. **Scan Funnel Completion Rate**:
+   ```sql
+   SELECT 
+     COUNT(CASE WHEN event_name = 'scan_completed' THEN 1 END)::FLOAT / 
+     NULLIF(COUNT(CASE WHEN event_name = 'scan_started' THEN 1 END), 0) AS scan_completion_rate
+   FROM analytics_events 
+   WHERE created_at >= NOW() - INTERVAL '7 days';
+   ```
+
+2. **Repeat Shopping Assistant Usage**:
+   ```sql
+   SELECT 
+     user_id_hash,
+     COUNT(DISTINCT DATE(created_at)) AS active_shopping_days,
+     COUNT(*) AS total_milestones
+   FROM analytics_events
+   WHERE event_name IN ('result_reviewed', 'product_saved', 'comparison_completed')
+   GROUP BY user_id_hash
+   HAVING COUNT(DISTINCT DATE(created_at)) > 1;
+   ```
+
+3. **Marginal Cost per Scan & Zero-Credit Economics**:
+   - **0 Credits**: Barcode lookup of reviewed products, saved shopping list management, reviewer approval workflow, community correction submission, and guest demo.
+   - **1 Credit**: Live Gemini vision OCR processing on newly photographed food packaging.
+   - **2 Credits**: Head-to-head comparative OCR processing on two unanalyzed food packages.
+
