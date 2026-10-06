@@ -662,12 +662,47 @@ export default function ScanPage() {
         {activeTab === 'scan' && (
           <div className="flex flex-col gap-6">
             {errorMsg && (
-              <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 flex gap-3 items-start">
-                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="text-sm font-bold text-rose-300">Analysis Notice</h4>
-                  <p className="text-rose-400/90 text-xs mt-1">{errorMsg}</p>
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 sm:p-5 flex gap-3.5 items-start justify-between">
+                <div className="flex gap-3.5 items-start">
+                  <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-bold text-rose-300">Analysis Notice</h4>
+                    <p className="text-rose-300/90 text-xs sm:text-sm mt-1 leading-relaxed">{errorMsg}</p>
+                    
+                    {/* Contextual CTAs based on error message */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {(errorMsg.toLowerCase().includes('sign in') || errorMsg.toLowerCase().includes('auth')) && (
+                        <Link
+                          href="/auth"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold text-xs transition"
+                        >
+                          Sign In Now
+                        </Link>
+                      )}
+                      {(errorMsg.toLowerCase().includes('credit') || errorMsg.toLowerCase().includes('pack')) && (
+                        <Link
+                          href="/pricing"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition"
+                        >
+                          Refill Scan Credits
+                        </Link>
+                      )}
+                      <Link
+                        href="/demo"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
+                      >
+                        Try Guest Demo (0 Credits)
+                      </Link>
+                    </div>
+                  </div>
                 </div>
+                <button
+                  onClick={() => setErrorMsg('')}
+                  className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/20 transition cursor-pointer shrink-0"
+                  title="Dismiss notice"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             )}
 

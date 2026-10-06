@@ -106,7 +106,23 @@ export async function POST(request: Request) {
     const { barcode, image, preferences, isDemo, isSample, filename, productName } = parsedBody.data;
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    let { data: { user } } = await supabase.auth.getUser();
+
+    // Fallback: If cookie-based session is missing/expired, check Bearer token in Authorization header
+    if (!user) {
+      const authHeader = request.headers.get("authorization");
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.substring(7).trim();
+        if (token) {
+          const adminClient = createAdminClient();
+          const tokenUserRes = await adminClient.auth.getUser(token);
+          if (tokenUserRes.data?.user) {
+            user = tokenUserRes.data.user;
+          }
+        }
+      }
+    }
+
     const isLoggedIn = !!user;
     if (isLoggedIn && user) {
       currentUserId = user.id;
