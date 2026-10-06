@@ -1,5 +1,5 @@
 import { createClient, createAdminClient } from "@/lib/supabase-server";
-import { analyzeLabel, enrichIngredientsText, applyPreferences, SAMPLE_PRODUCTS, IngredientAnalysis, RawProductFactsSchema, calculateHealthScore } from "@/lib/claude";
+import { analyzeLabel, enrichIngredientsText, applyPreferences, SAMPLE_PRODUCTS, IngredientAnalysis, RawProductFactsSchema, sanitizeRawProductFacts, calculateHealthScore } from "@/lib/claude";
 import { 
   reserveCredits, 
   finalizeReservation, 
@@ -296,7 +296,8 @@ export async function POST(request: Request) {
 
       if (cachedProduct && cachedProduct.raw_data) {
         // Validate cached raw facts schema
-        const cacheParsed = RawProductFactsSchema.safeParse(cachedProduct.raw_data);
+        const sanitizedRaw = sanitizeRawProductFacts(cachedProduct.raw_data);
+        const cacheParsed = RawProductFactsSchema.safeParse(sanitizedRaw);
         if (cacheParsed.success) {
           const rawFacts = cacheParsed.data;
           const { score, reason, safetyLevel } = calculateHealthScore(rawFacts);
