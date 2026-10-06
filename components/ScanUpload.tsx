@@ -445,7 +445,8 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         if (data.error === 'LIMIT_EXCEEDED') {
           throw new Error('LIMIT_EXCEEDED:' + data.message)
         }
-        throw new Error(data.error || 'Failed to analyze product. Please try again.')
+        const errorText = data.message || data.error || 'Failed to analyze product. Please try again.'
+        throw new Error(errorText)
       }
 
       if (data.success === false && data.errorType === 'PRODUCT_SELECTION_REQUIRED') {
