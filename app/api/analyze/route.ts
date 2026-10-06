@@ -156,13 +156,17 @@ export async function POST(request: Request) {
     // 2.1 Resolve user dietary preferences from profile if not passed in body BEFORE payload hashing
     let finalPrefs = preferences || [];
     if (!preferences || preferences.length === 0) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("dietary_profile")
-        .eq("id", user.id)
-        .single();
-      if (profile?.dietary_profile?.allergies) {
-        finalPrefs = profile.dietary_profile.allergies;
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("dietary_profile")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (profile?.dietary_profile?.allergies) {
+          finalPrefs = profile.dietary_profile.allergies;
+        }
+      } catch {
+        // dietary_profile column may not exist yet in live database
       }
     }
 
@@ -580,7 +584,10 @@ export async function POST(request: Request) {
     }
 
     // Save scan to user's private history
-    const { data: scanData, error: scanInsertErr } = await supabase
+    let finalScanData: any = null;
+    
+    // First try insert with operation tracking columns
+    const { data: scanDataWithOp, error: scanInsertErrWithOp } = await supabase
       .from("scans")
       .insert({
         user_id: user.id,
@@ -593,11 +600,36 @@ export async function POST(request: Request) {
         result_json: personalizedAnalysis
       })
       .select()
-      .single();
+      .maybeSingle();
 
-    let finalScanData = scanData;
-    if (scanInsertErr || !scanData) {
-      if (scanInsertErr && (scanInsertErr.code === "23505" || scanInsertErr.message?.includes("unique") || scanInsertErr.message?.includes("duplicate key"))) {
+    if (scanDataWithOp) {
+      finalScanData = scanDataWithOp;
+    } else {
+      // If failed due to missing column (PGRST204), retry with base schema columns
+      const isMissingColumn = scanInsertErrWithOp?.code === "PGRST204" || 
+        scanInsertErrWithOp?.code === "42703" ||
+        scanInsertErrWithOp?.message?.includes("column");
+
+      if (isMissingColumn) {
+        const { data: baseScanData, error: baseScanErr } = await supabase
+          .from("scans")
+          .insert({
+            user_id: user.id,
+            product_name: personalizedAnalysis.product_name,
+            barcode: barcode || null,
+            health_score: personalizedAnalysis.health_score,
+            safety_level: personalizedAnalysis.safety_level,
+            result_json: personalizedAnalysis
+          })
+          .select()
+          .maybeSingle();
+
+        if (baseScanData) {
+          finalScanData = baseScanData;
+        } else {
+          console.error("Base scan insert failed:", baseScanErr);
+        }
+      } else if (scanInsertErrWithOp && (scanInsertErrWithOp.code === "23505" || scanInsertErrWithOp.message?.includes("unique") || scanInsertErrWithOp.message?.includes("duplicate key"))) {
         const { data: existingSaved } = await supabase
           .from("scans")
           .select("*")
@@ -609,51 +641,66 @@ export async function POST(request: Request) {
           finalScanData = existingSaved;
         }
       }
+    }
 
-      if (!finalScanData) {
-        console.error("Failed to save vision scan to database:", scanInsertErr);
-        if (activeReservationOpId) {
-          await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for vision scan", activeFencingToken);
-          activeReservationOpId = null;
-        }
-        return NextResponse.json({
-          error: "DATABASE_ERROR",
-          message: "Failed to save scan record. Your credits have not been charged."
-        }, { status: 500 });
+    if (!finalScanData) {
+      console.error("Failed to save vision scan to database:", scanInsertErrWithOp);
+      if (activeReservationOpId) {
+        await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for vision scan", activeFencingToken);
+        activeReservationOpId = null;
       }
+      return NextResponse.json({
+        error: "DATABASE_ERROR",
+        message: "Failed to save scan record. Your credits have not been charged."
+      }, { status: 500 });
     }
 
     const scanId = finalScanData.id;
 
     // If barcode was provided and panel was extracted, cache neutral raw facts (strictly excluding user image & personalized preferences)
     if (barcode && baseAnalysis.panel_status === "extracted") {
-      const adminClient = createAdminClient();
-      await adminClient
-        .from("products_cache")
-        .upsert({
-          barcode,
-          product_name: baseAnalysis.product_name,
-          brand: baseAnalysis.brand,
-          raw_data: {
+      try {
+        const adminClient = createAdminClient();
+        await adminClient
+          .from("products_cache")
+          .upsert({
+            barcode,
             product_name: baseAnalysis.product_name,
             brand: baseAnalysis.brand,
-            panel_status: baseAnalysis.panel_status,
-            description: baseAnalysis.description,
-            ingredients: baseAnalysis.ingredients,
-            additives: baseAnalysis.additives,
-            allergens_declared: baseAnalysis.allergens_declared,
-            nutrition_facts: baseAnalysis.nutrition_facts,
-            upf_score: baseAnalysis.upf_score,
-            upf_reason: baseAnalysis.upf_reason,
-            glycemic_index_estimate: baseAnalysis.glycemic_index_estimate,
-            glycemic_reason: baseAnalysis.glycemic_reason,
-            recommendations: baseAnalysis.recommendations,
-            alternatives_detailed: baseAnalysis.alternatives_detailed
-          },
-          schema_version: "2.0",
-          source: "ocr",
-          updated_at: new Date().toISOString()
-        }, { onConflict: "barcode" });
+            raw_data: {
+              product_name: baseAnalysis.product_name,
+              brand: baseAnalysis.brand,
+              panel_status: baseAnalysis.panel_status,
+              description: baseAnalysis.description,
+              ingredients: baseAnalysis.ingredients,
+              additives: baseAnalysis.additives,
+              allergens_declared: baseAnalysis.allergens_declared,
+              nutrition_facts: baseAnalysis.nutrition_facts,
+              upf_score: baseAnalysis.upf_score,
+              upf_reason: baseAnalysis.upf_reason,
+              glycemic_index_estimate: baseAnalysis.glycemic_index_estimate,
+              glycemic_reason: baseAnalysis.glycemic_reason,
+              recommendations: baseAnalysis.recommendations,
+              alternatives_detailed: baseAnalysis.alternatives_detailed
+            },
+            schema_version: "2.0",
+            source: "ocr",
+            updated_at: new Date().toISOString()
+          }, { onConflict: "barcode" });
+      } catch (cacheErr) {
+        // Fallback to older product_cache table or ignore non-fatal cache write
+        try {
+          const adminClient = createAdminClient();
+          await adminClient
+            .from("product_cache")
+            .upsert({
+              barcode,
+              result_json: baseAnalysis
+            }, { onConflict: "barcode" });
+        } catch {
+          // Non-fatal
+        }
+      }
     }
 
     // Finalize credit deduction atomically

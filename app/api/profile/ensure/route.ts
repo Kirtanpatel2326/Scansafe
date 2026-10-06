@@ -23,13 +23,12 @@ export async function POST() {
       const email = user.email || ''
       const fullName = user.user_metadata?.full_name || email.split('@')[0] || 'User'
       
-      const { error: insertError } = await adminClient.from('profiles').insert({
+      let { error: insertError } = await adminClient.from('profiles').insert({
         id: user.id,
         email: email,
         full_name: fullName,
         plan: 'free',
-        scan_credits: 5,
-        dietary_profile: {}
+        scan_credits: 5
       })
 
       if (insertError) {
