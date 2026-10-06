@@ -165,22 +165,52 @@ export default function ScanPage() {
   const [newBlacklistItem, setNewBlacklistItem] = useState('')
 
   useEffect(() => {
+    let isMounted = true
+
+    // Safety timeout: never leave user hanging on loading spinner if network hangs
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) setLoadingSession(false)
+    }, 1500)
+
     // 1. Check active session (retrieves cached session and handles background refreshes)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!isMounted) return
       const currentUser = session?.user ?? null
       setUser(currentUser)
+
       if (currentUser) {
-        await fetch('/api/profile/ensure', { method: 'POST' })
-        await fetchProfile(currentUser.id)
-        await fetchRecentScans(currentUser.id)
-        await fetchFamilyMembers(currentUser.id)
-        await fetchComposerHistory(currentUser.id)
-        await fetchBlacklist(currentUser.id)
+        // Fast path: parallelize profile ensure & profile fetch
+        try {
+          await Promise.allSettled([
+            fetch('/api/profile/ensure', { method: 'POST' }),
+            fetchProfile(currentUser.id)
+          ])
+        } catch (e) {
+          console.warn('Initial profile load warning:', e)
+        }
+
+        // Release UI block immediately so scanner is responsive
+        if (isMounted) setLoadingSession(false)
+
+        // Asynchronously hydrate secondary tabs without blocking scanner
+        Promise.allSettled([
+          fetchRecentScans(currentUser.id),
+          fetchFamilyMembers(currentUser.id),
+          fetchComposerHistory(currentUser.id),
+          fetchBlacklist(currentUser.id)
+        ]).catch(() => {})
+      } else {
+        if (isMounted) setLoadingSession(false)
       }
-      setLoadingSession(false)
+
+      clearTimeout(safetyTimer)
+
       if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true') {
         router.push('/demo')
       }
+    }).catch((err) => {
+      console.warn('Session check warning:', err)
+      if (isMounted) setLoadingSession(false)
     })
 
     // 2. Listen for auth changes (token refreshes, sign ins, sign outs)
