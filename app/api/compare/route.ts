@@ -85,13 +85,17 @@ export async function POST(request: Request) {
     // Resolve user dietary preferences from profile if not passed in body BEFORE payload hashing
     let finalPrefs = preferences || [];
     if (!preferences || preferences.length === 0) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("dietary_profile")
-        .eq("id", user.id)
-        .single();
-      if (profile?.dietary_profile?.allergies) {
-        finalPrefs = profile.dietary_profile.allergies;
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("dietary_profile")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (profile?.dietary_profile?.allergies) {
+          finalPrefs = profile.dietary_profile.allergies;
+        }
+      } catch {
+        // dietary_profile column may not exist yet in live database
       }
     }
 
@@ -499,7 +503,9 @@ JSON.stringify({
     }
 
     // Save comparison scan to history database
-    const { data: scanData, error: dbErr } = await supabase
+    let finalScanData: any = null;
+
+    const { data: scanDataWithOp, error: dbErrWithOp } = await supabase
       .from("scans")
       .insert({
         user_id: user.id,
@@ -512,12 +518,35 @@ JSON.stringify({
         result_json: comparisonData
       })
       .select()
-      .single();
+      .maybeSingle();
 
-    let finalScanData = scanData;
-    if (dbErr || !scanData) {
-      // Check for concurrent unique constraint race on (user_id, op_id)
-      if (dbErr && (dbErr.code === "23505" || dbErr.message?.includes("unique") || dbErr.message?.includes("duplicate key"))) {
+    if (scanDataWithOp) {
+      finalScanData = scanDataWithOp;
+    } else {
+      const isMissingColumn = dbErrWithOp?.code === "PGRST204" || 
+        dbErrWithOp?.code === "42703" ||
+        dbErrWithOp?.message?.includes("column");
+
+      if (isMissingColumn) {
+        const { data: baseScanData, error: baseDbErr } = await supabase
+          .from("scans")
+          .insert({
+            user_id: user.id,
+            product_name: `${nameA} vs ${nameB}`,
+            barcode: `COMPARE:${comparisonData.winner}`,
+            health_score: representativeScore,
+            safety_level: representativeSafetyLevel,
+            result_json: comparisonData
+          })
+          .select()
+          .maybeSingle();
+
+        if (baseScanData) {
+          finalScanData = baseScanData;
+        } else {
+          console.error("Base comparison scan insert error:", baseDbErr);
+        }
+      } else if (dbErrWithOp && (dbErrWithOp.code === "23505" || dbErrWithOp.message?.includes("unique") || dbErrWithOp.message?.includes("duplicate key"))) {
         const { data: existingSaved } = await supabase
           .from("scans")
           .select("*")
@@ -529,18 +558,18 @@ JSON.stringify({
           finalScanData = existingSaved;
         }
       }
+    }
 
-      if (!finalScanData) {
-        console.error("Failed to save comparison to history database:", dbErr);
-        if (activeReservationOpId) {
-          await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for comparison", activeFencingToken);
-          activeReservationOpId = null;
-        }
-        return NextResponse.json({
-          error: "DATABASE_ERROR",
-          message: "Failed to save comparison result. Your scan credits have been preserved."
-        }, { status: 500 });
+    if (!finalScanData) {
+      console.error("Failed to save comparison to history database:", dbErrWithOp);
+      if (activeReservationOpId) {
+        await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for comparison", activeFencingToken);
+        activeReservationOpId = null;
       }
+      return NextResponse.json({
+        error: "DATABASE_ERROR",
+        message: "Failed to save comparison result. Your scan credits have been preserved."
+      }, { status: 500 });
     }
 
     const scanId = finalScanData.id;
@@ -555,10 +584,14 @@ JSON.stringify({
     );
     if (finalization.success) {
       if (scanId) {
-        await supabase
-          .from("scans")
-          .update({ accounting_status: "completed" })
-          .eq("id", scanId);
+        try {
+          await supabase
+            .from("scans")
+            .update({ accounting_status: "completed" })
+            .eq("id", scanId);
+        } catch {
+          // accounting_status column may not exist yet
+        }
       }
       activeReservationOpId = null;
 

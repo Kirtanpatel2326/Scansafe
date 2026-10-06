@@ -67,18 +67,11 @@ export default function PricingPage() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('plan, plan_type, plan_expires_at')
+        .select('plan, plan_type')
         .eq('id', userId)
-        .single()
+        .maybeSingle()
       
       if (!error && data) {
-        const now = new Date()
-        const expired = data.plan === 'pro' && data.plan_expires_at && new Date(data.plan_expires_at) <= now
-        if (expired) {
-          data.plan = 'free'
-          data.plan_type = 'free'
-          data.plan_expires_at = null
-        }
         setPlan(data.plan || 'free')
         setPlanType(data.plan_type || 'free')
       }

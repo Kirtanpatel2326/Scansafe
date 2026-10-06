@@ -19,22 +19,54 @@ export async function GET(request: Request) {
 
     // 1. Direct Barcode Lookup
     if (barcode) {
-      const { data: cached, error } = await supabase
-        .from("products_cache")
-        .select("*")
-        .eq("barcode", barcode)
-        .maybeSingle();
+      let cached: any = null;
+      try {
+        const { data } = await supabase
+          .from("products_cache")
+          .select("*")
+          .eq("barcode", barcode)
+          .maybeSingle();
+        cached = data;
+      } catch {
+        // Fall back to product_cache table
+      }
+
+      if (!cached) {
+        try {
+          const { data: legacy } = await supabase
+            .from("product_cache")
+            .select("*")
+            .eq("barcode", barcode)
+            .maybeSingle();
+          if (legacy && legacy.result_json) {
+            cached = {
+              barcode: legacy.barcode,
+              product_name: legacy.result_json.product_name,
+              brand: legacy.result_json.brand,
+              raw_data: legacy.result_json
+            };
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
 
       if (cached && cached.raw_data) {
         const rawData = cached.raw_data;
         const scoreResult = calculateHealthScore(rawData);
 
         // Fetch version history if available
-        const { data: versions } = await supabase
-          .from("product_versions")
-          .select("version, reason, created_at, created_by")
-          .eq("barcode", barcode)
-          .order("version", { ascending: false });
+        let versions: any[] = [];
+        try {
+          const { data: vData } = await supabase
+            .from("product_versions")
+            .select("version, reason, created_at, created_by")
+            .eq("barcode", barcode)
+            .order("version", { ascending: false });
+          versions = vData || [];
+        } catch {
+          // Non-fatal
+        }
 
         return NextResponse.json({
           success: true,
@@ -51,7 +83,7 @@ export async function GET(request: Request) {
             review_status: cached.review_status || "ai_extracted",
             last_reviewed_at: cached.last_reviewed_at || null,
             version: cached.version || 1,
-            version_history: versions || [],
+            version_history: versions,
             source: cached.source || "catalog",
             raw_data: rawData,
             health_score: scoreResult.score,
@@ -139,11 +171,17 @@ export async function GET(request: Request) {
 
     // 2. Query / Ambiguity Search by Product Name
     if (query) {
-      const { data: matches } = await supabase
-        .from("products_cache")
-        .select("barcode, product_name, brand, variant, pack_size, review_status, updated_at")
-        .or(`product_name.ilike.%${query}%,brand.ilike.%${query}%`)
-        .limit(10);
+      let matches: any[] = [];
+      try {
+        const { data } = await supabase
+          .from("products_cache")
+          .select("barcode, product_name, brand, variant, pack_size, review_status, updated_at")
+          .or(`product_name.ilike.%${query}%,brand.ilike.%${query}%`)
+          .limit(10);
+        matches = data || [];
+      } catch {
+        // Non-fatal if table not yet migrated
+      }
 
       const variants = (matches || []).map(m => ({
         barcode: m.barcode,

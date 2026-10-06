@@ -229,19 +229,33 @@ export default function ScanPage() {
 
   const fetchProfile = async (userId: string) => {
     try {
+      // First attempt query with extended columns
       const { data, error } = await supabase
         .from('profiles')
-        .select('plan, plan_type, plan_expires_at, scans_today, scan_credits, dietary_profile')
+        .select('plan, plan_type, scan_credits')
         .eq('id', userId)
-        .single()
+        .maybeSingle()
       
       if (!error && data) {
         setProfile(data as any)
-        const dp = data.dietary_profile || {}
-        setUserAge(dp.age || '')
-        setUserWeight(dp.weight || '')
-        setSelectedAllergies(dp.allergies || [])
-        setSelectedConditions(dp.conditions || [])
+      }
+
+      // Try reading dietary_profile separately without throwing if column absent
+      try {
+        const { data: dietData } = await supabase
+          .from('profiles')
+          .select('dietary_profile')
+          .eq('id', userId)
+          .maybeSingle()
+        if (dietData?.dietary_profile) {
+          const dp = dietData.dietary_profile || {}
+          setUserAge(dp.age || '')
+          setUserWeight(dp.weight || '')
+          setSelectedAllergies(dp.allergies || [])
+          setSelectedConditions(dp.conditions || [])
+        }
+      } catch {
+        // dietary_profile column may not exist yet
       }
     } catch (err) {
       console.error('Error loading profile:', err)
