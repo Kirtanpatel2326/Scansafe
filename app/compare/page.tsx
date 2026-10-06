@@ -148,13 +148,25 @@ export default function ComparePage() {
 
   // Check auth session & load any saved items from session storage
   useEffect(() => {
+    let isMounted = true
+
+    // Safety timeout: never leave user hanging on loading spinner
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) setLoadingSession(false)
+    }, 1200)
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!isMounted) return
       setUser(session?.user ?? null)
       setLoadingSession(false)
+      clearTimeout(safetyTimer)
+    }).catch((err) => {
+      console.warn('Compare session check warning:', err)
+      if (isMounted) setLoadingSession(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+      if (isMounted) setUser(session?.user ?? null)
     })
 
     // Check for saved items stored in session

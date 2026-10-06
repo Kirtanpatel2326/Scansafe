@@ -66,10 +66,11 @@ export async function GET(request: Request) {
         });
       }
 
-      // If not in database, attempt Open Food Facts lookup as public reference
+      // If not in database, attempt Open Food Facts lookup as public reference (with strict 2.5s timeout)
       try {
         const offRes = await fetch(`https://world.openfoodfacts.org/api/v3/product/${barcode}.json`, {
-          headers: { "User-Agent": "ScanSafe/1.0 (contact@scansafe.co.in)" }
+          headers: { "User-Agent": "ScanSafe/1.0 (contact@scansafe.co.in)" },
+          signal: AbortSignal.timeout(2500)
         });
         if (offRes.ok) {
           const offData = await offRes.json();
