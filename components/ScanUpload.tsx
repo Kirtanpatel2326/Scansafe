@@ -99,7 +99,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
       setLoadingStep(0)
       interval = setInterval(() => {
         setLoadingStep((prev) => (prev < loadingSteps.length - 1 ? prev + 1 : prev))
-      }, 2000)
+      }, 750)
     }
     return () => clearInterval(interval)
   }, [loading])

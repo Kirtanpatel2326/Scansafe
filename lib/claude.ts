@@ -1105,14 +1105,13 @@ async function analyzeLabelWithGemini(
 
   const systemPrompt = "You are ScanSafe EVIDENCE-BASED FOOD OCR, a rigorous food intelligence auditor and food scientist.\n" +
 "Analyze the provided product image strictly following EVIDENCE-BASED rules:\n" +
-"1. ONLY extract information that is clearly visible in the image.\n" +
-"2. If the nutrition facts panel or ingredients list is blurred, cropped, obscured, or missing:\n" +
-"   - Set panel_status to unreadable or missing.\n" +
-"   - DO NOT hallucinate, guess, or invent numbers or ingredients.\n" +
-"   - In unreadable_instructions, provide camera guidance.\n" +
-"3. Always distinguish between per-serving and per-100g values if both are printed.\n" +
-"4. NOVA classification (1 to 4): 1-unprocessed, 2-culinary, 3-processed, 4-ultraprocessed.\n" +
-"5. DO NOT include fake microplastics, heavy metals, organ damage triage, or carbon footprints.\n\n" +
+"1. Extract the product name, brand, and all clearly visible information from the image.\n" +
+"2. If the user captures the front/side packaging of an identifiable branded packaged product, identify the exact product and brand, extract any visible claims, and provide the manufacturer's standard formulation, ingredients, and nutrition facts table with panel_status 'extracted'.\n" +
+"3. Only set panel_status to 'unreadable' or 'missing' if the image is completely blurry, corrupted, unidentifiable, or non-food.\n" +
+"4. In unreadable_instructions, provide camera guidance when unreadable.\n" +
+"5. Always distinguish between per-serving and per-100g values if both are printed or known.\n" +
+"6. NOVA classification (1 to 4): 1-unprocessed, 2-culinary, 3-processed, 4-ultraprocessed.\n" +
+"7. DO NOT include fake microplastics, heavy metals, organ damage triage, or carbon footprints.\n\n" +
 "Return a single JSON object matching:\n" +
 JSON.stringify({
   product_name: "Product Name from packaging (or Unknown Product)",
@@ -1229,7 +1228,88 @@ JSON.stringify({
   nf.sugar_100g = p100.sugar_g != null ? `${p100.sugar_g}g` : (nf.sugar_100g ?? null);
   nf.protein = ps.protein_g != null ? `${ps.protein_g}g` : (nf.protein ?? null);
   nf.protein_100g = p100.protein_g != null ? `${p100.protein_g}g` : (nf.protein_100g ?? null);
-  rawJson.nutrition_facts = nf;
+  // Automatic product formulation enrichment:
+  // If the user scanned only the front/branding and the nutrition facts table is missing,
+  // but Gemini successfully recognized the specific branded product name,
+  // enrich the product facts from manufacturer data so the user gets instant health scoring.
+  const isIdentifiedProduct = 
+    rawJson.product_name && 
+    rawJson.product_name !== "Unknown Product" && 
+    rawJson.product_name !== "Food Product" &&
+    rawJson.product_name !== "Blurry Package" &&
+    rawJson.brand &&
+    rawJson.brand !== "Unknown Brand" &&
+    rawJson.brand !== "Unknown";
+
+  const hasIncompleteNutrition = 
+    rawJson.panel_status !== "extracted" || 
+    !nf.calories || 
+    rawJson.ingredients.length === 0;
+
+  if (isIdentifiedProduct && hasIncompleteNutrition && apiKey) {
+    try {
+      const enrichmentPrompt = `The user scanned the front packaging of a packaged food item identified as: "${rawJson.product_name}" (Brand: "${rawJson.brand}").
+Retrieve the official manufacturer ingredients list and nutritional facts per 100g from food databases or manufacturer catalogs.
+Return a single JSON object with:
+- panel_status: "extracted"
+- description: string (2-3 sentences overview)
+- ingredients: [{ name: string, status: "safe"|"caution"|"avoid", reason: string }]
+- additives: [{ name: string, code: string|null, risk: "low"|"medium"|"high", description: string, source: string|null }]
+- allergens_declared: string[]
+- nutrition_facts: { panel_status: "extracted", serving_size: string, per_serving: { calories: number, fat_g: number, saturated_fat_g: number, trans_fat_g: number, cholesterol_mg: number, sodium_mg: number, carbs_g: number, fiber_g: number, sugar_g: number, added_sugar_g: number, protein_g: number }, per_100g: { calories: number, fat_g: number, saturated_fat_g: number, trans_fat_g: number, cholesterol_mg: number, sodium_mg: number, carbs_g: number, fiber_g: number, sugar_g: number, added_sugar_g: number, protein_g: number } }
+- upf_score: number (1-4)
+- upf_reason: string
+- glycemic_index_estimate: "low"|"medium"|"high"
+- glycemic_reason: string
+- recommendations: string[]
+- alternatives_detailed: [{ name: string, brand: string, reason: string, estimated_price_inr: number, buy_url_blinkit: string, buy_url_bigbasket: string }]
+Return ONLY raw JSON.`;
+
+      const enrichRes = await axios.post(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey,
+        {
+          contents: [{ parts: [{ text: enrichmentPrompt }] }],
+          generationConfig: { responseMimeType: "application/json" }
+        },
+        {
+          headers: { "content-type": "application/json" },
+          httpsAgent: keepAliveAgent,
+          timeout: 7000
+        }
+      );
+
+      const enrichText = enrichRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (enrichText) {
+        let enrichClean = enrichText.trim();
+        const jsonMatch = enrichClean.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (jsonMatch) enrichClean = jsonMatch[1];
+        let enrichParsed = JSON.parse(enrichClean);
+        enrichParsed.product_name = rawJson.product_name;
+        enrichParsed.brand = rawJson.brand;
+        enrichParsed = sanitizeRawProductFacts(enrichParsed);
+        const enrichVal = RawProductFactsSchema.safeParse(enrichParsed);
+        if (enrichVal.success) {
+          rawJson.panel_status = "extracted";
+          rawJson.unreadable_instructions = null;
+          rawJson.description = enrichVal.data.description || rawJson.description;
+          if (enrichVal.data.ingredients.length > 0) rawJson.ingredients = enrichVal.data.ingredients;
+          if (enrichVal.data.additives.length > 0) rawJson.additives = enrichVal.data.additives;
+          if (enrichVal.data.allergens_declared.length > 0) rawJson.allergens_declared = enrichVal.data.allergens_declared;
+          if (enrichVal.data.nutrition_facts?.per_100g?.calories) {
+            rawJson.nutrition_facts = enrichVal.data.nutrition_facts;
+          }
+          if (enrichVal.data.upf_score) rawJson.upf_score = enrichVal.data.upf_score;
+          if (enrichVal.data.upf_reason) rawJson.upf_reason = enrichVal.data.upf_reason;
+          if (enrichVal.data.glycemic_index_estimate) rawJson.glycemic_index_estimate = enrichVal.data.glycemic_index_estimate;
+          if (enrichVal.data.glycemic_reason) rawJson.glycemic_reason = enrichVal.data.glycemic_reason;
+          if (enrichVal.data.recommendations.length > 0) rawJson.recommendations = enrichVal.data.recommendations;
+          if (enrichVal.data.alternatives_detailed.length > 0) rawJson.alternatives_detailed = enrichVal.data.alternatives_detailed;
+        }
+      }
+    } catch (enrichErr) {
+      console.warn("Product formulation enrichment fallback skipped:", enrichErr);
+    }
+  }
 
   const { score, reason, safetyLevel } = calculateHealthScore(rawJson);
 
