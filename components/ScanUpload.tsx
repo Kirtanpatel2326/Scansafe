@@ -15,6 +15,7 @@ import {
   FileText,
   Search
 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
 interface ScanUploadProps {
   onScanStart: () => void
@@ -422,11 +423,20 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
 
     try {
       const idempotencyKey = activeOpKey || generateClientOpKey('scan')
+      
+      // Obtain access token to ensure robust auth across all browser environments
+      const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }))
+      const authHeader: Record<string, string> = {}
+      if (session?.access_token) {
+        authHeader['Authorization'] = `Bearer ${session.access_token}`
+      }
+
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'X-Idempotency-Key': idempotencyKey
+          'X-Idempotency-Key': idempotencyKey,
+          ...authHeader
         },
         body: JSON.stringify({
           barcode: targetBarcode || null,
