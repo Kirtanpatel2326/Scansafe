@@ -91,6 +91,100 @@ export const AlternativeItemSchema = z.object({
   buy_url_bigbasket: z.string().nullable().optional(),
 });
 
+/**
+ * Sanitizes and normalizes raw AI outputs before strict schema validation.
+ * Ensures casing mismatches or descriptive strings for enum fields (like glycemic_index_estimate)
+ * are cleanly mapped to valid enum values or set to null/undefined without throwing schema errors.
+ */
+export function sanitizeRawProductFacts(data: any): any {
+  if (!data || typeof data !== "object") return data;
+  const clone = { ...data };
+
+  // 1. Normalize glycemic_index_estimate
+  if (clone.glycemic_index_estimate !== undefined && clone.glycemic_index_estimate !== null) {
+    const rawVal = String(clone.glycemic_index_estimate).toLowerCase().trim();
+    if (rawVal.includes("low")) {
+      clone.glycemic_index_estimate = "low";
+    } else if (rawVal.includes("med") || rawVal.includes("moderate")) {
+      clone.glycemic_index_estimate = "medium";
+    } else if (rawVal.includes("high")) {
+      clone.glycemic_index_estimate = "high";
+    } else {
+      clone.glycemic_index_estimate = null;
+    }
+  }
+
+  // 2. Normalize panel_status
+  if (clone.panel_status !== undefined && clone.panel_status !== null) {
+    const rawStatus = String(clone.panel_status).toLowerCase().trim();
+    if (rawStatus.includes("unread") || rawStatus.includes("blur") || rawStatus.includes("obscur")) {
+      clone.panel_status = "unreadable";
+    } else if (rawStatus.includes("miss") || rawStatus.includes("absent") || rawStatus.includes("none")) {
+      clone.panel_status = "missing";
+    } else {
+      clone.panel_status = "extracted";
+    }
+  }
+
+  // 3. Normalize upf_score
+  if (clone.upf_score !== undefined && clone.upf_score !== null) {
+    const num = Number(clone.upf_score);
+    if (!Number.isFinite(num) || num < 1 || num > 4) {
+      clone.upf_score = null;
+    } else {
+      clone.upf_score = Math.round(num);
+    }
+  }
+
+  // 4. Normalize ingredients list
+  if (Array.isArray(clone.ingredients)) {
+    clone.ingredients = clone.ingredients.map((ing: any) => {
+      if (!ing || typeof ing !== "object") return { name: String(ing || "Unknown"), status: "safe", reason: "" };
+      let status = String(ing.status || "").toLowerCase().trim();
+      if (!["safe", "caution", "avoid"].includes(status)) {
+        if (status.includes("avoid") || status.includes("harm") || status.includes("danger") || status.includes("bad")) {
+          status = "avoid";
+        } else if (status.includes("caut") || status.includes("warn") || status.includes("moderat")) {
+          status = "caution";
+        } else {
+          status = "safe";
+        }
+      }
+      return {
+        name: String(ing.name || "Ingredient"),
+        status,
+        reason: typeof ing.reason === "string" ? ing.reason : ""
+      };
+    });
+  }
+
+  // 5. Normalize additives list
+  if (Array.isArray(clone.additives)) {
+    clone.additives = clone.additives.map((add: any) => {
+      if (!add || typeof add !== "object") return { name: String(add || "Additive"), risk: "low", description: "" };
+      let risk = String(add.risk || "").toLowerCase().trim();
+      if (!["low", "medium", "high"].includes(risk)) {
+        if (risk.includes("high") || risk.includes("danger") || risk.includes("severe")) {
+          risk = "high";
+        } else if (risk.includes("med") || risk.includes("moderat") || risk.includes("caut")) {
+          risk = "medium";
+        } else {
+          risk = "low";
+        }
+      }
+      return {
+        name: String(add.name || "Additive"),
+        code: add.code ? String(add.code) : null,
+        risk,
+        description: typeof add.description === "string" ? add.description : "",
+        source: add.source ? String(add.source) : null
+      };
+    });
+  }
+
+  return clone;
+}
+
 export const RawProductFactsSchema = z.object({
   product_name: z.string().default("Food Product"),
   brand: z.string().default("Brand"),
@@ -1100,6 +1194,9 @@ JSON.stringify({
     throw new Error("Failed to parse AI response as valid JSON.");
   }
 
+  // Sanitize raw AI output to conform with strict runtime schema
+  parsedRaw = sanitizeRawProductFacts(parsedRaw);
+
   // Runtime Zod Schema Validation (strictly fail-closed)
   const validatedFacts = RawProductFactsSchema.safeParse(parsedRaw);
   if (!validatedFacts.success) {
@@ -1379,6 +1476,8 @@ JSON.stringify({
   // Construct authoritative nutrition facts strictly and purely from source nutriments
   const authoritativeNutrition = mapSourceNutriments(nutriments);
   rawParsed.nutrition_facts = authoritativeNutrition;
+
+  rawParsed = sanitizeRawProductFacts(rawParsed);
 
   const validated = RawProductFactsSchema.safeParse(rawParsed);
   if (!validated.success) {
