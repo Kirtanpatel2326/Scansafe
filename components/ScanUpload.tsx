@@ -431,48 +431,62 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         authHeader['Authorization'] = `Bearer ${session.access_token}`
       }
 
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-Idempotency-Key': idempotencyKey,
-          ...authHeader
-        },
-        body: JSON.stringify({
-          barcode: targetBarcode || null,
-          image: isDemoScan || targetBarcode ? null : targetImage,
-          preferences: selectedPrefs,
-          isDemo: isDemoScan || false,
-          filename: targetFilename,
-          productName: targetProductName,
-          idempotencyKey
-        }),
-      })
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 28000)
 
-      const data = await response.json()
+      try {
+        const response = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': idempotencyKey,
+            ...authHeader
+          },
+          body: JSON.stringify({
+            barcode: targetBarcode || null,
+            image: isDemoScan || targetBarcode ? null : targetImage,
+            preferences: selectedPrefs,
+            isDemo: isDemoScan || false,
+            filename: targetFilename,
+            productName: targetProductName,
+            idempotencyKey
+          }),
+          signal: controller.signal
+        })
 
-      if (!response.ok) {
-        if (data.error === 'LIMIT_EXCEEDED') {
-          throw new Error('LIMIT_EXCEEDED:' + data.message)
+        clearTimeout(timeoutId)
+
+        const data = await response.json()
+
+        if (!response.ok) {
+          if (data.error === 'LIMIT_EXCEEDED') {
+            throw new Error('LIMIT_EXCEEDED:' + data.message)
+          }
+          const errorText = data.message || data.error || 'Failed to analyze product. Please try again.'
+          throw new Error(errorText)
         }
-        const errorText = data.message || data.error || 'Failed to analyze product. Please try again.'
-        throw new Error(errorText)
-      }
 
-      if (data.success === false && data.errorType === 'PRODUCT_SELECTION_REQUIRED') {
-        setSelectionRequired(true)
-        return
-      }
+        if (data.success === false && data.errorType === 'PRODUCT_SELECTION_REQUIRED') {
+          setSelectionRequired(true)
+          return
+        }
 
-      if (data.success === false && data.errorType === 'BARCODE_NOT_FOUND') {
-        throw new Error(data.message)
-      }
+        if (data.success === false && data.errorType === 'BARCODE_NOT_FOUND') {
+          throw new Error(data.message)
+        }
 
-      // Refresh op key for subsequent scans
-      setActiveOpKey(generateClientOpKey('scan'))
-      onScanSuccess(data.analysis, data.scanId, targetImage || data.analysis?.image_url || undefined)
+        // Refresh op key for subsequent scans
+        setActiveOpKey(generateClientOpKey('scan'))
+        onScanSuccess(data.analysis, data.scanId, targetImage || data.analysis?.image_url || undefined)
+      } finally {
+        clearTimeout(timeoutId)
+      }
     } catch (err: any) {
-      onScanError(err.message || 'An unexpected error occurred.')
+      if (err.name === 'AbortError') {
+        onScanError('Analysis timed out. The server took too long to respond. Please try again.')
+      } else {
+        onScanError(err.message || 'An unexpected error occurred.')
+      }
     } finally {
       setLoading(false)
     }

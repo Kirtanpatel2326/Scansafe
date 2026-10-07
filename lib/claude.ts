@@ -1138,7 +1138,7 @@ JSON.stringify({
 
   let response;
   let retryCount = 0;
-  const maxRetries = 3;
+  const maxRetries = 1;
 
   while (retryCount <= maxRetries) {
     try {
@@ -1162,7 +1162,8 @@ JSON.stringify({
         },
         {
           headers: { "content-type": "application/json" },
-          httpsAgent: keepAliveAgent
+          httpsAgent: keepAliveAgent,
+          timeout: 18000
         }
       );
       break;
@@ -1170,7 +1171,7 @@ JSON.stringify({
       retryCount++;
       if (retryCount > maxRetries) throw err;
       console.warn("Gemini API attempt " + retryCount + " failed. Retrying... Error: " + err.message);
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 800));
     }
   }
 

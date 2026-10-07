@@ -339,10 +339,12 @@ export default function ScanPage() {
     setCompositing(false)
     setMealName('')
     
-    // Refresh credits and history
+    // Refresh credits and history in the background without blocking UI
     if (user) {
-      await fetchProfile(user.id)
-      await fetchRecentScans(user.id)
+      Promise.allSettled([
+        fetchProfile(user.id),
+        fetchRecentScans(user.id)
+      ]).catch(() => {})
     }
   }
 
