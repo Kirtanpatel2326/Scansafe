@@ -149,10 +149,17 @@ export default function NutritionTable({ nutrition }: NutritionTableProps) {
         </div>
       </div>
 
-      <div className="text-right py-1.5 border-b border-zinc-850">
-        <span className="text-[10px] font-bold text-zinc-400">% Daily Value*</span>
+      {/* Table Column Headers: Serving, 100g, and % DV */}
+      <div className="flex justify-between items-center py-2 border-b border-zinc-800 text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+        <span>Nutrient</span>
+        <div className="flex items-center gap-4 text-right">
+          <span className="w-16 text-right">Serving</span>
+          <span className="w-16 text-right">Per 100g</span>
+          <span className="w-12 text-right">% DV*</span>
+        </div>
       </div>
 
+      {/* Nutrient Rows */}
       <div className="flex flex-col">
         {rows.map((row, idx) => {
           const val100g = get100gVal(row.value, row.value100g)
@@ -160,26 +167,43 @@ export default function NutritionTable({ nutrition }: NutritionTableProps) {
           const isNotAvailable = row.value === 'N/A'
           
           return (
-            <div key={idx} className="border-b border-zinc-850 py-2.5">
+            <div key={idx} className="border-b border-zinc-850/80 py-2.5">
               <div className="flex justify-between items-center text-sm">
-                <div className="flex items-center gap-1">
-                  {row.indent && <span className="text-zinc-600 pl-3">↳</span>}
-                  <span className={row.indent ? "text-zinc-300 font-normal" : "font-black"}>
+                {/* Left: Nutrient Name */}
+                <div className={`flex items-center min-w-0 ${row.indent ? 'pl-3' : 'font-bold'}`}>
+                  {row.indent && <span className="text-zinc-500 mr-1.5 text-xs">↳</span>}
+                  <span className={`${row.indent ? 'text-zinc-300 font-normal' : 'text-white font-bold'} truncate`}>
                     {row.label}
                   </span>
-                  <span className="font-normal text-zinc-400 text-xs ml-1">
-                    {row.value}
+                </div>
+
+                {/* Right: Serving, Per 100g, and % Daily Value */}
+                <div className="flex items-center gap-4 text-right shrink-0">
+                  <span className="w-16 text-right text-xs font-semibold text-zinc-200">
+                    {isNotAvailable ? '—' : row.value}
+                  </span>
+                  <span className="w-16 text-right text-xs font-semibold text-emerald-400">
+                    {val100g !== 'N/A' ? val100g : '—'}
+                  </span>
+                  <span className="w-12 text-right text-xs font-bold text-white">
+                    {isNotAvailable ? '—' : (dv > 0 ? `${dv}%` : '0%')}
                   </span>
                 </div>
-                
-                <span className="font-bold">
-                  {isNotAvailable ? '—' : `${dv}%`}
-                </span>
               </div>
 
-              {!isNotAvailable && val100g !== 'N/A' && (
-                <div className="text-[10px] text-zinc-500 font-mono mt-0.5 pl-4">
-                  100g: {val100g}
+              {/* Visual Daily Value Bar */}
+              {!isNotAvailable && dv > 0 && (
+                <div className="mt-1.5 h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${
+                      row.label === 'Sugars' || row.label === 'Saturated Fat' || row.label === 'Sodium'
+                        ? dv > 25
+                          ? 'bg-rose-500'
+                          : 'bg-amber-400'
+                        : 'bg-emerald-400'
+                    }`}
+                    style={{ width: `${Math.min(dv, 100)}%` }}
+                  />
                 </div>
               )}
             </div>
