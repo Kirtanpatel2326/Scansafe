@@ -1317,9 +1317,32 @@ Return ONLY raw JSON.`;
           rawJson.description = enrichVal.data.description || rawJson.description;
           if (enrichVal.data.ingredients.length > 0) rawJson.ingredients = enrichVal.data.ingredients;
           if (enrichVal.data.additives.length > 0) rawJson.additives = enrichVal.data.additives;
-          if (enrichVal.data.allergens_declared.length > 0) rawJson.allergens_declared = enrichVal.data.allergens_declared;
-          if (enrichVal.data.nutrition_facts?.per_100g?.calories) {
-            rawJson.nutrition_facts = enrichVal.data.nutrition_facts;
+          if (enrichVal.data.nutrition_facts) {
+            const enf = enrichVal.data.nutrition_facts;
+            const eps = enf.per_serving || {};
+            const ep100 = enf.per_100g || {};
+            enf.panel_status = "extracted";
+            enf.calories = eps.calories !== undefined ? eps.calories : (enf.calories ?? ep100.calories ?? null);
+            enf.calories_100g = ep100.calories !== undefined ? ep100.calories : (enf.calories_100g ?? eps.calories ?? null);
+            enf.fat = eps.fat_g != null ? `${eps.fat_g}g` : (enf.fat ?? null);
+            enf.fat_100g = ep100.fat_g != null ? `${ep100.fat_g}g` : (enf.fat_100g ?? null);
+            enf.saturated_fat = eps.saturated_fat_g != null ? `${eps.saturated_fat_g}g` : (enf.saturated_fat ?? null);
+            enf.saturated_fat_100g = ep100.saturated_fat_g != null ? `${ep100.saturated_fat_g}g` : (enf.saturated_fat_100g ?? null);
+            enf.trans_fat = eps.trans_fat_g != null ? `${eps.trans_fat_g}g` : (enf.trans_fat ?? null);
+            enf.trans_fat_100g = ep100.trans_fat_g != null ? `${ep100.trans_fat_g}g` : (enf.trans_fat_100g ?? null);
+            enf.cholesterol = eps.cholesterol_mg != null ? `${eps.cholesterol_mg}mg` : (enf.cholesterol ?? null);
+            enf.cholesterol_100g = ep100.cholesterol_mg != null ? `${ep100.cholesterol_mg}mg` : (enf.cholesterol_100g ?? null);
+            enf.sodium = eps.sodium_mg != null ? `${eps.sodium_mg}mg` : (enf.sodium ?? null);
+            enf.sodium_100g = ep100.sodium_mg != null ? `${ep100.sodium_mg}mg` : (enf.sodium_100g ?? null);
+            enf.carbs = eps.carbs_g != null ? `${eps.carbs_g}g` : (enf.carbs ?? null);
+            enf.carbs_100g = ep100.carbs_g != null ? `${ep100.carbs_g}g` : (enf.carbs_100g ?? null);
+            enf.fiber = eps.fiber_g != null ? `${eps.fiber_g}g` : (enf.fiber ?? null);
+            enf.fiber_100g = ep100.fiber_g != null ? `${ep100.fiber_g}g` : (enf.fiber_100g ?? null);
+            enf.sugar = eps.sugar_g != null ? `${eps.sugar_g}g` : (enf.sugar ?? null);
+            enf.sugar_100g = ep100.sugar_g != null ? `${ep100.sugar_g}g` : (enf.sugar_100g ?? null);
+            enf.protein = eps.protein_g != null ? `${eps.protein_g}g` : (enf.protein ?? null);
+            enf.protein_100g = ep100.protein_g != null ? `${ep100.protein_g}g` : (enf.protein_100g ?? null);
+            rawJson.nutrition_facts = enf;
           }
           if (enrichVal.data.upf_score) rawJson.upf_score = enrichVal.data.upf_score;
           if (enrichVal.data.upf_reason) rawJson.upf_reason = enrichVal.data.upf_reason;
