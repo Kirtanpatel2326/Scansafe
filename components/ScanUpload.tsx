@@ -436,7 +436,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
       }
 
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 28000)
+      const timeoutId = setTimeout(() => controller.abort(), 55000)
 
       try {
         const response = await fetch('/api/analyze', {
