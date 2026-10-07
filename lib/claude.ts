@@ -1158,14 +1158,14 @@ JSON.stringify({
           ],
           generationConfig: {
             responseMimeType: "application/json",
-            maxOutputTokens: 2048,
-            temperature: 0.2
+            maxOutputTokens: 4096,
+            temperature: 0.1
           }
         },
         {
           headers: { "content-type": "application/json" },
           httpsAgent: keepAliveAgent,
-          timeout: 18000
+          timeout: 22000
         }
       );
       break;
@@ -1193,7 +1193,27 @@ JSON.stringify({
   try {
     parsedRaw = JSON.parse(cleanedText.trim());
   } catch (parseErr) {
-    throw new Error("Failed to parse AI response as valid JSON.");
+    // Robust fallback: try extracting the first outermost JSON object {...}
+    const firstBrace = cleanedText.indexOf("{");
+    const lastBrace = cleanedText.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        const sliced = cleanedText.slice(firstBrace, lastBrace + 1);
+        parsedRaw = JSON.parse(sliced);
+      } catch (sliceErr) {
+        // If truncated due to closing brackets, attempt recovery
+        try {
+          const recovered = sliced + "}";
+          parsedRaw = JSON.parse(recovered);
+        } catch {
+          console.error("Gemini unparseable text preview:", cleanedText.slice(0, 500));
+          throw new Error("Failed to parse AI response as valid JSON.");
+        }
+      }
+    } else {
+      console.error("Gemini unparseable text preview:", cleanedText.slice(0, 500));
+      throw new Error("Failed to parse AI response as valid JSON.");
+    }
   }
 
   // Sanitize raw AI output to conform with strict runtime schema
