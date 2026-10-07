@@ -327,7 +327,11 @@ export async function POST(request: Request) {
           // Apply user preferences dynamically on read
           const personalizedAnalysis = applyPreferences(baseAnalysis, finalPrefs);
 
-          const { data: scanData, error: scanInsertErr } = await supabase
+          let finalScanData: any = null;
+          const adminClient = createAdminClient();
+
+          // Try saving scan record: first with op_id/accounting_status, fallback to base schema columns
+          const { data: scanDataWithOp, error: scanInsertErrWithOp } = await adminClient
             .from("scans")
             .insert({
               user_id: user.id,
@@ -340,12 +344,36 @@ export async function POST(request: Request) {
               result_json: personalizedAnalysis
             })
             .select()
-            .single();
+            .maybeSingle();
 
-          let finalScanData = scanData;
-          if (scanInsertErr || !scanData) {
-            if (scanInsertErr && (scanInsertErr.code === "23505" || scanInsertErr.message?.includes("unique") || scanInsertErr.message?.includes("duplicate key"))) {
-              const { data: existingSaved } = await supabase
+          if (scanDataWithOp) {
+            finalScanData = scanDataWithOp;
+          } else {
+            const isMissingColumn = scanInsertErrWithOp?.code === "PGRST204" || 
+              scanInsertErrWithOp?.code === "42703" ||
+              scanInsertErrWithOp?.message?.includes("column");
+
+            if (isMissingColumn) {
+              const { data: baseScanData, error: baseScanErr } = await adminClient
+                .from("scans")
+                .insert({
+                  user_id: user.id,
+                  product_name: personalizedAnalysis.product_name,
+                  barcode: barcode,
+                  health_score: personalizedAnalysis.health_score,
+                  safety_level: personalizedAnalysis.safety_level,
+                  result_json: personalizedAnalysis
+                })
+                .select()
+                .maybeSingle();
+
+              if (baseScanData) {
+                finalScanData = baseScanData;
+              } else {
+                console.error("Base cached scan insert error:", baseScanErr);
+              }
+            } else if (scanInsertErrWithOp && (scanInsertErrWithOp.code === "23505" || scanInsertErrWithOp.message?.includes("unique") || scanInsertErrWithOp.message?.includes("duplicate key"))) {
+              const { data: existingSaved } = await adminClient
                 .from("scans")
                 .select("*")
                 .eq("user_id", user.id)
@@ -356,18 +384,18 @@ export async function POST(request: Request) {
                 finalScanData = existingSaved;
               }
             }
+          }
 
-            if (!finalScanData) {
-              console.error("Failed to save cached scan to database:", scanInsertErr);
-              if (activeReservationOpId) {
-                await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for cached scan", activeFencingToken);
-                activeReservationOpId = null;
-              }
-              return NextResponse.json({
-                error: "DATABASE_ERROR",
-                message: "Failed to save scan record. Your credits have not been charged."
-              }, { status: 500 });
+          if (!finalScanData) {
+            console.error("Failed to save cached scan to database:", scanInsertErrWithOp);
+            if (activeReservationOpId) {
+              await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for cached scan", activeFencingToken);
+              activeReservationOpId = null;
             }
+            return NextResponse.json({
+              error: "DATABASE_ERROR",
+              message: "Failed to save scan record. Your credits have not been charged."
+            }, { status: 500 });
           }
 
           const scanId = finalScanData.id;
@@ -381,10 +409,14 @@ export async function POST(request: Request) {
             activeFencingToken
           );
           if (finalization.success) {
-            await supabase
-              .from("scans")
-              .update({ accounting_status: "completed" })
-              .eq("id", scanId);
+            try {
+              await adminClient
+                .from("scans")
+                .update({ accounting_status: "completed" })
+                .eq("id", scanId);
+            } catch {
+              // Ignore if column doesn't exist
+            }
             activeReservationOpId = null;
 
             return NextResponse.json({
@@ -470,7 +502,10 @@ export async function POST(request: Request) {
             // Apply user preferences dynamically for current user
             const personalizedAnalysis = applyPreferences(enriched, finalPrefs);
 
-            const { data: scanData, error: offScanErr } = await supabase
+            let finalScanData: any = null;
+
+            // Try saving scan record: first with op_id/accounting_status, fallback to base schema columns
+            const { data: scanDataWithOp, error: offScanErrWithOp } = await adminClient
               .from("scans")
               .insert({
                 user_id: user.id,
@@ -483,12 +518,36 @@ export async function POST(request: Request) {
                 result_json: personalizedAnalysis
               })
               .select()
-              .single();
+              .maybeSingle();
 
-            let finalScanData = scanData;
-            if (offScanErr || !scanData) {
-              if (offScanErr && (offScanErr.code === "23505" || offScanErr.message?.includes("unique") || offScanErr.message?.includes("duplicate key"))) {
-                const { data: existingSaved } = await supabase
+            if (scanDataWithOp) {
+              finalScanData = scanDataWithOp;
+            } else {
+              const isMissingColumn = offScanErrWithOp?.code === "PGRST204" || 
+                offScanErrWithOp?.code === "42703" ||
+                offScanErrWithOp?.message?.includes("column");
+
+              if (isMissingColumn) {
+                const { data: baseScanData, error: baseScanErr } = await adminClient
+                  .from("scans")
+                  .insert({
+                    user_id: user.id,
+                    product_name: offName,
+                    barcode: barcode,
+                    health_score: personalizedAnalysis.health_score,
+                    safety_level: personalizedAnalysis.safety_level,
+                    result_json: personalizedAnalysis
+                  })
+                  .select()
+                  .maybeSingle();
+
+                if (baseScanData) {
+                  finalScanData = baseScanData;
+                } else {
+                  console.error("Base OFF scan insert error:", baseScanErr);
+                }
+              } else if (offScanErrWithOp && (offScanErrWithOp.code === "23505" || offScanErrWithOp.message?.includes("unique") || offScanErrWithOp.message?.includes("duplicate key"))) {
+                const { data: existingSaved } = await adminClient
                   .from("scans")
                   .select("*")
                   .eq("user_id", user.id)
@@ -499,18 +558,18 @@ export async function POST(request: Request) {
                   finalScanData = existingSaved;
                 }
               }
+            }
 
-              if (!finalScanData) {
-                console.error("Failed to save OFF scan to database:", offScanErr);
-                if (activeReservationOpId) {
-                  await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for OFF scan", activeFencingToken);
-                  activeReservationOpId = null;
-                }
-                return NextResponse.json({
-                  error: "DATABASE_ERROR",
-                  message: "Failed to save scan record. Your credits have not been charged."
-                }, { status: 500 });
+            if (!finalScanData) {
+              console.error("Failed to save OFF scan to database:", offScanErrWithOp);
+              if (activeReservationOpId) {
+                await releaseOperationOnFailure(user.id, activeReservationOpId, workerId, "Database save failure for OFF scan", activeFencingToken);
+                activeReservationOpId = null;
               }
+              return NextResponse.json({
+                error: "DATABASE_ERROR",
+                message: "Failed to save scan record. Your credits have not been charged."
+              }, { status: 500 });
             }
 
             const scanId = finalScanData.id;
@@ -523,10 +582,14 @@ export async function POST(request: Request) {
               activeFencingToken
             );
             if (finalization.success) {
-              await supabase
-                .from("scans")
-                .update({ accounting_status: "completed" })
-                .eq("id", scanId);
+              try {
+                await adminClient
+                  .from("scans")
+                  .update({ accounting_status: "completed" })
+                  .eq("id", scanId);
+              } catch {
+                // Ignore if column doesn't exist
+              }
               activeReservationOpId = null;
 
               return NextResponse.json({
@@ -586,9 +649,10 @@ export async function POST(request: Request) {
 
     // Save scan to user's private history
     let finalScanData: any = null;
+    const adminClient = createAdminClient();
     
     // First try insert with operation tracking columns
-    const { data: scanDataWithOp, error: scanInsertErrWithOp } = await supabase
+    const { data: scanDataWithOp, error: scanInsertErrWithOp } = await adminClient
       .from("scans")
       .insert({
         user_id: user.id,
@@ -612,7 +676,7 @@ export async function POST(request: Request) {
         scanInsertErrWithOp?.message?.includes("column");
 
       if (isMissingColumn) {
-        const { data: baseScanData, error: baseScanErr } = await supabase
+        const { data: baseScanData, error: baseScanErr } = await adminClient
           .from("scans")
           .insert({
             user_id: user.id,
@@ -631,7 +695,7 @@ export async function POST(request: Request) {
           console.error("Base scan insert failed:", baseScanErr);
         }
       } else if (scanInsertErrWithOp && (scanInsertErrWithOp.code === "23505" || scanInsertErrWithOp.message?.includes("unique") || scanInsertErrWithOp.message?.includes("duplicate key"))) {
-        const { data: existingSaved } = await supabase
+        const { data: existingSaved } = await adminClient
           .from("scans")
           .select("*")
           .eq("user_id", user.id)
@@ -661,7 +725,6 @@ export async function POST(request: Request) {
     // If barcode was provided and panel was extracted, cache neutral raw facts (strictly excluding user image & personalized preferences)
     if (barcode && baseAnalysis.panel_status === "extracted") {
       try {
-        const adminClient = createAdminClient();
         await adminClient
           .from("products_cache")
           .upsert({
@@ -691,7 +754,6 @@ export async function POST(request: Request) {
       } catch (cacheErr) {
         // Fallback to older product_cache table or ignore non-fatal cache write
         try {
-          const adminClient = createAdminClient();
           await adminClient
             .from("product_cache")
             .upsert({
@@ -714,10 +776,14 @@ export async function POST(request: Request) {
     );
     if (finalization.success) {
       if (scanId) {
-        await supabase
-          .from("scans")
-          .update({ accounting_status: "completed" })
-          .eq("id", scanId);
+        try {
+          await adminClient
+            .from("scans")
+            .update({ accounting_status: "completed" })
+            .eq("id", scanId);
+        } catch {
+          // Ignore if column doesn't exist
+        }
       }
       activeReservationOpId = null;
 
