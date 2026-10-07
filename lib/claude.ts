@@ -1157,7 +1157,9 @@ JSON.stringify({
             }
           ],
           generationConfig: {
-            responseMimeType: "application/json"
+            responseMimeType: "application/json",
+            maxOutputTokens: 2048,
+            temperature: 0.2
           }
         },
         {
