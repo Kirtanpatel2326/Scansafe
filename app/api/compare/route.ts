@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase-server";
+import { createClient, createAdminClient } from "@/lib/supabase-server";
 import { 
   reserveCredits, 
   finalizeReservation, 
@@ -54,8 +54,22 @@ export async function POST(request: Request) {
     const supabase = await createClient();
 
     // 1. Authenticate user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
+    let { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (!user) {
+      const authHeader = request.headers.get("authorization");
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.substring(7).trim();
+        if (token) {
+          const adminClient = createAdminClient();
+          const tokenUserRes = await adminClient.auth.getUser(token);
+          if (tokenUserRes.data?.user) {
+            user = tokenUserRes.data.user;
+          }
+        }
+      }
+    }
+
+    if (!user) {
       return NextResponse.json({
         error: "AUTH_REQUIRED",
         message: "Please sign in to run side-by-side food comparisons."
@@ -504,8 +518,9 @@ JSON.stringify({
 
     // Save comparison scan to history database
     let finalScanData: any = null;
+    const adminClient = createAdminClient();
 
-    const { data: scanDataWithOp, error: dbErrWithOp } = await supabase
+    const { data: scanDataWithOp, error: dbErrWithOp } = await adminClient
       .from("scans")
       .insert({
         user_id: user.id,
@@ -528,7 +543,7 @@ JSON.stringify({
         dbErrWithOp?.message?.includes("column");
 
       if (isMissingColumn) {
-        const { data: baseScanData, error: baseDbErr } = await supabase
+        const { data: baseScanData, error: baseDbErr } = await adminClient
           .from("scans")
           .insert({
             user_id: user.id,
@@ -547,7 +562,7 @@ JSON.stringify({
           console.error("Base comparison scan insert error:", baseDbErr);
         }
       } else if (dbErrWithOp && (dbErrWithOp.code === "23505" || dbErrWithOp.message?.includes("unique") || dbErrWithOp.message?.includes("duplicate key"))) {
-        const { data: existingSaved } = await supabase
+        const { data: existingSaved } = await adminClient
           .from("scans")
           .select("*")
           .eq("user_id", user.id)
@@ -585,7 +600,7 @@ JSON.stringify({
     if (finalization.success) {
       if (scanId) {
         try {
-          await supabase
+          await adminClient
             .from("scans")
             .update({ accounting_status: "completed" })
             .eq("id", scanId);
