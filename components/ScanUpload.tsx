@@ -86,11 +86,10 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
   const streamRef = useRef<MediaStream | null>(null)
 
   const loadingSteps = [
-    'Initializing ScanSafe ULTRA Intelligence...',
-    'Decoding barcode indexes / running Vision OCR...',
-    'Querying food science database & additives register...',
-    'Checking NOVA food processing & additive safety standards...',
-    'Sourcing clean alternatives from Blinkit / BigBasket...',
+    'Preparing packaging label image...',
+    'Extracting ingredients & nutritional panel via Vision OCR...',
+    'Analyzing food additive safety & NOVA processing levels...',
+    'Computing evidence-based health score...',
   ]
 
   useEffect(() => {
@@ -417,6 +416,13 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
 
     if (!targetImage && !isDemoScan && !targetBarcode) return
 
+    // Pre-flight session check: verify user session before starting upload
+    const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }))
+    if (!isDemoScan && !session?.user) {
+      onScanError('Please sign in to scan food products. You can also explore our Guest Demo without signing in.')
+      return
+    }
+
     setLoading(true)
     onScanStart()
     setSelectionRequired(false)
@@ -424,8 +430,6 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
     try {
       const idempotencyKey = activeOpKey || generateClientOpKey('scan')
       
-      // Obtain access token to ensure robust auth across all browser environments
-      const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }))
       const authHeader: Record<string, string> = {}
       if (session?.access_token) {
         authHeader['Authorization'] = `Bearer ${session.access_token}`
@@ -682,6 +686,7 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
             {/* Action Trigger Button */}
             {imagePreview && (
               <button
+                data-testid="analyze-btn"
                 onClick={() => handleScanSubmit()}
                 className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 py-4 text-base font-black tracking-wide text-black hover:bg-emerald-400 transition duration-200 shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:scale-[1.01]"
               >

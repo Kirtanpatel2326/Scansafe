@@ -685,6 +685,18 @@ export default function ScanPage() {
                     
                     {/* Contextual CTAs based on error message */}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setErrorMsg('')
+                          // Find and trigger scan submit if image is present
+                          const analyzeBtn = document.querySelector('button[data-testid="analyze-btn"]') as HTMLButtonElement
+                          if (analyzeBtn) analyzeBtn.click()
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs transition cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" /> Retry Scan
+                      </button>
                       {(errorMsg.toLowerCase().includes('sign in') || errorMsg.toLowerCase().includes('auth')) && (
                         <Link
                           href="/auth"
