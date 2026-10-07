@@ -5,7 +5,6 @@ import Link from 'next/link'
 import Header from '@/components/Header'
 import { SAMPLE_PRODUCTS, applyPreferences, IngredientAnalysis } from '@/lib/claude'
 import ResultCard from '@/components/ResultCard'
-import NutritionTable from '@/components/NutritionTable'
 import { AlertTriangle, ArrowRight, RefreshCw, CheckCircle, Info, Filter } from 'lucide-react'
 
 export default function GuestDemoPage() {
@@ -171,20 +170,6 @@ export default function GuestDemoPage() {
               onScanAnother={handleSimulateRescan}
             />
           </div>
-
-          {currentAnalysis.nutrition_facts && (
-            <div className="w-full mt-2">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500">
-                  Extracted Nutrition Panel (Sample Data)
-                </h3>
-                <span className="text-[11px] text-zinc-500 font-mono">
-                  Basis: {currentAnalysis.nutrition_facts.basis || 'per_100g'}
-                </span>
-              </div>
-              <NutritionTable nutrition={currentAnalysis.nutrition_facts} />
-            </div>
-          )}
 
           {/* ACCURACY & ESTIMATE NOTICE */}
           <div className="rounded-xl border border-zinc-850 bg-zinc-950 p-4 text-xs text-zinc-400 leading-relaxed flex items-start gap-3">

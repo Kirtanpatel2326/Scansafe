@@ -5,6 +5,8 @@ import { toPng } from "html-to-image"
 import { ExposePoster } from "./ExposePoster"
 import { DietaryAlertsCard } from "./DietaryAlertsCard"
 import { CorrectionModal } from "./CorrectionModal"
+import NutritionTable from "./NutritionTable"
+import ScanFeedback from "./ScanFeedback"
 import { DietaryAlert } from "@/lib/preferences"
 import { 
   Sparkles, 
@@ -819,6 +821,22 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
               ) : (
                 <p className="text-zinc-500 text-center py-6 text-sm">No ingredients extracted from photo.</p>
               )}
+
+              {/* Nutrition Facts Table placed directly after Label Ingredients */}
+              {nutrition_facts && Object.keys(nutrition_facts).length > 0 && (
+                <div className="w-full mt-6 pt-6 border-t border-zinc-850 flex flex-col items-center">
+                  <div className="w-full max-w-sm">
+                    <NutritionTable nutrition={nutrition_facts} />
+                  </div>
+                </div>
+              )}
+
+              {/* Rate This Scan Audit placed in the middle below Nutrition Box */}
+              <div className="w-full max-w-xl mx-auto mt-6 pt-6 border-t border-zinc-850 flex flex-col items-center">
+                <div className="w-full">
+                  <ScanFeedback scanId={scanId || null} />
+                </div>
+              </div>
             </div>
           )}
 

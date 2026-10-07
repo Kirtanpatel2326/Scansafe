@@ -6,8 +6,6 @@ import Link from 'next/link'
 import Header from '@/components/Header'
 import ScanUpload from '@/components/ScanUpload'
 import ResultCard, { IngredientAnalysisResult } from '@/components/ResultCard'
-import NutritionTable from '@/components/NutritionTable'
-import ScanFeedback from '@/components/ScanFeedback'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
 import { 
@@ -801,15 +799,6 @@ export default function ScanPage() {
                   <div className="w-full">
                     <ResultCard result={scanResult} scanId={scanId} imageUrl={scanImageUrl} onScanAnother={resetScanner} />
                   </div>
-                  <div className="w-full max-w-2xl mx-auto mt-2">
-                    <ScanFeedback scanId={scanId} />
-                  </div>
-                  {scanResult.nutrition_facts && Object.keys(scanResult.nutrition_facts).length > 0 && (
-                    <div className="w-full mt-4">
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3.5">Nutrition facts Panel</h3>
-                      <NutritionTable nutrition={scanResult.nutrition_facts} />
-                    </div>
-                  )}
                 </div>
               </div>
             )}
