@@ -191,12 +191,14 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
         canvas.width = width
         canvas.height = height
         const ctx = canvas.getContext('2d')
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height)
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.4) // Reduced quality to 0.4 for extremely fast upload
-          setImagePreview(dataUrl)
-          setSelectionRequired(false)
-        }
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height)
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.4) // Reduced quality to 0.4 for extremely fast upload
+            setImagePreview(dataUrl)
+            setSelectionRequired(false)
+            // Auto-trigger analysis immediately on upload
+            handleScanSubmit(dataUrl, false, file.name)
+          }
       }
       img.src = reader.result as string
     }
@@ -395,6 +397,8 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
       setActiveOpKey(generateClientOpKey('scan'))
       stopCamera()
       setSelectionRequired(false)
+      // Auto-trigger analysis immediately on camera capture
+      handleScanSubmit(dataUrl, false)
     } catch (err: any) {
       console.error('Camera capture error:', err)
       onScanError('Error taking photo: ' + (err.message || 'Unknown error'))
