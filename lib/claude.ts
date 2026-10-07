@@ -1297,7 +1297,7 @@ Return ONLY raw JSON.`;
         {
           headers: { "content-type": "application/json" },
           httpsAgent: keepAliveAgent,
-          timeout: 7000
+          timeout: 4500
         }
       );
 
