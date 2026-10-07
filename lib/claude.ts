@@ -1197,8 +1197,8 @@ JSON.stringify({
     const firstBrace = cleanedText.indexOf("{");
     const lastBrace = cleanedText.lastIndexOf("}");
     if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const sliced = cleanedText.slice(firstBrace, lastBrace + 1);
       try {
-        const sliced = cleanedText.slice(firstBrace, lastBrace + 1);
         parsedRaw = JSON.parse(sliced);
       } catch (sliceErr) {
         // If truncated due to closing brackets, attempt recovery
