@@ -416,9 +416,21 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
 
     if (!targetImage && !isDemoScan && !targetBarcode) return
 
-    // Pre-flight session check: verify user session before starting upload
-    const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }))
-    if (!isDemoScan && !session?.user) {
+    // Pre-flight session check: verify and refresh user session before starting upload
+    let activeSession = null
+    try {
+      const { data: getRes } = await supabase.auth.getSession()
+      activeSession = getRes.session
+      // If no active session or close to expiration, attempt an immediate refresh
+      if (!activeSession?.user) {
+        const { data: refreshRes } = await supabase.auth.refreshSession()
+        activeSession = refreshRes.session || activeSession
+      }
+    } catch {
+      activeSession = null
+    }
+
+    if (!isDemoScan && !activeSession?.user) {
       onScanError('Please sign in to scan food products. You can also explore our Guest Demo without signing in.')
       return
     }
@@ -431,8 +443,8 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
       const idempotencyKey = activeOpKey || generateClientOpKey('scan')
       
       const authHeader: Record<string, string> = {}
-      if (session?.access_token) {
-        authHeader['Authorization'] = `Bearer ${session.access_token}`
+      if (activeSession?.access_token) {
+        authHeader['Authorization'] = `Bearer ${activeSession.access_token}`
       }
 
       const controller = new AbortController()

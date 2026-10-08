@@ -173,15 +173,27 @@ export default function ScanPage() {
     // 1. Check active session (retrieves cached session and handles background refreshes)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!isMounted) return
-      const currentUser = session?.user ?? null
-      setUser(currentUser)
+      let activeUser = session?.user ?? null
 
-      if (currentUser) {
+      // If no cached session, attempt a fast refresh to catch valid refresh cookies/tokens
+      if (!activeUser) {
+        try {
+          const { data: refreshRes } = await supabase.auth.refreshSession()
+          if (refreshRes?.session?.user) {
+            session = refreshRes.session
+            activeUser = refreshRes.session.user
+          }
+        } catch {}
+      }
+
+      setUser(activeUser)
+
+      if (activeUser) {
         // Fast path: parallelize profile ensure & profile fetch
         try {
           await Promise.allSettled([
             fetch('/api/profile/ensure', { method: 'POST' }),
-            fetchProfile(currentUser.id)
+            fetchProfile(activeUser.id)
           ])
         } catch (e) {
           console.warn('Initial profile load warning:', e)
@@ -192,10 +204,10 @@ export default function ScanPage() {
 
         // Asynchronously hydrate secondary tabs without blocking scanner
         Promise.allSettled([
-          fetchRecentScans(currentUser.id),
-          fetchFamilyMembers(currentUser.id),
-          fetchComposerHistory(currentUser.id),
-          fetchBlacklist(currentUser.id)
+          fetchRecentScans(activeUser.id),
+          fetchFamilyMembers(activeUser.id),
+          fetchComposerHistory(activeUser.id),
+          fetchBlacklist(activeUser.id)
         ]).catch(() => {})
       } else {
         if (isMounted) setLoadingSession(false)
