@@ -632,11 +632,29 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
                   </div>
                 </div>
               ) : imagePreview ? (
-                <div className="relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 aspect-[4/3] max-h-[380px] flex items-center justify-center">
-                  <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
-                  <div className="absolute top-3 right-3 flex gap-2">
-                    <button onClick={clearSelection} className="flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-zinc-300 hover:text-white hover:bg-zinc-900 border border-zinc-800 backdrop-blur-sm transition"><X className="w-5 h-5" /></button>
+                <div className="flex flex-col gap-3">
+                  <div className="relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 aspect-[4/3] max-h-[380px] flex items-center justify-center">
+                    <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
+                    <div className="absolute top-3 right-3 flex gap-2">
+                      <button 
+                        type="button"
+                        onClick={clearSelection} 
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-zinc-300 hover:text-white hover:bg-zinc-900 border border-zinc-800 backdrop-blur-sm transition cursor-pointer"
+                        title="Remove image"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
+                  <button
+                    data-testid="analyze-btn"
+                    type="button"
+                    onClick={() => handleScanSubmit()}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 py-4 text-base font-black tracking-wide text-black hover:bg-emerald-400 transition duration-200 shadow-[0_0_25px_rgba(16,185,129,0.35)] hover:scale-[1.01] cursor-pointer"
+                  >
+                    <Sparkles className="w-5 h-5" />
+                    ANALYZE INGREDIENTS NOW
+                  </button>
                 </div>
               ) : (
                 <div
