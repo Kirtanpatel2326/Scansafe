@@ -21,7 +21,7 @@ export async function POST(request:Request){
     if(hasDatabase){db=await createClient();const {data}=await db.auth.getUser();userId=data.user?.id}
     // Persistence never silently happens for anonymous requests.
     const result=await executeGuardianAgent(requestData,{
-      ...(requestData.allowCatalogSearch&&process.env.GUARDIAN_CATALOG_API_URL?{catalogSearch:searchApprovedCatalog}:{}),
+      ...((requestData.allowCatalogSearch || requestData.allowPartnerCatalog)&&process.env.GUARDIAN_CATALOG_API_URL?{catalogSearch:searchApprovedCatalog}:{}),
       ...(db&&userId?{saveShortlist:async(ids,runId)=>{const {error}=await db!.from('guardian_saved_tasks').insert({user_id:userId,run_id:runId,goal:requestData.goal,shortlist:ids});if(error)throw error}}:{}),
     })
     return NextResponse.json(result,{headers:{'Cache-Control':'no-store'}})

@@ -16,7 +16,8 @@
     "test:flows": "npx tsx scripts/verify-submission-flows.ts",
     "test:postgres": "npx tsx scripts/test-postgres-integration.ts",
     "test:guardian": "node scripts/test-guardian-prototype.cjs",
-    "test:guardian:agent": "node scripts/test-guardian-agent.cjs"
+    "test:guardian:agent": "node scripts/test-guardian-agent.cjs",
+    "test:guardian:benchmarks": "npx tsx scripts/test-guardian-benchmarks.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

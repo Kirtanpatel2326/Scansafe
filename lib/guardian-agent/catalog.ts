@@ -23,6 +23,12 @@ export async function searchApprovedCatalog(query:string,currency:string):Promis
     while(true){const {done,value}=await reader.read();if(done)break;count+=value.byteLength;if(count>100000){await reader.cancel();throw new Error('Catalogue response too large')}chunks.push(value)}
     const buffer=new Uint8Array(count);let offset=0;for(const c of chunks){buffer.set(c,offset);offset+=c.length}
     const json=JSON.parse(new TextDecoder().decode(buffer)) as unknown
-    return records.parse(z.object({products:records}).parse(json).products)
+    const parsed = records.parse(z.object({products:records}).parse(json).products)
+    return parsed.map(item => ({
+      ...item,
+      sourceType: 'PARTNER_MANUFACTURER_FEED' as const,
+      currency: (currency as any) || 'INR',
+      retrievedAt: new Date().toISOString()
+    }))
   }finally{clearTimeout(timer)}
 }
