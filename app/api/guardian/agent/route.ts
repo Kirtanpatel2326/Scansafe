@@ -119,14 +119,45 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err: any) {
-    console.error('[Guardian Agent API Error]', { clientKey, error: err?.message, stack: err?.stack })
-    const isSafeUserMessage = err instanceof Error &&
-      !err.message.includes('Database') &&
-      !err.message.includes('Postgres') &&
-      !err.message.includes('password') &&
-      !err.message.includes('key')
+    const correlationId = crypto.randomUUID()
+    // Secure internal audit log with correlation ID (never exposed to client)
+    console.error(`[Guardian Agent API Error] [correlationId: ${correlationId}]`, {
+      correlationId,
+      clientKey,
+      errorName: err?.name,
+      errorMessage: err?.message,
+      stack: err?.stack
+    })
+
+    // Explicit error classification:
+    if (err instanceof SyntaxError) {
+      return NextResponse.json(
+        { error: 'Invalid JSON payload in request body', code: 'BAD_REQUEST', correlationId },
+        { status: 400 }
+      )
+    }
+
+    if (err?.name === 'AbortError' || err?.message?.includes('timeout')) {
+      return NextResponse.json(
+        { error: 'Execution budget exceeded. Agent request timed out.', code: 'EXECUTION_TIMEOUT', correlationId },
+        { status: 504 }
+      )
+    }
+
+    if (typeof err?.message === 'string' && err.message.startsWith('Invalid agent request')) {
+      return NextResponse.json(
+        { error: 'Invalid agent request parameters', code: 'INVALID_PARAMETERS', correlationId },
+        { status: 400 }
+      )
+    }
+
+    // Default safe fallback: Never expose unexpected exceptions, DB errors, stack traces, or provider internals
     return NextResponse.json(
-      { error: isSafeUserMessage ? err.message : 'Unable to complete agent execution. An internal error occurred.' },
+      {
+        error: 'Unable to complete agent execution. An internal error occurred.',
+        code: 'INTERNAL_ERROR',
+        correlationId
+      },
       { status: 500 }
     )
   } finally {

@@ -50,7 +50,7 @@ export const GeminiPlanOutputSchema = z.object({
  */
 export async function createAutonomousExecutionPlan(
   input: PlannerInput,
-  timeoutMs: number = 3500
+  timeoutMs: number = 7000
 ): Promise<StructuredPlan> {
   const availableTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'> = []
   if (input.allowInternalCatalog) availableTools.push('internal_catalog')
@@ -77,7 +77,7 @@ Respond strictly in valid JSON matching this schema:
   "searchQueries": ["targeted query 1", "fallback query 2"]
 }`
 
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
       const res = await fetch(endpoint, {
         method: 'POST',
         signal: controller.signal,
@@ -86,7 +86,7 @@ Respond strictly in valid JSON matching this schema:
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 300,
+            maxOutputTokens: 1000,
             responseMimeType: 'application/json'
           }
         })
@@ -100,7 +100,8 @@ Respond strictly in valid JSON matching this schema:
           const json = JSON.parse(text)
           const rawContent = json.candidates?.[0]?.content?.parts?.[0]?.text
           if (rawContent) {
-            const rawParsed = JSON.parse(rawContent)
+            const cleaned = rawContent.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
+            const rawParsed = JSON.parse(cleaned)
             const validation = GeminiPlanOutputSchema.safeParse(rawParsed)
             if (validation.success) {
               const plan = validation.data
