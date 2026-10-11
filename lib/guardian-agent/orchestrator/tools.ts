@@ -84,13 +84,16 @@ export async function searchPublicOpenFoodFacts(
   currency: 'INR' | 'AED' | 'USD' = 'INR'
 ): Promise<ProductEvidence[]> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 4000)
+  const timer = setTimeout(() => controller.abort(), 8000)
 
   try {
     const endpoint = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5`
     const res = await fetch(endpoint, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'ScanSafe-Guardian/2.0 (audit@scansafe.co.in)' }
+      headers: {
+        'User-Agent': 'ScanSafe-Guardian/2.0 (audit@scansafe.co.in)',
+        'Accept': 'application/json'
+      }
     })
 
     if (!res.ok) return []
