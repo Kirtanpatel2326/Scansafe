@@ -38,8 +38,9 @@ export type Step = {
   durationMs: number
 }
 export type ToolContext = {
-  catalogSearch?: (query: string, currency: string) => Promise<ProductEvidence[]>
+  catalogSearch?: (query: string, currency: string, signal?: AbortSignal) => Promise<ProductEvidence[]>
   saveShortlist?: (ids: string[], runId: string) => Promise<void>
+  signal?: AbortSignal
 }
 
 /**
@@ -87,7 +88,8 @@ export async function executeGuardianAgent(request: AgentRequest, tools: ToolCon
 
     const res = await runGuardianAutonomousAgent(orchestratorReq, {
       externalCatalogSearch: tools.catalogSearch,
-      saveShortlist: tools.saveShortlist ? async (ids, runId) => tools.saveShortlist!(ids, runId) : undefined
+      saveShortlist: tools.saveShortlist ? async (ids, runId) => tools.saveShortlist!(ids, runId) : undefined,
+      signal: tools.signal
     })
 
     return {

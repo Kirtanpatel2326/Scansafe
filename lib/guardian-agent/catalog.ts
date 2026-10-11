@@ -4,14 +4,19 @@ import type { ProductEvidence } from './engine'
 const records=z.array(GuardianRequestSchema.shape.products.element).max(20)
 // Integration contract: trusted partner server should expose GET /search?q=...&currency=...
 // with JSON {products:[...]} using the explicit ProductEvidence schema.
-export async function searchApprovedCatalog(query:string,currency:string):Promise<ProductEvidence[]>{
+export async function searchApprovedCatalog(query:string,currency:string,signal?:AbortSignal):Promise<ProductEvidence[]>{
+  if (signal?.aborted) throw new Error('Catalog lookup aborted')
   const base=process.env.GUARDIAN_CATALOG_API_URL
   if(!base)throw new Error('Catalog connector not configured')
   const u=new URL(base)
   if(u.protocol!=='https:')throw new Error('Catalog API must use HTTPS')
   const endpoint=new URL(u.toString())
   endpoint.searchParams.set('q',query.slice(0,200));endpoint.searchParams.set('currency',currency)
-  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),5000)
+  const controller=new AbortController()
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  const timer=setTimeout(()=>controller.abort(),5000)
   try{
     const res=await fetch(endpoint.toString(),{method:'GET',signal:controller.signal,headers:{...(process.env.GUARDIAN_CATALOG_API_KEY?{'Authorization':`Bearer ${process.env.GUARDIAN_CATALOG_API_KEY}`}:{})},cache:'no-store'})
     if(!res.ok)throw new Error(`Catalogue returned HTTP ${res.status}`)

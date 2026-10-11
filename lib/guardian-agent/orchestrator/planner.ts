@@ -50,7 +50,8 @@ export const GeminiPlanOutputSchema = z.object({
  */
 export async function createAutonomousExecutionPlan(
   input: PlannerInput,
-  timeoutMs: number = 7000
+  timeoutMs: number = 7000,
+  parentSignal?: AbortSignal
 ): Promise<StructuredPlan> {
   const availableTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'> = []
   if (input.allowInternalCatalog) availableTools.push('internal_catalog')
@@ -61,9 +62,19 @@ export async function createAutonomousExecutionPlan(
   const hasGemini = Boolean(process.env.GEMINI_API_KEY)
 
   if (hasGemini && availableTools.length > 0) {
+    if (parentSignal?.aborted) {
+      return makeDeterministicPlan(input, availableTools)
+    }
+
+    const controller = new AbortController()
+    let timer: NodeJS.Timeout | undefined
+
+    if (parentSignal) {
+      parentSignal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+
     try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      timer = setTimeout(() => controller.abort(), timeoutMs)
 
       const prompt = `You are the food safety research planner for ScanSafe Guardian AI.
 Given this research goal: "${input.goal}"
@@ -74,8 +85,9 @@ Respond strictly in valid JSON matching this schema:
 {
   "reasoning": "Concise 1 sentence explanation of query plan",
   "selectedTools": ["${availableTools.join('", "')}"],
-  "searchQueries": ["targeted query 1", "fallback query 2"]
-}`
+  "searchQueries": ["core product keyword (1-3 words, e.g. energy bar)", "broader category fallback"]
+}
+IMPORTANT: searchQueries MUST be 1-3 simple words naming the core food item (e.g. "energy bar", "seed butter", "dipping sauce"). Do NOT include allergen or dietary adjectives like gluten-free or vegan in searchQueries because dietary safety is checked deterministically afterwards.`
 
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
       const res = await fetch(endpoint, {
@@ -86,12 +98,11 @@ Respond strictly in valid JSON matching this schema:
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 1000,
+            maxOutputTokens: 2000,
             responseMimeType: 'application/json'
           }
         })
       })
-      clearTimeout(timer)
 
       if (res.ok) {
         // Enforce max output payload limit (50 KB)
@@ -139,11 +150,34 @@ Respond strictly in valid JSON matching this schema:
       }
     } catch (err: any) {
       console.warn('[Guardian Planner] LLM planner request aborted or failed; falling back to state machine:', err?.message)
+    } finally {
+      if (timer) clearTimeout(timer)
     }
   }
 
-  // Bounded Deterministic Rule Planner (Honest, auditable fallback)
-  const defaultQuery = input.goal.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().slice(0, 100)
+  return makeDeterministicPlan(input, availableTools)
+}
+
+function cleanProductSearchQuery(goal: string, constraints: string[] = []): string {
+  let q = goal
+    .replace(/^(find|search for|search|look for|check|get|buy|locate)\s+(me\s+)?(a\s+|an\s+|some\s+)?/i, '')
+    .trim()
+  for (const c of constraints) {
+    q = q.replace(new RegExp(`\\b${c}[-\\s]?free\\b`, 'gi'), '')
+  }
+  q = q
+    .replace(/\b(low[- ]sugar|vegan|organic|healthy|allergy[- ]safe|safe|and|with|without)\b/gi, ' ')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return q.length >= 3 ? q : goal.replace(/[^a-zA-Z0-9\s]/g, ' ').trim().slice(0, 100)
+}
+
+function makeDeterministicPlan(
+  input: PlannerInput,
+  availableTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'>
+): StructuredPlan {
+  const defaultQuery = cleanProductSearchQuery(input.goal, input.constraints)
   return {
     mode: 'BOUNDED_STATE_MACHINE_PLANNER',
     reasoning: `Deterministic state-machine plan: prioritize available tools [${availableTools.join(', ') || 'user_evidence_only'}].`,
@@ -160,30 +194,71 @@ Respond strictly in valid JSON matching this schema:
   }
 }
 
+export type ReplanReason =
+  | 'EMPTY_RESULTS'
+  | 'TOOL_FAILURE'
+  | 'INSUFFICIENT_CANDIDATES'
+  | 'CONFLICTING_EVIDENCE'
+
+export interface ReplanOptions {
+  reason: ReplanReason
+  exhaustedTool: string
+  remainingTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'>
+  fallbackQuery?: string
+  currentCandidatesCount?: number
+  targetCandidateCount?: number
+  errorDetails?: string
+}
+
 /**
- * Dynamic replanning: triggered when initial tool returns 0 candidates or fails.
- * Genuinely updates tool selection, active search queries, and notes.
+ * Dynamic replanning: triggered when initial tool returns 0 candidates, encounters errors,
+ * discovers conflicting evidence, or produces insufficient qualifying candidates.
  */
 export function dynamicReplanAfterToolExecution(
   currentPlan: StructuredPlan,
-  exhaustedTool: string,
-  remainingTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'>,
-  fallbackQuery?: string
+  optionsOrTool: ReplanOptions | string,
+  legacyRemaining?: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'>,
+  legacyQuery?: string
 ): StructuredPlan {
-  const replannedTools = remainingTools.filter(t => t !== exhaustedTool)
-  const updatedQueries = fallbackQuery && fallbackQuery.trim().length >= 2
-    ? [fallbackQuery.trim(), ...currentPlan.searchQueries.filter(q => q !== fallbackQuery.trim())]
+  const opts: ReplanOptions = typeof optionsOrTool === 'string'
+    ? {
+        reason: 'EMPTY_RESULTS',
+        exhaustedTool: optionsOrTool,
+        remainingTools: legacyRemaining || [],
+        fallbackQuery: legacyQuery
+      }
+    : optionsOrTool
+
+  const replannedTools = opts.remainingTools.filter(t => t !== opts.exhaustedTool)
+  const updatedQueries = opts.fallbackQuery && opts.fallbackQuery.trim().length >= 2
+    ? [opts.fallbackQuery.trim(), ...currentPlan.searchQueries.filter(q => q !== opts.fallbackQuery!.trim())]
     : currentPlan.searchQueries
+
+  let explanation = ''
+  switch (opts.reason) {
+    case 'EMPTY_RESULTS':
+      explanation = `Tool "${opts.exhaustedTool}" yielded 0 candidates; dynamically shifted execution priority to [${replannedTools.join(', ') || 'user evidence'}]. Query updated to: "${updatedQueries[0]}".`
+      break
+    case 'TOOL_FAILURE':
+      explanation = `Tool "${opts.exhaustedTool}" encountered an error (${opts.errorDetails || 'unreachable'}). Safely recovered by routing to next permitted tool: [${replannedTools.join(', ') || 'user evidence only'}].`
+      break
+    case 'INSUFFICIENT_CANDIDATES':
+      explanation = `Discovered ${opts.currentCandidatesCount || 0} candidate(s), below target quota of ${opts.targetCandidateCount || 5}. Replanned to backfill shortlist from [${replannedTools.join(', ')}].`
+      break
+    case 'CONFLICTING_EVIDENCE':
+      explanation = `Conflicting cross-source allergen claims detected. Replanned to seek corroborating evidence from remaining permitted tools: [${replannedTools.join(', ')}].`
+      break
+  }
 
   return {
     ...currentPlan,
     replanCount: currentPlan.replanCount + 1,
-    replanNotes: `Tool "${exhaustedTool}" yielded 0 candidates; dynamically shifted execution priority to [${replannedTools.join(', ') || 'user evidence'}]. Query updated to: "${updatedQueries[0]}".`,
+    replanNotes: explanation,
     selectedTools: replannedTools,
     searchQueries: updatedQueries,
     stages: [
       ...currentPlan.stages,
-      `Dynamic Replan: Tool "${exhaustedTool}" yielded 0 candidates. Transitioning research to remaining permitted tools: [${replannedTools.join(', ')}]. Active search query updated to: "${updatedQueries[0]}".`
+      `Dynamic Replan #${currentPlan.replanCount + 1} (${opts.reason}): ${explanation}`
     ]
   }
 }

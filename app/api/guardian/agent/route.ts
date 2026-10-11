@@ -95,6 +95,7 @@ export async function POST(request: Request) {
 
     // Execute with affirmative persistence gate and reliable error handling
     const result = await executeGuardianAgent(requestData, {
+      signal: request.signal,
       ...((requestData.allowCatalogSearch || requestData.allowPartnerCatalog) &&
       process.env.GUARDIAN_CATALOG_API_URL
         ? { catalogSearch: searchApprovedCatalog }

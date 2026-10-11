@@ -9,8 +9,10 @@ import { createClient } from '@/lib/supabase-server'
 
 export async function searchInternalReviewedCatalog(
   query: string,
-  currency: 'INR' | 'AED' | 'USD' = 'INR'
+  currency: 'INR' | 'AED' | 'USD' = 'INR',
+  signal?: AbortSignal
 ): Promise<ProductEvidence[]> {
+  if (signal?.aborted) return []
   try {
     let supabase: any
     try {
@@ -81,24 +83,54 @@ export async function searchInternalReviewedCatalog(
 
 export async function searchPublicOpenFoodFacts(
   query: string,
-  currency: 'INR' | 'AED' | 'USD' = 'INR'
+  currency: 'INR' | 'AED' | 'USD' = 'INR',
+  signal?: AbortSignal
 ): Promise<ProductEvidence[]> {
+  if (signal?.aborted) return []
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8000)
+  let timer: NodeJS.Timeout | undefined
+
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
 
   try {
-    const endpoint = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5`
-    const res = await fetch(endpoint, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'ScanSafe-Guardian/2.0 (audit@scansafe.co.in)',
-        'Accept': 'application/json'
+    timer = setTimeout(() => controller.abort(), 8000)
+    const fetchOff = async (q: string) => {
+      const hosts = ['world.openfoodfacts.org', 'us.openfoodfacts.org']
+      for (const host of hosts) {
+        if (controller.signal.aborted) break
+        try {
+          const endpoint = `https://${host}/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=5`
+          const res = await fetch(endpoint, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'ScanSafe-Guardian/2.0 (audit@scansafe.co.in)',
+              'Accept': 'application/json'
+            }
+          })
+          if (!res.ok) continue
+          const text = await res.text()
+          if (!text.trim().startsWith('{')) continue
+          const json = JSON.parse(text)
+          if (Array.isArray(json.products) && json.products.length > 0) {
+            return json.products
+          }
+        } catch {
+          // Try next host
+        }
       }
-    })
+      return []
+    }
 
-    if (!res.ok) return []
-    const json = await res.json()
-    const products = json.products || []
+    let products = await fetchOff(query)
+    if (products.length === 0) {
+      const words = query.trim().split(/\s+/)
+      if (words.length > 2) {
+        const fallbackQuery = words.slice(-2).join(' ')
+        products = await fetchOff(fallbackQuery)
+      }
+    }
 
     return products.slice(0, 5).map((p: any) => {
       const name = p.product_name || p.product_name_en || 'Packaged Product'

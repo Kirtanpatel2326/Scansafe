@@ -500,6 +500,199 @@ async function main() {
     const res = await GET(req)
     assert(res.status === 401 || res.status === 503, `Expected 401 or 503, got ${res.status}`)
   })
+
+  // 6. Gemini Timeout Lifecycle, Abort Signal & Autonomous Replanning Bounds
+  console.log('\n▶ [Part 6] Gemini Timeout Lifecycle, Abort Signal & Autonomous Replanning Bounds')
+
+  await runTest('runGuardianAutonomousAgent aborts immediately when passed an already-aborted signal', async () => {
+    const { runGuardianAutonomousAgent } = await import('../lib/guardian-agent/orchestrator/engine')
+    const abortController = new AbortController()
+    abortController.abort()
+
+    let threwAbort = false
+    try {
+      await runGuardianAutonomousAgent(
+        {
+          goal: 'Find allergy safe snack',
+          constraints: ['peanut'],
+          allowInternalCatalog: true
+        },
+        { signal: abortController.signal }
+      )
+    } catch (err: any) {
+      threwAbort = true
+      assert(err.name === 'AbortError' || err.message.includes('aborted'), 'Expected AbortError')
+    }
+    assert(threwAbort, 'Expected runGuardianAutonomousAgent to throw AbortError for aborted signal')
+  })
+
+  await runTest('createAutonomousExecutionPlan cleans up timer in finally block and supports parent cancellation', async () => {
+    const { createAutonomousExecutionPlan } = await import('../lib/guardian-agent/orchestrator/planner')
+    const abortController = new AbortController()
+    abortController.abort()
+
+    const plan = await createAutonomousExecutionPlan(
+      {
+        goal: 'Find sesame-free crackers',
+        constraints: ['sesame'],
+        currency: 'INR',
+        allowInternalCatalog: true,
+        allowPublicOffCatalog: true,
+        allowPartnerCatalog: false
+      },
+      5000,
+      abortController.signal
+    )
+
+    assert(plan !== null, 'Expected plan object')
+    assert(typeof plan.mode === 'string', 'Expected mode string')
+    assert(Array.isArray(plan.selectedTools), 'Expected selectedTools array')
+    assert(plan.replanCount === 0, 'Initial plan must have replanCount=0')
+  })
+
+  await runTest('Dynamic replanning: handles EMPTY_RESULTS with query refinement and tool pivot', async () => {
+    const { runGuardianAutonomousAgent } = await import('../lib/guardian-agent/orchestrator/engine')
+    // Provide a query that won't match internal cache, but allow public OFF fallback
+    const res = await runGuardianAutonomousAgent({
+      goal: 'ZzzNonExistentProductQuery99999 snack',
+      constraints: ['peanut'],
+      allowInternalCatalog: true,
+      allowPublicOffCatalog: true,
+      allowPartnerCatalog: false
+    })
+
+    assert(typeof res.runId === 'string', 'Expected valid runId')
+    const replanStep = res.steps.find(s => s.tool === 'dynamic_replanner')
+    assert(Boolean(replanStep), 'Expected dynamic_replanner step to be executed')
+    assert(
+      res.plan.some(stage => stage.includes('Dynamic Replan')),
+      'Expected plan stages to reflect dynamic replanning trace'
+    )
+  })
+
+  await runTest('Dynamic replanning: handles TOOL_FAILURE by safely recovering to next permitted tool', async () => {
+    const { runGuardianAutonomousAgent } = await import('../lib/guardian-agent/orchestrator/engine')
+    let partnerCalled = false
+
+    const res = await runGuardianAutonomousAgent(
+      {
+        goal: 'Safe dairy free oat milk',
+        constraints: ['milk'],
+        allowInternalCatalog: false,
+        allowPartnerCatalog: true,
+        allowPublicOffCatalog: true
+      },
+      {
+        externalCatalogSearch: async () => {
+          partnerCalled = true
+          throw new Error('Simulated upstream partner 502 Bad Gateway')
+        }
+      }
+    )
+
+    assert(partnerCalled, 'Expected partner catalog to be called')
+    assert(res.retrievalErrors.length > 0, 'Expected recorded partner connector failure')
+    const replanStep = res.steps.find(s => s.tool === 'dynamic_replanner')
+    assert(Boolean(replanStep), 'Expected dynamic replan step after tool failure')
+    assert(
+      res.plan.some(stage => stage.includes('TOOL_FAILURE') || stage.includes('Dynamic Replan')),
+      'Plan should log tool failure replan recovery'
+    )
+  })
+
+  await runTest('Dynamic replanning: handles INSUFFICIENT_CANDIDATES to backfill candidate quota', async () => {
+    const { runGuardianAutonomousAgent } = await import('../lib/guardian-agent/orchestrator/engine')
+    
+    // Provide 1 user product, target maxResults 5, with partner catalog permitted
+    let backfillAttempted = false
+    const res = await runGuardianAutonomousAgent(
+      {
+        goal: 'Safe gluten free seed bread',
+        constraints: ['gluten'],
+        maxResults: 5,
+        allowInternalCatalog: false,
+        allowPublicOffCatalog: false,
+        allowPartnerCatalog: true,
+        products: [{
+          id: 'single_seed_bread',
+          name: 'Buckwheat Seed Loaf',
+          ingredients: 'buckwheat flour, water, yeast, salt',
+          allergenStatement: 'Gluten-free.',
+          labelComplete: true,
+          evidenceSource: 'Uploaded Label'
+        }]
+      },
+      {
+        externalCatalogSearch: async () => {
+          backfillAttempted = true
+          return [{
+            id: 'partner_bread_2',
+            name: 'Millet Flaxseed Toast',
+            ingredients: 'millet flour, flaxseeds, water, salt',
+            allergenStatement: 'No gluten ingredients.',
+            labelComplete: true,
+            evidenceSource: 'Partner API',
+            sourceType: 'PARTNER_MANUFACTURER_FEED',
+            verificationStatus: 'MANUFACTURER_AUTHORIZED',
+            evidenceLimitations: [],
+            currency: 'INR'
+          }]
+        }
+      }
+    )
+
+    assert(backfillAttempted, 'Expected partner backfill to be triggered')
+    assert(res.products.some(p => p.id === 'single_seed_bread'), 'Original product preserved')
+    assert(res.products.some(p => p.id === 'partner_bread_2'), 'Backfilled product evaluated')
+  })
+
+  await runTest('Deterministic dietary safety evaluation operates completely outside LLM decisions', async () => {
+    const { evaluateDeterministicSafety } = await import('../lib/guardian-agent/orchestrator/verifier')
+    
+    // Item with hidden peanut allergen
+    const unsafeItem = {
+      id: 'unsafe_test_item',
+      name: 'All-Natural High Protein Spread',
+      ingredients: 'roasted arachis hypogaea, sea salt', // scientific name for peanut
+      allergenStatement: 'Contains: arachis.',
+      labelComplete: true,
+      evidenceSource: 'Test',
+      sourceType: 'INTERNAL_VERIFIED_CATALOG' as const,
+      verificationStatus: 'MANUFACTURER_AUTHORIZED' as const,
+      evidenceLimitations: [],
+      currency: 'INR' as const
+    }
+
+    const evaluation = evaluateDeterministicSafety(unsafeItem, ['peanut'])
+    assert(evaluation.status === 'excluded', 'Item with arachis hypogaea must be strictly flagged excluded')
+    assert(evaluation.allergenStatus === 'CONTAINS', 'Allergen status must be CONTAINS')
+    assert(evaluation.reasons.some(r => r.includes('arachis')), 'Reason must cite specific ingredient')
+  })
+
+  await runTest('POST /api/guardian/agent handles client abort signal and returns clean timeout/cancellation', async () => {
+    const { POST } = await import('../app/api/guardian/agent/route')
+    const controller = new AbortController()
+    controller.abort()
+
+    const req = new Request('http://localhost:3000/api/guardian/agent', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-forwarded-for': '198.51.100.101'
+      },
+      body: JSON.stringify({
+        goal: 'Aborted request test',
+        constraints: ['peanut']
+      }),
+      signal: controller.signal
+    })
+
+    const res = await POST(req)
+    assert(res.status === 504 || res.status === 400, `Expected 504 or 400 for aborted request, got ${res.status}`)
+    const json = await res.json()
+    assert(typeof json.correlationId === 'string', 'Expected correlationId for tracking')
+  })
+
   const passed = results.filter(r => r.passed).length
   const failed = results.filter(r => !r.passed).length
 

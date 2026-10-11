@@ -13,8 +13,9 @@ import { createAutonomousExecutionPlan, dynamicReplanAfterToolExecution } from '
 export interface AgentContext {
   userId?: string
   db?: any
-  externalCatalogSearch?: (query: string, currency: string) => Promise<ProductEvidence[]>
+  externalCatalogSearch?: (query: string, currency: string, signal?: AbortSignal) => Promise<ProductEvidence[]>
   saveShortlist?: (ids: string[], runId: string, goal: string) => Promise<void>
+  signal?: AbortSignal
 }
 
 const EXECUTION_TIMEOUT_MS = 25000 // 25s safe hard-stop budget
@@ -115,51 +116,74 @@ export async function runGuardianAutonomousAgent(
     approvedActions: Array.isArray(rawRequest.approvedActions) ? rawRequest.approvedActions : []
   }
 
-  const runId = crypto.randomUUID()
-  const steps: AgentStep[] = []
-  let stepCounter = 0
-  const retrievalErrors: string[] = []
-  const uncertainties: string[] = []
-
-  const logStep = (
-    stage: AgentStep['stage'],
-    tool: string,
-    status: AgentStep['status'],
-    description: string,
-    startMs: number,
-    error?: string | null
-  ) => {
-    steps.push({
-      id: ++stepCounter,
-      stage,
-      tool,
-      status,
-      description,
-      at: new Date().toISOString(),
-      durationMs: Date.now() - startMs,
-      error: error || null
-    })
+  // Check client cancellation
+  if (context.signal?.aborted) {
+    const err = new Error('Execution aborted by client signal')
+    err.name = 'AbortError'
+    throw err
   }
 
-  // Stage 1: Autonomous Planning (LLM or Bounded Deterministic Planner)
-  let t = Date.now()
-  const executionPlan = await createAutonomousExecutionPlan({
-    goal: request.goal,
-    constraints: request.constraints,
-    budget: request.budget,
-    currency: request.currency,
-    allowInternalCatalog: request.allowInternalCatalog,
-    allowPublicOffCatalog: request.allowPublicOffCatalog,
-    allowPartnerCatalog: request.allowPartnerCatalog
-  })
+  const globalController = new AbortController()
+  let globalTimer: NodeJS.Timeout | undefined
 
-  logStep(
-    'parse_objective',
-    'plan_orchestrator',
-    'completed',
-    `Formulated plan via ${executionPlan.mode}. Reasoning: ${executionPlan.reasoning}`,
-    t
-  )
+  if (context.signal) {
+    context.signal.addEventListener('abort', () => globalController.abort(), { once: true })
+  }
+
+  try {
+    globalTimer = setTimeout(() => globalController.abort(), EXECUTION_TIMEOUT_MS)
+
+    const MAX_REPLANS = 3
+    const permittedTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'> = []
+    if (request.allowInternalCatalog) permittedTools.push('internal_catalog')
+    if (request.allowPublicOffCatalog) permittedTools.push('open_food_facts')
+    if (request.allowPartnerCatalog) permittedTools.push('partner_catalog')
+
+    const runId = crypto.randomUUID()
+    const steps: AgentStep[] = []
+    let stepCounter = 0
+    const retrievalErrors: string[] = []
+    const uncertainties: string[] = []
+
+    const logStep = (
+      stage: AgentStep['stage'],
+      tool: string,
+      status: AgentStep['status'],
+      description: string,
+      startMs: number,
+      error?: string | null
+    ) => {
+      steps.push({
+        id: ++stepCounter,
+        stage,
+        tool,
+        status,
+        description,
+        at: new Date().toISOString(),
+        durationMs: Date.now() - startMs,
+        error: error || null
+      })
+    }
+
+    // Stage 1: Autonomous Planning (LLM or Bounded Deterministic Planner)
+    let t = Date.now()
+    const executionPlan = await createAutonomousExecutionPlan({
+      goal: request.goal,
+      constraints: request.constraints,
+      budget: request.budget,
+      currency: request.currency,
+      allowInternalCatalog: request.allowInternalCatalog,
+      allowPublicOffCatalog: request.allowPublicOffCatalog,
+      allowPartnerCatalog: request.allowPartnerCatalog
+    }, 7000, globalController.signal)
+
+    logStep(
+      'parse_objective',
+      'plan_orchestrator',
+      'completed',
+      `Formulated plan via ${executionPlan.mode}. Reasoning: ${executionPlan.reasoning}`,
+      t
+    )
 
   // Stage 2: Evidence Gathering with Dynamic Replanning & Safe Timeout
   t = Date.now()
@@ -184,9 +208,9 @@ export async function runGuardianAutonomousAgent(
     if (executedTools.has(toolName)) continue
     executedTools.add(toolName)
 
-    // Check execution budget hard-stop
-    if (Date.now() - started > EXECUTION_TIMEOUT_MS) {
-      retrievalErrors.push('Execution timeout reached; safely halted further tool dispatch.')
+    // Check execution budget hard-stop or abort
+    if (globalController.signal.aborted || (Date.now() - started) > EXECUTION_TIMEOUT_MS) {
+      retrievalErrors.push('Execution deadline reached or cancelled; safely halted further tool dispatch.')
       break
     }
 
@@ -195,7 +219,7 @@ export async function runGuardianAutonomousAgent(
     if (toolName === 'internal_catalog' && request.allowInternalCatalog) {
       t = Date.now()
       try {
-        const matches = await searchInternalReviewedCatalog(currentQuery, request.currency)
+        const matches = await searchInternalReviewedCatalog(currentQuery, request.currency, globalController.signal)
         if (matches.length > 0) {
           gatheredEvidence.push(...matches)
           logStep(
@@ -213,23 +237,24 @@ export async function runGuardianAutonomousAgent(
             'Internal database searched; no matching products found for query.',
             t
           )
-          // Dynamic replan: if initial internal catalog search yields 0 items, replan tool priority and refine query
-          if (request.allowPublicOffCatalog && !executedTools.has('open_food_facts')) {
+          // Dynamic replan on EMPTY_RESULTS: refine query and shift to remaining permitted tools
+          const remainingPermitted = permittedTools.filter(item => !executedTools.has(item))
+          if (remainingPermitted.length > 0 && currentPlan.replanCount < MAX_REPLANS) {
             const refinedQuery = currentQuery.split(/\s+/).slice(0, 3).join(' ')
-            currentPlan = dynamicReplanAfterToolExecution(
-              currentPlan,
-              'internal_catalog',
-              ['open_food_facts'],
-              refinedQuery
-            )
-            if (!toolQueue.includes('open_food_facts')) {
-              toolQueue.push('open_food_facts')
+            currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
+              reason: 'EMPTY_RESULTS',
+              exhaustedTool: 'internal_catalog',
+              remainingTools: remainingPermitted,
+              fallbackQuery: refinedQuery
+            })
+            for (const nextTool of remainingPermitted) {
+              if (!toolQueue.includes(nextTool)) toolQueue.push(nextTool)
             }
             logStep(
               'retrieve_candidate_evidence',
               'dynamic_replanner',
               'completed',
-              currentPlan.replanNotes || 'Replanned tool priorities.',
+              currentPlan.replanNotes || 'Replanned tool priorities after empty internal catalog results.',
               t
             )
           }
@@ -244,6 +269,26 @@ export async function runGuardianAutonomousAgent(
           t,
           err.message
         )
+        // Dynamic replan on TOOL_FAILURE
+        const remainingPermitted = permittedTools.filter(item => !executedTools.has(item))
+        if (remainingPermitted.length > 0 && currentPlan.replanCount < MAX_REPLANS) {
+          currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
+            reason: 'TOOL_FAILURE',
+            exhaustedTool: 'internal_catalog',
+            remainingTools: remainingPermitted,
+            errorDetails: err.message
+          })
+          for (const nextTool of remainingPermitted) {
+            if (!toolQueue.includes(nextTool)) toolQueue.push(nextTool)
+          }
+          logStep(
+            'retrieve_candidate_evidence',
+            'dynamic_replanner',
+            'completed',
+            currentPlan.replanNotes || 'Replanned tool priorities after internal catalog failure.',
+            t
+          )
+        }
       }
     } else if (toolName === 'partner_catalog' && request.allowPartnerCatalog) {
       const catalogSearchFn = context.externalCatalogSearch || (process.env.GUARDIAN_CATALOG_API_URL ? searchApprovedCatalog : undefined)
@@ -258,11 +303,16 @@ export async function runGuardianAutonomousAgent(
         )
       } else {
         let partnerSuccess = false
-        // Bounded 1-retry budget with backoff
+        // Bounded retry budget respecting remaining global deadline
         for (let attempt = 1; attempt <= 2 && !partnerSuccess; attempt++) {
+          const remainingMs = EXECUTION_TIMEOUT_MS - (Date.now() - started)
+          if (remainingMs <= 600 || globalController.signal.aborted) {
+            retrievalErrors.push('Partner catalog retry skipped: insufficient execution time remaining.')
+            break
+          }
           t = Date.now()
           try {
-            const partnerItems = await catalogSearchFn(currentQuery, request.currency)
+            const partnerItems = await catalogSearchFn(currentQuery, request.currency, globalController.signal)
             gatheredEvidence.push(...partnerItems.slice(0, 10))
             partnerSuccess = true
             logStep(
@@ -278,11 +328,14 @@ export async function runGuardianAutonomousAgent(
                 'retrieve_candidate_evidence',
                 'catalog_search',
                 'failed',
-                `Attempt 1 failed (${err.message}); initiating automatic retry with backoff.`,
+                `Attempt 1 failed (${err.message}); evaluating retry against remaining budget.`,
                 t,
                 err.message
               )
-              await new Promise(r => setTimeout(r, 200))
+              const remainingAfterErr = EXECUTION_TIMEOUT_MS - (Date.now() - started)
+              if (remainingAfterErr > 600 && !globalController.signal.aborted) {
+                await new Promise(r => setTimeout(r, Math.min(200, remainingAfterErr - 100)))
+              }
             } else {
               retrievalErrors.push(`Partner catalog connector failed: ${err.message}`)
               logStep(
@@ -293,6 +346,26 @@ export async function runGuardianAutonomousAgent(
                 t,
                 err.message
               )
+              // Dynamic replan on TOOL_FAILURE
+              const remainingPermitted = permittedTools.filter(item => !executedTools.has(item))
+              if (remainingPermitted.length > 0 && currentPlan.replanCount < MAX_REPLANS) {
+                currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
+                  reason: 'TOOL_FAILURE',
+                  exhaustedTool: 'partner_catalog',
+                  remainingTools: remainingPermitted,
+                  errorDetails: err.message
+                })
+                for (const nextTool of remainingPermitted) {
+                  if (!toolQueue.includes(nextTool)) toolQueue.push(nextTool)
+                }
+                logStep(
+                  'retrieve_candidate_evidence',
+                  'dynamic_replanner',
+                  'completed',
+                  currentPlan.replanNotes || 'Replanned tool priorities after partner catalog failure.',
+                  t
+                )
+              }
             }
           }
         }
@@ -300,7 +373,7 @@ export async function runGuardianAutonomousAgent(
     } else if (toolName === 'open_food_facts' && request.allowPublicOffCatalog) {
       t = Date.now()
       try {
-        const offItems = await searchPublicOpenFoodFacts(currentQuery, request.currency)
+        const offItems = await searchPublicOpenFoodFacts(currentQuery, request.currency, globalController.signal)
         if (offItems.length > 0) {
           gatheredEvidence.push(...offItems)
           uncertainties.push('Public Open Food Facts records contain crowdsourced entries; ingredient formulations may differ by region.')
@@ -319,6 +392,25 @@ export async function runGuardianAutonomousAgent(
             'Open Food Facts query completed; zero matching records found.',
             t
           )
+          // Dynamic replan on EMPTY_RESULTS
+          const remainingPermitted = permittedTools.filter(item => !executedTools.has(item))
+          if (remainingPermitted.length > 0 && currentPlan.replanCount < MAX_REPLANS) {
+            currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
+              reason: 'EMPTY_RESULTS',
+              exhaustedTool: 'open_food_facts',
+              remainingTools: remainingPermitted
+            })
+            for (const nextTool of remainingPermitted) {
+              if (!toolQueue.includes(nextTool)) toolQueue.push(nextTool)
+            }
+            logStep(
+              'retrieve_candidate_evidence',
+              'dynamic_replanner',
+              'completed',
+              currentPlan.replanNotes || 'Replanned after Open Food Facts returned empty results.',
+              t
+            )
+          }
         }
       } catch (err: any) {
         retrievalErrors.push(`Open Food Facts error: ${err.message}`)
@@ -330,7 +422,54 @@ export async function runGuardianAutonomousAgent(
           t,
           err.message
         )
+        // Dynamic replan on TOOL_FAILURE
+        const remainingPermitted = permittedTools.filter(item => !executedTools.has(item))
+        if (remainingPermitted.length > 0 && currentPlan.replanCount < MAX_REPLANS) {
+          currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
+            reason: 'TOOL_FAILURE',
+            exhaustedTool: 'open_food_facts',
+            remainingTools: remainingPermitted,
+            errorDetails: err.message
+          })
+          for (const nextTool of remainingPermitted) {
+            if (!toolQueue.includes(nextTool)) toolQueue.push(nextTool)
+          }
+          logStep(
+            'retrieve_candidate_evidence',
+            'dynamic_replanner',
+            'completed',
+            currentPlan.replanNotes || 'Replanned tool priorities after Open Food Facts failure.',
+            t
+          )
+        }
       }
+    }
+
+    // Dynamic replan on INSUFFICIENT_CANDIDATES: if current tool queue is empty, but we have < 3 candidates
+    const remainingUnused = permittedTools.filter(item => !executedTools.has(item))
+    if (
+      toolQueue.length === 0 &&
+      gatheredEvidence.length < (request.maxResults || 3) &&
+      remainingUnused.length > 0 &&
+      currentPlan.replanCount < MAX_REPLANS
+    ) {
+      currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
+        reason: 'INSUFFICIENT_CANDIDATES',
+        exhaustedTool: toolName,
+        remainingTools: remainingUnused,
+        currentCandidatesCount: gatheredEvidence.length,
+        targetCandidateCount: request.maxResults || 5
+      })
+      for (const nextTool of remainingUnused) {
+        if (!toolQueue.includes(nextTool)) toolQueue.push(nextTool)
+      }
+      logStep(
+        'retrieve_candidate_evidence',
+        'dynamic_replanner',
+        'completed',
+        currentPlan.replanNotes || 'Replanned to backfill insufficient candidate pool.',
+        t
+      )
     }
   }
 
@@ -472,26 +611,29 @@ export async function runGuardianAutonomousAgent(
   else if (hasUserSource) sourceMode = 'USER_SUPPLIED_EVIDENCE_ONLY'
   else if (hasCatalogSource) sourceMode = 'CATALOG_EVIDENCE_ONLY'
 
-  return {
-    runId,
-    createdAt: new Date().toISOString(),
-    elapsedMs: Date.now() - started,
-    mode: currentPlan.mode,
-    goal: request.goal,
-    sourceMode,
-    plan: currentPlan.stages,
-    currentStage: 'persist_shortlist_approval',
-    steps,
-    products: evaluatedProducts,
-    shortlist,
-    saved,
-    retrievalErrors,
-    uncertainties,
-    safetyNotice: 'A candidate rating represents an uncertified comparative status based strictly on retrieved text. It does NOT constitute medical or allergy safety certification. Always verify physical manufacturer labels directly before consuming.',
-    limitations: [
-      'Autonomous agent operates within bounded deterministic state machine; arbitrary execution of unverified web URLs is strictly prohibited.',
-      'Third-party and crowdsourced public databases (Open Food Facts, community OCR cache) may contain unverified or outdated ingredient formulations.',
-      'A missing allergen declaration does NOT prove the absence of an allergen or cross-contact risk.'
-    ]
+    return {
+      runId,
+      createdAt: new Date().toISOString(),
+      elapsedMs: Date.now() - started,
+      mode: currentPlan.mode,
+      goal: request.goal,
+      sourceMode,
+      plan: currentPlan.stages,
+      currentStage: 'persist_shortlist_approval',
+      steps,
+      products: evaluatedProducts,
+      shortlist,
+      saved,
+      retrievalErrors,
+      uncertainties,
+      safetyNotice: 'A candidate rating represents an uncertified comparative status based strictly on retrieved text. It does NOT constitute medical or allergy safety certification. Always verify physical manufacturer labels directly before consuming.',
+      limitations: [
+        'Autonomous agent operates within bounded deterministic state machine; arbitrary execution of unverified web URLs is strictly prohibited.',
+        'Third-party and crowdsourced public databases (Open Food Facts, community OCR cache) may contain unverified or outdated ingredient formulations.',
+        'A missing allergen declaration does NOT prove the absence of an allergen or cross-contact risk.'
+      ]
+    }
+  } finally {
+    if (globalTimer) clearTimeout(globalTimer)
   }
 }
