@@ -17,7 +17,9 @@
     "test:postgres": "npx tsx scripts/test-postgres-integration.ts",
     "test:guardian": "node scripts/test-guardian-prototype.cjs",
     "test:guardian:agent": "node scripts/test-guardian-agent.cjs",
-    "test:guardian:benchmarks": "npx tsx scripts/test-guardian-benchmarks.ts"
+    "test:guardian:benchmarks": "npx tsx scripts/test-guardian-benchmarks.ts",
+    "test:guardian:rls": "npx tsx scripts/test-guardian-rls.ts",
+    "test:guardian:integration": "npx tsx scripts/test-guardian-integration.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

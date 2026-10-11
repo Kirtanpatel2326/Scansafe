@@ -1,4 +1,9 @@
-import { Constraint, ProductEvidence, EvaluatedProduct } from './types'
+import {
+  Constraint,
+  ProductEvidence,
+  EvaluatedProduct,
+  AllergenStatus
+} from './types'
 
 export const COMPREHENSIVE_ALLERGEN_ALIASES: Record<Constraint, string[]> = {
   peanut: ['peanut', 'peanuts', 'groundnut', 'groundnuts', 'arachis', 'monkey nut', 'goober'],
@@ -78,7 +83,6 @@ export function evaluateDeterministicSafety(
   )
   let precautionaryNotice = false
   for (const seg of precautionarySegments) {
-    // Check if relevant allergen is mentioned in the cross-contact warning
     const mentionedTypes = (Object.keys(COMPREHENSIVE_ALLERGEN_ALIASES) as Constraint[]).filter(c =>
       COMPREHENSIVE_ALLERGEN_ALIASES[c].some(alias => termIn(seg, alias))
     )
@@ -111,18 +115,54 @@ export function evaluateDeterministicSafety(
     }
   }
 
+  // 4. Evidence Freshness & Provenance Audit
   const reasons: string[] = []
+  let isStale = false
+  if (product.retrievedAt) {
+    const retrievedTime = new Date(product.retrievedAt).getTime()
+    if (!isNaN(retrievedTime)) {
+      const ageDays = (Date.now() - retrievedTime) / (1000 * 60 * 60 * 24)
+      if (ageDays > 180) {
+        isStale = true
+        reasons.push(`Needs Review: Evidence record is ${Math.round(ageDays)} days old (> 180 days). Manufacturing lines and product formulations may have changed.`)
+      }
+    }
+  }
+
+  const limitations = [...(product.evidenceLimitations || [])]
+  if (product.sourceType === 'OPEN_FOOD_FACTS_CROWDSOURCED' || product.verificationStatus === 'CROWDSOURCED_COMMUNITY') {
+    if (!limitations.some(l => l.includes('Crowdsourced'))) {
+      limitations.push('Crowdsourced community data: Volunteer submitted; not verified by manufacturer or laboratory testing.')
+    }
+  } else if (product.sourceType === 'INTERNAL_CACHE_OCR' || product.verificationStatus === 'UNVERIFIED_COMMUNITY_OCR') {
+    if (!limitations.some(l => l.includes('OCR'))) {
+      limitations.push('Internal community OCR cache: Extracted from user packaging photos; unverified against manufacturer registry.')
+    }
+  }
+
+  // 5. Determine Allergen Classification Status
+  let allergenStatus: AllergenStatus = 'NO_RESTRICTED_TOKENS_DETECTED'
   if (allergenHits.length > 0) {
-    reasons.push(`Excluded: Detected explicit restricted allergens: ${[...new Set(allergenHits)].join(', ')}.`)
+    allergenStatus = 'CONTAINS'
+  } else if (conflictingClaims) {
+    allergenStatus = 'CONFLICTING'
+  } else if (precautionaryNotice) {
+    allergenStatus = 'MAY_CONTAIN'
+  } else if (!product.labelComplete || !ingredients.trim() || !allergenStatement.trim()) {
+    allergenStatus = 'UNKNOWN'
+  }
+
+  if (allergenHits.length > 0) {
+    reasons.push(`Excluded (CONTAINS): Detected explicit restricted allergens: ${[...new Set(allergenHits)].join(', ')}.`)
   }
   if (precautionaryNotice) {
-    reasons.push('Needs Review: Precautionary cross-contact warning detected for restricted dietary criteria.')
+    reasons.push('Needs Review (MAY CONTAIN): Precautionary cross-contact warning detected for restricted dietary criteria.')
   }
   if (conflictingClaims) {
-    reasons.push('Needs Review: Unverified or contradictory "free-from" marketing claim detected. Negative claims do not prove safety.')
+    reasons.push('Needs Review (CONFLICTING): Unverified or contradictory "free-from" marketing claim detected. Negative claims do not prove safety.')
   }
   if (!product.labelComplete || !ingredients.trim() || !allergenStatement.trim()) {
-    reasons.push('Needs Review: Packaging label or allergen declaration is incomplete or partially unreadable.')
+    reasons.push('Needs Review (UNKNOWN): Packaging label or allergen declaration is incomplete or partially unreadable. Absence of declarations does not prove safety.')
   }
   if (budget !== undefined && product.price === undefined) {
     reasons.push('Needs Review: Product price is unavailable; budget constraint cannot be verified.')
@@ -131,7 +171,7 @@ export function evaluateDeterministicSafety(
     reasons.push(`Excluded: Price (${product.price} ${product.currency}) exceeds user budget constraint (${budget} ${product.currency}).`)
   }
 
-  // Compute status
+  // Compute status & uncertainty score
   let status: 'candidate' | 'excluded' | 'needs_review'
   let uncertaintyScore = 0
 
@@ -144,17 +184,26 @@ export function evaluateDeterministicSafety(
   } else if (
     precautionaryNotice ||
     conflictingClaims ||
+    isStale ||
     !product.labelComplete ||
     !ingredients.trim() ||
     !allergenStatement.trim() ||
     (budget !== undefined && product.price === undefined)
   ) {
     status = 'needs_review'
-    uncertaintyScore = !product.labelComplete ? 0.8 : precautionaryNotice ? 0.6 : 0.4
+    uncertaintyScore = !product.labelComplete ? 0.85 : conflictingClaims ? 0.80 : isStale ? 0.70 : precautionaryNotice ? 0.65 : 0.45
   } else {
     status = 'candidate'
-    uncertaintyScore = 0.15
-    reasons.push('Unverified Comparison Candidate: No restricted allergen tokens detected in supplied label text. Does not constitute medical allergy certification.')
+    if (product.sourceType === 'OPEN_FOOD_FACTS_CROWDSOURCED' || product.verificationStatus === 'CROWDSOURCED_COMMUNITY') {
+      uncertaintyScore = 0.40
+      reasons.push('Crowdsourced Candidate: No restricted allergen tokens found in community dataset. Unverified by manufacturer.')
+    } else if (product.sourceType === 'INTERNAL_CACHE_OCR' || product.verificationStatus === 'UNVERIFIED_COMMUNITY_OCR') {
+      uncertaintyScore = 0.35
+      reasons.push('Community OCR Candidate: No restricted allergen tokens found in scanned packaging text. Requires visual label inspection.')
+    } else {
+      uncertaintyScore = 0.15
+      reasons.push('Unverified Comparison Candidate: No restricted allergen tokens detected in supplied label text. Does not constitute medical allergy certification.')
+    }
   }
 
   return {
@@ -165,11 +214,54 @@ export function evaluateDeterministicSafety(
     currency: product.currency,
     evidenceSource: product.evidenceSource,
     sourceType: product.sourceType,
+    verificationStatus: product.verificationStatus,
+    allergenStatus,
     status,
     reasons,
     allergenHits: [...new Set(allergenHits)],
     precautionaryNotice,
     conflictingClaims,
-    uncertaintyScore
+    uncertaintyScore,
+    evidenceLimitations: product.evidenceLimitations,
+    sourceUrl: product.sourceUrl,
+    retrievedAt: product.retrievedAt
   }
+}
+
+/**
+ * Detects conflicts between multiple evidence sources for identical or matching products.
+ * E.g., if one source says contains milk and another says dairy free or omits milk.
+ */
+export function detectEvidenceConflicts(
+  evidenceList: ProductEvidence[],
+  constraints: Constraint[]
+): Map<string, string> {
+  const conflicts = new Map<string, string>()
+  const byName = new Map<string, ProductEvidence[]>()
+
+  for (const item of evidenceList) {
+    const normKey = (item.gtin || item.name).toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (!byName.has(normKey)) byName.set(normKey, [])
+    byName.get(normKey)!.push(item)
+  }
+
+  for (const [, items] of byName.entries()) {
+    if (items.length > 1) {
+      for (const constraint of constraints) {
+        const aliases = COMPREHENSIVE_ALLERGEN_ALIASES[constraint] || [constraint]
+        const presence = items.map(it => {
+          const text = `${it.ingredients} ${it.allergenStatement}`.toLowerCase()
+          return aliases.some(alias => matchesActiveIngredient(text, alias))
+        })
+        const hasPresence = presence.some(p => p === true)
+        const hasAbsence = presence.some(p => p === false)
+        if (hasPresence && hasAbsence) {
+          const conflictMsg = `Conflicting allergen declarations detected across multiple sources for ${constraint}.`
+          for (const it of items) conflicts.set(it.id, conflictMsg)
+        }
+      }
+    }
+  }
+
+  return conflicts
 }

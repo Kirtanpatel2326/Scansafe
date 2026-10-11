@@ -66,9 +66,30 @@ try {
 // Regex patterns for secrets
 const secretRegexes = {
   'Google Gemini Key': /AIzaSy[A-Za-z0-9_-]{35}/,
+  'Anthropic Claude Key': /sk-ant-[a-zA-Z0-9_-]{32,}/,
+  'OpenAI Key': /sk-[a-zA-Z0-9]{32,}/,
   'Razorpay Key': /rzp_(live|test)_[a-zA-Z0-9]{14}/,
   'Generic API Key Reference': /const\s+\w*(API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*['"`][a-zA-Z0-9_-]{16,}['"`]/i
 };
+
+// Check if git is accidentally tracking any environment secret files
+try {
+  const { execSync } = require('child_process');
+  const trackedEnvFiles = execSync('git ls-files ".env*"', { cwd: projectRoot, encoding: 'utf8' }).trim();
+  if (trackedEnvFiles) {
+    const dangerous = trackedEnvFiles.split('\n').filter(f => f !== '.env.example');
+    if (dangerous.length > 0) {
+      console.log(`  ${colors.red}✗${colors.reset} CRITICAL: Sensitive environment files tracked in Git: ${dangerous.join(', ')}`);
+      issuesCount++;
+    } else {
+      console.log(`  ${colors.green}✓${colors.reset} No sensitive .env files tracked in Git (only .env.example allowed).`);
+    }
+  } else {
+    console.log(`  ${colors.green}✓${colors.reset} No .env files tracked in Git.`);
+  }
+} catch (e) {
+  // If not a git repo or git not found, continue file scan
+}
 
 allFiles.forEach(file => {
   const ext = path.extname(file);
@@ -155,6 +176,11 @@ if (fs.existsSync(apiDir)) {
           rateLimitChecks++;
           warningsCount++;
         }
+        if (relPath.includes('guardian') && (relPath.endsWith('route.ts') || relPath.endsWith('route.js')) && !content.includes('checkGuardianRateLimit')) {
+          console.log(`  ${colors.yellow}!${colors.reset} WARNING: Guardian endpoint does not appear to have rate limiting: ${colors.cyan}${relPath}${colors.reset}`);
+          rateLimitChecks++;
+          warningsCount++;
+        }
       } catch (e) {}
     }
   });
@@ -235,6 +261,19 @@ try {
       issuesCount++;
     }
   });
+
+  // Verify Guardian tables
+  const guardianSchemaPath = path.join(projectRoot, 'schema_guardian.sql');
+  if (fs.existsSync(guardianSchemaPath)) {
+    const guardianContent = fs.readFileSync(guardianSchemaPath, 'utf8');
+    if (guardianContent.includes('guardian_saved_tasks enable row level security') || guardianContent.includes('ENABLE ROW LEVEL SECURITY')) {
+      console.log(`  ${colors.green}✓${colors.reset} RLS is active on database table: ${colors.cyan}guardian_saved_tasks${colors.reset}`);
+    } else {
+      console.log(`  ${colors.red}✗${colors.reset} CRITICAL: Table "guardian_saved_tasks" does NOT enable ROW LEVEL SECURITY!`);
+      rlsErrors++;
+      issuesCount++;
+    }
+  }
 } catch (e) {
   console.log(`  ${colors.yellow}!${colors.reset} WARNING: schema.sql database definitions file not found.`);
   warningsCount++;

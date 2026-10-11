@@ -3,10 +3,14 @@ import { createClient } from '@/lib/supabase-server'
 
 /**
  * Real research tool adapters for permitted information sources.
- * Strictly captures provenance, retrieval date, evidence status, and limitations.
+ * Strictly captures provenance, retrieval date, verification status, source URLs, and limitations.
+ * Never misrepresents unverified cached or crowdsourced entries as manufacturer-verified.
  */
 
-export async function searchInternalReviewedCatalog(query: string, currency: 'INR' | 'AED' | 'USD' = 'INR'): Promise<ProductEvidence[]> {
+export async function searchInternalReviewedCatalog(
+  query: string,
+  currency: 'INR' | 'AED' | 'USD' = 'INR'
+): Promise<ProductEvidence[]> {
   try {
     let supabase: any
     try {
@@ -18,6 +22,7 @@ export async function searchInternalReviewedCatalog(query: string, currency: 'IN
       const { createClient: createBaseClient } = await import('@supabase/supabase-js')
       supabase = createBaseClient(url, key)
     }
+
     const { data, error } = await supabase
       .from('products_cache')
       .select('*')
@@ -35,15 +40,33 @@ export async function searchInternalReviewedCatalog(query: string, currency: 'IN
         ? raw.allergens_declared.join(', ')
         : (item.allergens_declared || '')
 
+      const isExplicitlyVerified = Boolean(item.is_verified || raw.dietitian_verified)
+      const sourceType = isExplicitlyVerified ? 'INTERNAL_VERIFIED_CATALOG' : 'INTERNAL_CACHE_OCR'
+      const verificationStatus = isExplicitlyVerified
+        ? 'MANUFACTURER_AUTHORIZED'
+        : 'UNVERIFIED_COMMUNITY_OCR'
+
+      const limitations = isExplicitlyVerified
+        ? ['Dietitian/curator reviewed internal entry. Check packaging batch for formulation revisions.']
+        : [
+            'Derived from community OCR mobile scans; characters may contain scan transcription artifacts.',
+            'Unverified by manufacturer; physical product label must be inspected before consumption.'
+          ]
+
       return {
         id: item.barcode || item.id || `internal_${Date.now()}`,
         name: item.product_name,
         brand: item.brand,
-        ingredients: ingredients || 'Ingredients not recorded in verified cache.',
+        ingredients: ingredients || 'Ingredients not recorded in internal cache entry.',
         allergenStatement: allergens ? `Allergens: ${allergens}` : 'No explicit allergen declaration recorded.',
         labelComplete: Boolean(ingredients),
-        evidenceSource: `ScanSafe Internal Verified Catalog (Barcode: ${item.barcode || 'N/A'}, Version: ${item.version || 1})`,
-        sourceType: 'INTERNAL_VERIFIED_CATALOG',
+        evidenceSource: isExplicitlyVerified
+          ? `ScanSafe Curated Database (Verified Entry, Barcode: ${item.barcode || 'N/A'})`
+          : `ScanSafe Community OCR Cache (Unverified Mobile Scan, Barcode: ${item.barcode || 'N/A'})`,
+        sourceType,
+        verificationStatus,
+        evidenceLimitations: limitations,
+        sourceUrl: item.barcode ? `https://scansafe.co.in/scan?barcode=${item.barcode}` : undefined,
         price: undefined,
         currency,
         gtin: item.barcode,
@@ -56,15 +79,18 @@ export async function searchInternalReviewedCatalog(query: string, currency: 'IN
   }
 }
 
-export async function searchPublicOpenFoodFacts(query: string, currency: 'INR' | 'AED' | 'USD' = 'INR'): Promise<ProductEvidence[]> {
+export async function searchPublicOpenFoodFacts(
+  query: string,
+  currency: 'INR' | 'AED' | 'USD' = 'INR'
+): Promise<ProductEvidence[]> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 3500)
+  const timer = setTimeout(() => controller.abort(), 4000)
 
   try {
     const endpoint = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5`
     const res = await fetch(endpoint, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'ScanSafe-Guardian/2.0 (contact@scansafe.co.in)' }
+      headers: { 'User-Agent': 'ScanSafe-Guardian/2.0 (audit@scansafe.co.in)' }
     })
 
     if (!res.ok) return []
@@ -77,6 +103,8 @@ export async function searchPublicOpenFoodFacts(query: string, currency: 'INR' |
       const ingredients = p.ingredients_text || ''
       const allergens = (p.allergens_tags || []).map((t: string) => t.replace(/^[a-z]+:/i, '')).join(', ')
 
+      const sourceUrl = p.url || (p.code ? `https://world.openfoodfacts.org/product/${p.code}` : undefined)
+
       return {
         id: `off_${p.code || Math.random().toString(36).slice(2)}`,
         name,
@@ -84,8 +112,14 @@ export async function searchPublicOpenFoodFacts(query: string, currency: 'INR' |
         ingredients: ingredients || 'Ingredient list unpopulated in public database record.',
         allergenStatement: allergens ? `Contains / May Contain: ${allergens}` : (p.allergens || 'No explicit allergen tags in public record.'),
         labelComplete: Boolean(ingredients),
-        evidenceSource: `Open Food Facts Public Open Database (Crowdsourced / Unverified, ID: ${p.code || 'N/A'})`,
-        sourceType: 'OPEN_FOOD_FACTS_PUBLIC',
+        evidenceSource: `Open Food Facts Public Knowledgebase (Crowdsourced Volunteer Data, Code: ${p.code || 'N/A'})`,
+        sourceType: 'OPEN_FOOD_FACTS_CROWDSOURCED',
+        verificationStatus: 'CROWDSOURCED_COMMUNITY',
+        evidenceLimitations: [
+          'Crowdsourced public database entry; community volunteers may upload unverified or outdated ingredient formulations.',
+          'Does NOT constitute authoritative manufacturer confirmation.'
+        ],
+        sourceUrl,
         price: undefined,
         currency,
         gtin: p.code,

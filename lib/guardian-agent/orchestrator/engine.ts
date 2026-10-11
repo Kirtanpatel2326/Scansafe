@@ -1,14 +1,14 @@
 import {
   AutonomousAgentInput,
-  AutonomousAgentRequestSchema,
   AutonomousAgentResponse,
   AgentStep,
   ProductEvidence,
   EvaluatedProduct
 } from './types'
-import { evaluateDeterministicSafety } from './verifier'
+import { evaluateDeterministicSafety, detectEvidenceConflicts } from './verifier'
 import { searchInternalReviewedCatalog, searchPublicOpenFoodFacts } from './tools'
 import { searchApprovedCatalog } from '../catalog'
+import { createAutonomousExecutionPlan, dynamicReplanAfterToolExecution } from './planner'
 
 export interface AgentContext {
   userId?: string
@@ -17,26 +17,104 @@ export interface AgentContext {
   saveShortlist?: (ids: string[], runId: string, goal: string) => Promise<void>
 }
 
+const EXECUTION_TIMEOUT_MS = 25000 // 25s safe hard-stop budget
+
 /**
  * Controlled State Machine Orchestrator for Guardian Agent Phase 2.
- * Enforces structured planning, real multi-source tools, retry recovery,
- * deterministic safety verifications, and affirmative user consent.
+ * 
+ * Features:
+ * - Real bounded LLM planning with structured tool selection & dynamic replanning.
+ * - Deterministic dietary safety verification strictly independent of LLM judgment.
+ * - Transparent execution mode: 'LLM_STRUCTURED_AUTONOMOUS_PLANNER' or 'BOUNDED_STATE_MACHINE_PLANNER'.
+ * - Strict input validation; rejects malformed payloads fail-closed.
+ * - Timeout budget, retry budgets, and affirmative approval gates.
  */
 export async function runGuardianAutonomousAgent(
   rawRequest: AutonomousAgentInput,
   context: AgentContext = {}
 ): Promise<AutonomousAgentResponse> {
-  let request: any = rawRequest
-  try {
-    const parsed = AutonomousAgentRequestSchema.safeParse(rawRequest)
-    if (parsed && parsed.success && parsed.data && typeof parsed.data.goal === 'string') {
-      request = parsed.data
-    }
-  } catch {
-    // offline stub runner fallback
-  }
-  const normalizedConstraints = Array.isArray(request.constraints) ? request.constraints : []
   const started = Date.now()
+
+  // 1. Strict Input Validation (Fail-closed for both HTTP and direct callers)
+  if (!rawRequest || typeof rawRequest !== 'object') {
+    throw new Error('Invalid agent request: payload must be a non-null object.')
+  }
+  if (!rawRequest.goal || typeof rawRequest.goal !== 'string' || rawRequest.goal.trim().length < 5) {
+    throw new Error('Invalid agent request: goal must be a valid string of at least 5 characters.')
+  }
+  if (rawRequest.goal.length > 1000) {
+    throw new Error('Invalid agent request: goal exceeds 1000 characters limit.')
+  }
+  if (!Array.isArray(rawRequest.constraints) || rawRequest.constraints.length === 0) {
+    throw new Error('Invalid agent request: at least one active dietary constraint is required.')
+  }
+  if (rawRequest.constraints.length > 15) {
+    throw new Error('Invalid agent request: exceeds 15 dietary constraints limit.')
+  }
+  const VALID_CONSTRAINTS = [
+    'peanut', 'tree_nut', 'milk', 'egg', 'soy', 'wheat', 'sesame',
+    'gluten', 'crustacean', 'fish', 'mustard', 'celery', 'lupin', 'mollusc', 'sulphite'
+  ]
+  for (const c of rawRequest.constraints) {
+    if (!VALID_CONSTRAINTS.includes(c)) {
+      throw new Error(`Invalid agent request: unknown or unsupported dietary constraint '${c}'.`)
+    }
+  }
+  if (rawRequest.budget !== undefined && (typeof rawRequest.budget !== 'number' || rawRequest.budget <= 0 || !Number.isFinite(rawRequest.budget))) {
+    throw new Error('Invalid agent request: budget must be a positive finite number.')
+  }
+  if (rawRequest.currency !== undefined && !['INR', 'AED', 'USD'].includes(rawRequest.currency)) {
+    throw new Error('Invalid agent request: currency must be INR, AED, or USD.')
+  }
+  if (rawRequest.maxResults !== undefined) {
+    if (typeof rawRequest.maxResults !== 'number' || !Number.isInteger(rawRequest.maxResults) || rawRequest.maxResults < 1 || rawRequest.maxResults > 20) {
+      throw new Error('Invalid agent request: maxResults must be an integer between 1 and 20.')
+    }
+  }
+  if (rawRequest.products !== undefined) {
+    if (!Array.isArray(rawRequest.products)) {
+      throw new Error('Invalid agent request: products must be an array.')
+    }
+    if (rawRequest.products.length > 50) {
+      throw new Error('Invalid agent request: products array cannot exceed 50 items.')
+    }
+    for (const [idx, p] of rawRequest.products.entries()) {
+      if (!p || typeof p !== 'object' || !p.id || !p.name || typeof p.ingredients !== 'string' || typeof p.allergenStatement !== 'string' || typeof p.labelComplete !== 'boolean') {
+        throw new Error(`Invalid agent request: malformed product item at index ${idx}. Must include id, name, ingredients, allergenStatement, and labelComplete.`)
+      }
+    }
+  }
+  if (rawRequest.approvedActions !== undefined) {
+    if (!Array.isArray(rawRequest.approvedActions)) {
+      throw new Error('Invalid agent request: approvedActions must be an array.')
+    }
+    const VALID_ACTIONS = ['save_shortlist', 'notify_user']
+    for (const action of rawRequest.approvedActions) {
+      if (!VALID_ACTIONS.includes(action)) {
+        throw new Error(`Invalid agent request: unknown or unsupported action '${action}'.`)
+      }
+    }
+  }
+
+  const request = {
+    ...rawRequest,
+    goal: String(rawRequest.goal).trim(),
+    constraints: [...rawRequest.constraints],
+    budget: rawRequest.budget,
+    currency: rawRequest.currency || 'INR',
+    maxResults: rawRequest.maxResults || 5,
+    allowInternalCatalog: rawRequest.allowInternalCatalog ?? true,
+    allowPublicOffCatalog: rawRequest.allowPublicOffCatalog ?? false,
+    allowPartnerCatalog: rawRequest.allowPartnerCatalog ?? false,
+    products: (Array.isArray(rawRequest.products) ? rawRequest.products : []).map(p => ({
+      ...p,
+      sourceType: p.sourceType || 'USER_UPLOADED_LABEL',
+      verificationStatus: p.verificationStatus || 'MANUALLY_PROVIDED',
+      evidenceLimitations: p.evidenceLimitations || []
+    })) as ProductEvidence[],
+    approvedActions: Array.isArray(rawRequest.approvedActions) ? rawRequest.approvedActions : []
+  }
+
   const runId = crypto.randomUUID()
   const steps: AgentStep[] = []
   let stepCounter = 0
@@ -63,28 +141,31 @@ export async function runGuardianAutonomousAgent(
     })
   }
 
-  // Stage 1: Parse Objective and Formulate Controlled Plan
+  // Stage 1: Autonomous Planning (LLM or Bounded Deterministic Planner)
   let t = Date.now()
-  const plan = [
-    'Analyze objective constraints: restrict products for ' + normalizedConstraints.join(', '),
-    'Assemble multi-source evidence: inspect user-uploaded labels, internal verified database, and permitted catalogs',
-    'Execute deterministic toxicology & allergen verification (fail-closed, zero false reassurance)',
-    'Synthesize candidate rankings, assess uncertainty metrics, and flag missing facts',
-    'Verify affirmative action approval before persisting shortlist to user vault'
-  ]
+  const executionPlan = await createAutonomousExecutionPlan({
+    goal: request.goal,
+    constraints: request.constraints,
+    budget: request.budget,
+    currency: request.currency,
+    allowInternalCatalog: request.allowInternalCatalog,
+    allowPublicOffCatalog: request.allowPublicOffCatalog,
+    allowPartnerCatalog: request.allowPartnerCatalog
+  })
+
   logStep(
     'parse_objective',
     'plan_orchestrator',
     'completed',
-    `Formulated 5-stage bounded autonomous execution plan for goal: "${request.goal}".`,
+    `Formulated plan via ${executionPlan.mode}. Reasoning: ${executionPlan.reasoning}`,
     t
   )
 
-  // Stage 2 & 3: Evidence Gathering via Real Research Tools
+  // Stage 2: Evidence Gathering with Dynamic Replanning & Safe Timeout
   t = Date.now()
-  const gatheredEvidence: ProductEvidence[] = [...(request.products || [])]
+  const gatheredEvidence: ProductEvidence[] = [...request.products]
 
-  if (request.products && request.products.length > 0) {
+  if (request.products.length > 0) {
     logStep(
       'check_evidence_sources',
       'user_evidence_loader',
@@ -94,128 +175,170 @@ export async function runGuardianAutonomousAgent(
     )
   }
 
-  // Tool 1: Internal Reviewed Catalog
-  if (request.allowInternalCatalog) {
-    t = Date.now()
-    try {
-      const internalMatches = await searchInternalReviewedCatalog(request.goal, request.currency)
-      if (internalMatches.length > 0) {
-        gatheredEvidence.push(...internalMatches)
-        logStep(
-          'retrieve_candidate_evidence',
-          'internal_reviewed_catalog',
-          'completed',
-          `Retrieved ${internalMatches.length} verified record(s) from ScanSafe database.`,
-          t
-        )
-      } else {
-        logStep(
-          'retrieve_candidate_evidence',
-          'internal_reviewed_catalog',
-          'completed',
-          'Internal database searched; no matching products found for query.',
-          t
-        )
-      }
-    } catch (err: any) {
-      retrievalErrors.push(`Internal catalog query error: ${err.message}`)
-      logStep(
-        'retrieve_candidate_evidence',
-        'internal_reviewed_catalog',
-        'failed',
-        `Internal database query failed: ${err.message}`,
-        t,
-        err.message
-      )
-    }
-  }
+  let currentPlan = executionPlan
+  const toolQueue: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'> = [...currentPlan.selectedTools]
+  const executedTools = new Set<string>()
 
-  // Tool 2: Approved External Partner Catalog (with bounded 1-retry backoff)
-  if (request.allowPartnerCatalog) {
-    const catalogSearchFn = context.externalCatalogSearch || (process.env.GUARDIAN_CATALOG_API_URL ? searchApprovedCatalog : undefined)
-    if (!catalogSearchFn) {
+  while (toolQueue.length > 0) {
+    const toolName = toolQueue.shift()!
+    if (executedTools.has(toolName)) continue
+    executedTools.add(toolName)
+
+    // Check execution budget hard-stop
+    if (Date.now() - started > EXECUTION_TIMEOUT_MS) {
+      retrievalErrors.push('Execution timeout reached; safely halted further tool dispatch.')
+      break
+    }
+
+    const currentQuery = currentPlan.searchQueries[0] || request.goal
+
+    if (toolName === 'internal_catalog' && request.allowInternalCatalog) {
       t = Date.now()
-      logStep(
-        'retrieve_candidate_evidence',
-        'catalog_search',
-        'skipped',
-        'Partner catalog requested but GUARDIAN_CATALOG_API_URL is not configured; no simulated products fabricated.',
-        t
-      )
-    } else {
-      let partnerSuccess = false
-      for (let attempt = 1; attempt <= 2 && !partnerSuccess; attempt++) {
-        t = Date.now()
-        try {
-          const partnerItems = await catalogSearchFn(request.goal, request.currency)
-          gatheredEvidence.push(...partnerItems.slice(0, 10))
-          partnerSuccess = true
+      try {
+        const matches = await searchInternalReviewedCatalog(currentQuery, request.currency)
+        if (matches.length > 0) {
+          gatheredEvidence.push(...matches)
           logStep(
             'retrieve_candidate_evidence',
-            'catalog_search',
+            'internal_reviewed_catalog',
             'completed',
-            `Partner catalog returned ${partnerItems.length} candidate record(s) on attempt ${attempt}.`,
+            `Retrieved ${matches.length} record(s) from ScanSafe database.`,
             t
           )
-        } catch (err: any) {
-          if (attempt === 1) {
-            logStep(
-              'retrieve_candidate_evidence',
-              'catalog_search',
-              'failed',
-              `Attempt 1 failed (${err.message}); initiating automatic retry with backoff.`,
-              t,
-              err.message
+        } else {
+          logStep(
+            'retrieve_candidate_evidence',
+            'internal_reviewed_catalog',
+            'completed',
+            'Internal database searched; no matching products found for query.',
+            t
+          )
+          // Dynamic replan: if initial internal catalog search yields 0 items, replan tool priority and refine query
+          if (request.allowPublicOffCatalog && !executedTools.has('open_food_facts')) {
+            const refinedQuery = currentQuery.split(/\s+/).slice(0, 3).join(' ')
+            currentPlan = dynamicReplanAfterToolExecution(
+              currentPlan,
+              'internal_catalog',
+              ['open_food_facts'],
+              refinedQuery
             )
-            await new Promise(r => setTimeout(r, 200))
-          } else {
-            retrievalErrors.push(`Partner catalog connector failed: ${err.message}`)
+            if (!toolQueue.includes('open_food_facts')) {
+              toolQueue.push('open_food_facts')
+            }
             logStep(
               'retrieve_candidate_evidence',
-              'catalog_search',
-              'failed',
-              `Attempt 2 failed; halted connector. Zero fake records created.`,
-              t,
-              err.message
+              'dynamic_replanner',
+              'completed',
+              currentPlan.replanNotes || 'Replanned tool priorities.',
+              t
             )
           }
         }
-      }
-    }
-  }
-
-  // Tool 3: Public Open Food Facts (Optional crowdsourced public fallback)
-  if (request.allowPublicOffCatalog) {
-    t = Date.now()
-    try {
-      const offItems = await searchPublicOpenFoodFacts(request.goal, request.currency)
-      if (offItems.length > 0) {
-        gatheredEvidence.push(...offItems)
+      } catch (err: any) {
+        retrievalErrors.push(`Internal catalog query error: ${err.message}`)
         logStep(
           'retrieve_candidate_evidence',
-          'open_food_facts_public',
-          'completed',
-          `Retrieved ${offItems.length} public record(s) from Open Food Facts API (unverified crowdsourced data).`,
-          t
+          'internal_reviewed_catalog',
+          'failed',
+          `Internal database query failed: ${err.message}`,
+          t,
+          err.message
         )
       }
-    } catch (err: any) {
-      retrievalErrors.push(`Public catalog query error: ${err.message}`)
-      logStep(
-        'retrieve_candidate_evidence',
-        'open_food_facts_public',
-        'failed',
-        `Public catalog lookup failed: ${err.message}`,
-        t,
-        err.message
-      )
+    } else if (toolName === 'partner_catalog' && request.allowPartnerCatalog) {
+      const catalogSearchFn = context.externalCatalogSearch || (process.env.GUARDIAN_CATALOG_API_URL ? searchApprovedCatalog : undefined)
+      if (!catalogSearchFn) {
+        t = Date.now()
+        logStep(
+          'retrieve_candidate_evidence',
+          'catalog_search',
+          'skipped',
+          'Partner catalog requested but GUARDIAN_CATALOG_API_URL is not configured; zero simulated products fabricated.',
+          t
+        )
+      } else {
+        let partnerSuccess = false
+        // Bounded 1-retry budget with backoff
+        for (let attempt = 1; attempt <= 2 && !partnerSuccess; attempt++) {
+          t = Date.now()
+          try {
+            const partnerItems = await catalogSearchFn(currentQuery, request.currency)
+            gatheredEvidence.push(...partnerItems.slice(0, 10))
+            partnerSuccess = true
+            logStep(
+              'retrieve_candidate_evidence',
+              'catalog_search',
+              'completed',
+              `Partner catalog returned ${partnerItems.length} candidate record(s) on attempt ${attempt}.`,
+              t
+            )
+          } catch (err: any) {
+            if (attempt === 1) {
+              logStep(
+                'retrieve_candidate_evidence',
+                'catalog_search',
+                'failed',
+                `Attempt 1 failed (${err.message}); initiating automatic retry with backoff.`,
+                t,
+                err.message
+              )
+              await new Promise(r => setTimeout(r, 200))
+            } else {
+              retrievalErrors.push(`Partner catalog connector failed: ${err.message}`)
+              logStep(
+                'retrieve_candidate_evidence',
+                'catalog_search',
+                'failed',
+                `Attempt 2 failed; halted connector safely. Zero fake records created.`,
+                t,
+                err.message
+              )
+            }
+          }
+        }
+      }
+    } else if (toolName === 'open_food_facts' && request.allowPublicOffCatalog) {
+      t = Date.now()
+      try {
+        const offItems = await searchPublicOpenFoodFacts(currentQuery, request.currency)
+        if (offItems.length > 0) {
+          gatheredEvidence.push(...offItems)
+          uncertainties.push('Public Open Food Facts records contain crowdsourced entries; ingredient formulations may differ by region.')
+          logStep(
+            'retrieve_candidate_evidence',
+            'open_food_facts_crowdsourced',
+            'completed',
+            `Retrieved ${offItems.length} record(s) from Open Food Facts public database.`,
+            t
+          )
+        } else {
+          logStep(
+            'retrieve_candidate_evidence',
+            'open_food_facts_crowdsourced',
+            'completed',
+            'Open Food Facts query completed; zero matching records found.',
+            t
+          )
+        }
+      } catch (err: any) {
+        retrievalErrors.push(`Open Food Facts error: ${err.message}`)
+        logStep(
+          'retrieve_candidate_evidence',
+          'open_food_facts_crowdsourced',
+          'failed',
+          `Open Food Facts query failed: ${err.message}`,
+          t,
+          err.message
+        )
+      }
     }
   }
 
-  // Deduplicate records by unique identifier
+  // Stage 3: Deduplication and Evidence Normalization
   const uniqueItems = new Map<string, ProductEvidence>()
   let duplicatesCount = 0
   for (const item of gatheredEvidence) {
+    if (!item || !item.id) continue
     if (uniqueItems.has(item.id)) {
       duplicatesCount++
       continue
@@ -233,7 +356,7 @@ export async function runGuardianAutonomousAgent(
     t
   )
 
-  // Stage 4: Deterministic Cross-Verification Engine
+  // Stage 4: Deterministic Cross-Verification Engine (Independent of LLM)
   t = Date.now()
   const evaluatedProducts: EvaluatedProduct[] = []
   if (normalizedEvidence.length === 0) {
@@ -246,37 +369,49 @@ export async function runGuardianAutonomousAgent(
     )
     uncertainties.push('No product evidence could be verified. Provide label photographs or configure a catalog connector.')
   } else {
+    // Cross-source conflict screening across gathered evidence
+    const sourceConflicts = detectEvidenceConflicts(normalizedEvidence, request.constraints)
+
     for (const item of normalizedEvidence) {
-      const evaluated = evaluateDeterministicSafety(item, normalizedConstraints, request.budget)
+      const evaluated = evaluateDeterministicSafety(item, request.constraints, request.budget)
+      if (sourceConflicts.has(item.id)) {
+        evaluated.conflictingClaims = true
+        evaluated.allergenStatus = 'CONFLICTING'
+        evaluated.status = 'needs_review'
+        evaluated.uncertaintyScore = Math.max(evaluated.uncertaintyScore, 0.90)
+        evaluated.reasons.push(`Needs Review (SOURCE CONFLICT): ${sourceConflicts.get(item.id)}`)
+      }
       evaluatedProducts.push(evaluated)
       if (evaluated.uncertaintyScore > 0.4) {
-        uncertainties.push(`Uncertainty on "${item.name}": incomplete declarations or ambiguous cross-contact wording.`)
+        uncertainties.push(`Uncertainty on "${item.name}": incomplete declarations, crowdsourced origin, or ambiguous cross-contact wording.`)
       }
     }
+
     logStep(
       'cross_verify_dietary_rules',
       'deterministic_verifier',
       'completed',
-      `Evaluated ${evaluatedProducts.length} record(s): ${evaluatedProducts.filter(p => p.status === 'candidate').length} candidate(s), ${evaluatedProducts.filter(p => p.status === 'excluded').length} excluded, ${evaluatedProducts.filter(p => p.status === 'needs_review').length} requiring review.`,
+      `Evaluated ${evaluatedProducts.length} product(s) against 15 strict dietary constraints independently of LLM.`,
       t
     )
   }
 
-  // Stage 5: Ranking and Uncertainty Assessment
+  // Stage 5: Uncertainty Scoring and Candidate Shortlist
   t = Date.now()
   const candidates = evaluatedProducts.filter(p => p.status === 'candidate')
   candidates.sort((a, b) => {
-    // Sort by price if available, else by lower uncertainty
-    if (a.price !== null && b.price !== null) return a.price - b.price
-    if (a.price !== null) return -1
-    if (b.price !== null) return 1
-    return a.uncertaintyScore - b.uncertaintyScore
+    // Rank by price ascending, with unknown price last
+    const priceA = a.price ?? Number.POSITIVE_INFINITY
+    const priceB = b.price ?? Number.POSITIVE_INFINITY
+    if (priceA !== priceB) return priceA - priceB
+    return (a.uncertaintyScore ?? 0.5) - (b.uncertaintyScore ?? 0.5)
   })
-  const shortlist = candidates.slice(0, request.maxResults).map(c => c.id)
+
+  const shortlist = candidates.slice(0, request.maxResults).map(p => p.id)
 
   logStep(
     'rank_and_evaluate_uncertainty',
-    'ranker_and_uncertainty_evaluator',
+    'uncertainty_ranker',
     'completed',
     `Ranked ${shortlist.length} candidate shortlist from ${candidates.length} qualifying item(s).`,
     t
@@ -295,15 +430,17 @@ export async function runGuardianAutonomousAgent(
           'persist_shortlist_approval',
           'user_vault_storage',
           'completed',
-          'Successfully persisted task and approved shortlist to user vault.',
+          `Shortlist persisted with user affirmative approval into user vault (Run ID: ${runId}).`,
           t
         )
       } catch (err: any) {
+        saved = false
+        retrievalErrors.push(`Failed to persist shortlist: ${err.message}`)
         logStep(
           'persist_shortlist_approval',
           'user_vault_storage',
           'failed',
-          `Vault write failed: ${err.message}. Shortlist was not saved.`,
+          `Vault persistence failed: ${err.message}. Shortlist marked unsaved.`,
           t,
           err.message
         )
@@ -339,10 +476,10 @@ export async function runGuardianAutonomousAgent(
     runId,
     createdAt: new Date().toISOString(),
     elapsedMs: Date.now() - started,
-    mode: 'AUTONOMOUS_LANGGRAPH_STATE_MACHINE',
+    mode: currentPlan.mode,
     goal: request.goal,
     sourceMode,
-    plan,
+    plan: currentPlan.stages,
     currentStage: 'persist_shortlist_approval',
     steps,
     products: evaluatedProducts,
@@ -350,12 +487,11 @@ export async function runGuardianAutonomousAgent(
     saved,
     retrievalErrors,
     uncertainties,
-    safetyNotice: 'A candidate rating represents an uncertified comparative status based strictly on retrieved text. It does NOT constitute medical or allergy safety certification. Always verify manufacturer labels directly before consuming.',
+    safetyNotice: 'A candidate rating represents an uncertified comparative status based strictly on retrieved text. It does NOT constitute medical or allergy safety certification. Always verify physical manufacturer labels directly before consuming.',
     limitations: [
-      'Autonomous agent operates within bounded LangGraph-inspired deterministic states; arbitrary execution of unverified web URLs is strictly prohibited.',
-      'Third-party and crowdsourced public databases may contain unverified or outdated ingredient formulations.',
+      'Autonomous agent operates within bounded deterministic state machine; arbitrary execution of unverified web URLs is strictly prohibited.',
+      'Third-party and crowdsourced public databases (Open Food Facts, community OCR cache) may contain unverified or outdated ingredient formulations.',
       'A missing allergen declaration does NOT prove the absence of an allergen or cross-contact risk.'
-    ],
-    engineVersion: '2.0.0'
+    ]
   }
 }

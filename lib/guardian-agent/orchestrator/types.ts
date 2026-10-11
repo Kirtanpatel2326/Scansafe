@@ -23,6 +23,35 @@ export type Constraint = z.infer<typeof ConstraintEnum>
 export const CurrencyEnum = z.enum(['INR', 'AED', 'USD'])
 export type Currency = z.infer<typeof CurrencyEnum>
 
+export const SourceTypeEnum = z.enum([
+  'USER_UPLOADED_LABEL',
+  'INTERNAL_CACHE_OCR',
+  'INTERNAL_VERIFIED_CATALOG',
+  'OPEN_FOOD_FACTS_CROWDSOURCED',
+  'OPEN_FOOD_FACTS_PUBLIC', // preserved for backwards compatibility
+  'PARTNER_MANUFACTURER_FEED',
+  'SYNTHETIC_BENCHMARK_FIXTURE'
+])
+export type SourceType = z.infer<typeof SourceTypeEnum>
+
+export const VerificationStatusEnum = z.enum([
+  'UNVERIFIED_COMMUNITY_OCR',
+  'MANUFACTURER_AUTHORIZED',
+  'CROWDSOURCED_COMMUNITY',
+  'MANUALLY_PROVIDED',
+  'SYNTHETIC_FIXTURE'
+])
+export type VerificationStatus = z.infer<typeof VerificationStatusEnum>
+
+export const AllergenStatusEnum = z.enum([
+  'CONTAINS',
+  'MAY_CONTAIN',
+  'UNKNOWN',
+  'CONFLICTING',
+  'NO_RESTRICTED_TOKENS_DETECTED'
+])
+export type AllergenStatus = z.infer<typeof AllergenStatusEnum>
+
 export const ProductEvidenceSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(200),
@@ -31,17 +60,14 @@ export const ProductEvidenceSchema = z.object({
   allergenStatement: z.string().trim().max(3000),
   labelComplete: z.boolean(),
   evidenceSource: z.string().trim().min(4).max(500),
-  sourceType: z.enum([
-    'USER_UPLOADED_LABEL',
-    'INTERNAL_VERIFIED_CATALOG',
-    'OPEN_FOOD_FACTS_PUBLIC',
-    'PARTNER_MANUFACTURER_FEED',
-    'SYNTHETIC_BENCHMARK_FIXTURE'
-  ]).default('USER_UPLOADED_LABEL'),
+  sourceType: SourceTypeEnum.default('USER_UPLOADED_LABEL'),
+  verificationStatus: VerificationStatusEnum.default('MANUALLY_PROVIDED'),
+  evidenceLimitations: z.array(z.string()).default([]),
+  sourceUrl: z.string().max(1000).optional(),
   price: z.number().finite().nonnegative().max(100000).optional(),
   currency: CurrencyEnum.default('INR'),
   gtin: z.string().trim().max(50).optional(),
-  retrievedAt: z.string().datetime().optional()
+  retrievedAt: z.string().optional()
 })
 export type ProductEvidence = z.infer<typeof ProductEvidenceSchema>
 
@@ -74,12 +100,17 @@ export const EvaluatedProductSchema = z.object({
   currency: CurrencyEnum,
   evidenceSource: z.string(),
   sourceType: z.string(),
+  verificationStatus: z.string().optional(),
+  allergenStatus: AllergenStatusEnum,
   status: z.enum(['candidate', 'excluded', 'needs_review']),
   reasons: z.array(z.string()),
   allergenHits: z.array(z.string()),
   precautionaryNotice: z.boolean(),
   conflictingClaims: z.boolean(),
-  uncertaintyScore: z.number().min(0).max(1)
+  uncertaintyScore: z.number().min(0).max(1),
+  evidenceLimitations: z.array(z.string()).optional(),
+  sourceUrl: z.string().optional(),
+  retrievedAt: z.string().optional()
 })
 export type EvaluatedProduct = z.infer<typeof EvaluatedProductSchema>
 
@@ -92,17 +123,24 @@ export const AutonomousAgentRequestSchema = z.object({
   allowInternalCatalog: z.boolean().default(true),
   allowPublicOffCatalog: z.boolean().default(false),
   allowPartnerCatalog: z.boolean().default(false),
-  products: z.array(ProductEvidenceSchema).max(50).optional(),
+  products: z.array(ProductEvidenceSchema).max(50).default([]),
   approvedActions: z.array(z.enum(['save_shortlist', 'notify_user'])).default([])
 })
 export type AutonomousAgentRequest = z.output<typeof AutonomousAgentRequestSchema>
 export type AutonomousAgentInput = z.input<typeof AutonomousAgentRequestSchema>
 
+export const AgentExecutionModeEnum = z.enum([
+  'LLM_STRUCTURED_AUTONOMOUS_PLANNER',
+  'BOUNDED_STATE_MACHINE_PLANNER',
+  'BOUNDED_AUTONOMOUS_WORKFLOW'
+])
+export type AgentExecutionMode = z.infer<typeof AgentExecutionModeEnum>
+
 export const AutonomousAgentResponseSchema = z.object({
   runId: z.string().uuid(),
   createdAt: z.string(),
   elapsedMs: z.number().nonnegative(),
-  mode: z.literal('AUTONOMOUS_LANGGRAPH_STATE_MACHINE'),
+  mode: AgentExecutionModeEnum,
   goal: z.string(),
   sourceMode: z.enum([
     'USER_SUPPLIED_EVIDENCE_ONLY',
@@ -119,7 +157,7 @@ export const AutonomousAgentResponseSchema = z.object({
   retrievalErrors: z.array(z.string()),
   uncertainties: z.array(z.string()),
   safetyNotice: z.string(),
-  limitations: z.array(z.string()),
-  engineVersion: z.string().default(GUARDIAN_ENGINE_VERSION)
+  limitations: z.array(z.string())
 })
 export type AutonomousAgentResponse = z.infer<typeof AutonomousAgentResponseSchema>
+export { GUARDIAN_ENGINE_VERSION }

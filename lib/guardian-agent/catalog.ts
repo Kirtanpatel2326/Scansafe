@@ -27,6 +27,8 @@ export async function searchApprovedCatalog(query:string,currency:string):Promis
     return parsed.map(item => ({
       ...item,
       sourceType: 'PARTNER_MANUFACTURER_FEED' as const,
+      verificationStatus: 'MANUFACTURER_AUTHORIZED' as const,
+      evidenceLimitations: ['Partner manufacturer catalog API feed. Requires periodic verification.'],
       currency: (currency as any) || 'INR',
       retrievedAt: new Date().toISOString()
     }))

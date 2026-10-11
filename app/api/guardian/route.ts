@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { GuardianRequestSchema, runGuardian } from '@/lib/guardian'
+import { checkGuardianRateLimitShared } from '@/lib/guardian-security'
 
 const MAX_REQUEST_BYTES = 120_000
 
@@ -27,6 +28,12 @@ async function readBoundedJson(request: Request): Promise<string> {
 }
 
 export async function POST(request: Request) {
+  const rateLimitResponse = await checkGuardianRateLimitShared(request, undefined, {
+    routeLabel: 'guardian-evidence-auditor',
+    maxRequests: 20
+  })
+  if (rateLimitResponse) return rateLimitResponse
+
   if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
     return NextResponse.json({ error: 'JSON content required' }, { status: 415 })
   }

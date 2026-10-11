@@ -47,24 +47,42 @@ export type ToolContext = {
  * upgrading to the state machine orchestrator for Phase 2.
  */
 export async function executeGuardianAgent(request: AgentRequest, tools: ToolContext = {}) {
+  if (!request || typeof request !== 'object') {
+    throw new Error('Invalid agent request: payload must be an object.')
+  }
+  let validRequest: AgentRequest = request
+  if (typeof AgentRequestSchema?.safeParse === 'function') {
+    const parsed = AgentRequestSchema.safeParse(request)
+    if (parsed && typeof parsed.success === 'boolean') {
+      if (!parsed.success) {
+        const issue = parsed.error?.issues?.[0]
+        const msg = issue ? `${issue.path.join('.')}: ${issue.message}` : 'schema validation failed'
+        throw new Error(`Invalid agent request: ${msg}`)
+      }
+      if (parsed.data && typeof parsed.data.goal === 'string') {
+        validRequest = parsed.data
+      }
+    }
+  }
+
   // If request specifies partner catalog or allowCatalogSearch, map to orchestrator
-  const isAutonomousRequest = request.allowInternalCatalog !== undefined ||
-    request.allowPublicOffCatalog !== undefined ||
-    request.allowPartnerCatalog !== undefined ||
-    request.allowCatalogSearch
+  const isAutonomousRequest = validRequest.allowInternalCatalog !== undefined ||
+    validRequest.allowPublicOffCatalog !== undefined ||
+    validRequest.allowPartnerCatalog !== undefined ||
+    validRequest.allowCatalogSearch
 
   if (isAutonomousRequest) {
     const orchestratorReq = {
-      goal: request.goal,
-      constraints: request.constraints,
-      budget: request.budget,
-      currency: request.currency,
-      maxResults: request.maxResults,
-      allowInternalCatalog: request.allowInternalCatalog ?? (request.allowCatalogSearch ? false : true),
-      allowPublicOffCatalog: request.allowPublicOffCatalog ?? false,
-      allowPartnerCatalog: request.allowPartnerCatalog ?? request.allowCatalogSearch ?? false,
-      products: request.products,
-      approvedActions: request.approvedActions
+      goal: validRequest.goal,
+      constraints: validRequest.constraints,
+      budget: validRequest.budget,
+      currency: validRequest.currency,
+      maxResults: validRequest.maxResults,
+      allowInternalCatalog: validRequest.allowInternalCatalog ?? (validRequest.allowCatalogSearch ? false : true),
+      allowPublicOffCatalog: validRequest.allowPublicOffCatalog ?? false,
+      allowPartnerCatalog: validRequest.allowPartnerCatalog ?? validRequest.allowCatalogSearch ?? false,
+      products: validRequest.products,
+      approvedActions: validRequest.approvedActions
     }
 
     const res = await runGuardianAutonomousAgent(orchestratorReq, {

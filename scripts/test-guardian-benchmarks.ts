@@ -43,6 +43,8 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
     labelComplete: overrides.labelComplete !== undefined ? overrides.labelComplete : true,
     evidenceSource: overrides.evidenceSource || 'Synthetic Benchmark Fixture',
     sourceType: overrides.sourceType || 'SYNTHETIC_BENCHMARK_FIXTURE',
+    verificationStatus: overrides.verificationStatus || 'SYNTHETIC_FIXTURE',
+    evidenceLimitations: overrides.evidenceLimitations || ['Synthetic benchmark testing fixture.'],
     price: overrides.price !== undefined ? overrides.price : 100,
     currency: overrides.currency || 'INR',
     ...overrides
