@@ -52,6 +52,30 @@ export const AllergenStatusEnum = z.enum([
 ])
 export type AllergenStatus = z.infer<typeof AllergenStatusEnum>
 
+export const GoalRelevanceStatusEnum = z.enum([
+  'MATCH',
+  'EXCLUDED',
+  'NEEDS_REVIEW'
+])
+export type GoalRelevanceStatus = z.infer<typeof GoalRelevanceStatusEnum>
+
+export const DecomposedGoalSchema = z.object({
+  rawGoal: z.string(),
+  requiredCategory: z.string().trim().min(1).max(100),
+  categoryKeywords: z.array(z.string()).default([]),
+  excludedCategoryKeywords: z.array(z.string()).default([]),
+  requiredAttributes: z.array(z.string()).default([]),
+  excludedIngredients: z.array(z.string()).default([]),
+  dietaryRestrictions: z.array(ConstraintEnum).default([]),
+  optionalPreferences: z.array(z.string()).default([]),
+  budget: z.number().positive().finite().optional(),
+  currency: CurrencyEnum.default('INR'),
+  maxResults: z.number().int().min(1).max(20).default(5),
+  quantity: z.string().optional(),
+  geographicOrRetailerConstraints: z.string().optional()
+})
+export type DecomposedGoal = z.infer<typeof DecomposedGoalSchema>
+
 export const ProductEvidenceSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(200),
@@ -67,7 +91,11 @@ export const ProductEvidenceSchema = z.object({
   price: z.number().finite().nonnegative().max(100000).optional(),
   currency: CurrencyEnum.default('INR'),
   gtin: z.string().trim().max(50).optional(),
-  retrievedAt: z.string().optional()
+  retrievedAt: z.string().optional(),
+  sugarsPer100g: z.number().finite().nonnegative().optional(),
+  isOrganicDeclared: z.boolean().optional(),
+  certificationsDeclared: z.array(z.string()).optional(),
+  categoriesDeclared: z.array(z.string()).optional()
 })
 export type ProductEvidence = z.infer<typeof ProductEvidenceSchema>
 
@@ -92,6 +120,12 @@ export const AgentStepSchema = z.object({
 })
 export type AgentStep = z.infer<typeof AgentStepSchema>
 
+export const AttributeEvidenceDetailSchema = z.object({
+  status: GoalRelevanceStatusEnum,
+  evidence: z.string()
+})
+export type AttributeEvidenceDetail = z.infer<typeof AttributeEvidenceDetailSchema>
+
 export const EvaluatedProductSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -102,14 +136,19 @@ export const EvaluatedProductSchema = z.object({
   sourceType: z.string(),
   verificationStatus: z.string().optional(),
   allergenStatus: AllergenStatusEnum,
+  goalRelevanceStatus: GoalRelevanceStatusEnum.optional(),
+  categoryMatch: z.boolean().optional(),
   status: z.enum(['candidate', 'excluded', 'needs_review']),
   reasons: z.array(z.string()),
+  relevanceReasons: z.array(z.string()).optional(),
+  attributeEvidence: z.record(z.string(), AttributeEvidenceDetailSchema).optional(),
   allergenHits: z.array(z.string()),
   precautionaryNotice: z.boolean(),
   conflictingClaims: z.boolean(),
   uncertaintyScore: z.number().min(0).max(1),
   evidenceLimitations: z.array(z.string()).optional(),
   sourceUrl: z.string().optional(),
+  gtin: z.string().optional(),
   retrievedAt: z.string().optional()
 })
 export type EvaluatedProduct = z.infer<typeof EvaluatedProductSchema>
@@ -142,6 +181,7 @@ export const AutonomousAgentResponseSchema = z.object({
   elapsedMs: z.number().nonnegative(),
   mode: AgentExecutionModeEnum,
   goal: z.string(),
+  decomposedGoal: DecomposedGoalSchema.optional(),
   sourceMode: z.enum([
     'USER_SUPPLIED_EVIDENCE_ONLY',
     'CATALOG_EVIDENCE_ONLY',

@@ -6,6 +6,7 @@ import {
   EvaluatedProduct
 } from './types'
 import { evaluateDeterministicSafety, detectEvidenceConflicts } from './verifier'
+import { decomposeUserGoal, evaluateProductGoalRelevance } from './goal-verifier'
 import { searchInternalReviewedCatalog, searchPublicOpenFoodFacts } from './tools'
 import { searchApprovedCatalog } from '../catalog'
 import { createAutonomousExecutionPlan, dynamicReplanAfterToolExecution } from './planner'
@@ -165,8 +166,16 @@ export async function runGuardianAutonomousAgent(
       })
     }
 
-    // Stage 1: Autonomous Planning (LLM or Bounded Deterministic Planner)
+    // Stage 1: Structured Goal Decomposition & Autonomous Planning
     let t = Date.now()
+    const decomposedGoal = decomposeUserGoal(
+      request.goal,
+      request.constraints,
+      request.budget,
+      request.currency,
+      request.maxResults
+    )
+
     const executionPlan = await createAutonomousExecutionPlan({
       goal: request.goal,
       constraints: request.constraints,
@@ -174,14 +183,15 @@ export async function runGuardianAutonomousAgent(
       currency: request.currency,
       allowInternalCatalog: request.allowInternalCatalog,
       allowPublicOffCatalog: request.allowPublicOffCatalog,
-      allowPartnerCatalog: request.allowPartnerCatalog
+      allowPartnerCatalog: request.allowPartnerCatalog,
+      decomposedGoal
     }, 7000, globalController.signal)
 
     logStep(
       'parse_objective',
       'plan_orchestrator',
       'completed',
-      `Formulated plan via ${executionPlan.mode}. Reasoning: ${executionPlan.reasoning}`,
+      `Decomposed goal (${decomposedGoal.requiredCategory}) & formulated plan via ${executionPlan.mode}. Reasoning: ${executionPlan.reasoning}`,
       t
     )
 
@@ -495,7 +505,7 @@ export async function runGuardianAutonomousAgent(
     t
   )
 
-  // Stage 4: Deterministic Cross-Verification Engine (Independent of LLM)
+  // Stage 4: Independent Deterministic Verification (Safety & Goal Relevance)
   t = Date.now()
   const evaluatedProducts: EvaluatedProduct[] = []
   if (normalizedEvidence.length === 0) {
@@ -512,17 +522,45 @@ export async function runGuardianAutonomousAgent(
     const sourceConflicts = detectEvidenceConflicts(normalizedEvidence, request.constraints)
 
     for (const item of normalizedEvidence) {
-      const evaluated = evaluateDeterministicSafety(item, request.constraints, request.budget)
+      const safetyEval = evaluateDeterministicSafety(item, request.constraints, request.budget)
+      const goalEval = evaluateProductGoalRelevance(item, decomposedGoal)
+
       if (sourceConflicts.has(item.id)) {
-        evaluated.conflictingClaims = true
-        evaluated.allergenStatus = 'CONFLICTING'
-        evaluated.status = 'needs_review'
-        evaluated.uncertaintyScore = Math.max(evaluated.uncertaintyScore, 0.90)
-        evaluated.reasons.push(`Needs Review (SOURCE CONFLICT): ${sourceConflicts.get(item.id)}`)
+        safetyEval.conflictingClaims = true
+        safetyEval.allergenStatus = 'CONFLICTING'
+        safetyEval.status = 'needs_review'
+        safetyEval.uncertaintyScore = Math.max(safetyEval.uncertaintyScore, 0.90)
+        safetyEval.reasons.push(`Needs Review (SOURCE CONFLICT): ${sourceConflicts.get(item.id)}`)
       }
+
+      // Priority 2: Two independent evaluation dimensions.
+      // Shortlisting requires passing BOTH food safety and goal relevance.
+      let combinedStatus: 'candidate' | 'excluded' | 'needs_review' = 'needs_review'
+      if (sourceConflicts.has(item.id) || safetyEval.allergenStatus === 'CONFLICTING') {
+        combinedStatus = 'needs_review'
+      } else if (goalEval.status === 'EXCLUDED' || safetyEval.allergenStatus === 'CONTAINS' || safetyEval.allergenStatus === 'MAY_CONTAIN') {
+        combinedStatus = 'excluded'
+      } else if (safetyEval.allergenStatus === 'NO_RESTRICTED_TOKENS_DETECTED' && goalEval.status === 'MATCH') {
+        combinedStatus = 'candidate'
+      } else {
+        combinedStatus = 'needs_review'
+      }
+
+      const evaluated: EvaluatedProduct = {
+        ...safetyEval,
+        status: combinedStatus,
+        goalRelevanceStatus: goalEval.status,
+        categoryMatch: goalEval.categoryMatch,
+        relevanceReasons: goalEval.relevanceReasons,
+        attributeEvidence: goalEval.attributeEvidence,
+        reasons: [...safetyEval.reasons, ...goalEval.relevanceReasons]
+      }
+
       evaluatedProducts.push(evaluated)
-      if (evaluated.uncertaintyScore > 0.4) {
-        uncertainties.push(`Uncertainty on "${item.name}": incomplete declarations, crowdsourced origin, or ambiguous cross-contact wording.`)
+      if (evaluated.uncertaintyScore > 0.4 || goalEval.status === 'NEEDS_REVIEW') {
+        const reviewNote = goalEval.relevanceReasons.find(r => r.startsWith('NEEDS_REVIEW')) ||
+          'incomplete declarations, crowdsourced origin, or unverified claims'
+        uncertainties.push(`Uncertainty on "${item.name}": ${reviewNote}.`)
       }
     }
 
@@ -530,7 +568,7 @@ export async function runGuardianAutonomousAgent(
       'cross_verify_dietary_rules',
       'deterministic_verifier',
       'completed',
-      `Evaluated ${evaluatedProducts.length} product(s) against 15 strict dietary constraints independently of LLM.`,
+      `Evaluated ${evaluatedProducts.length} product(s) across food safety (15 allergens) and goal relevance (${decomposedGoal.requiredCategory}) independently of LLM.`,
       t
     )
   }
@@ -617,6 +655,7 @@ export async function runGuardianAutonomousAgent(
       elapsedMs: Date.now() - started,
       mode: currentPlan.mode,
       goal: request.goal,
+      decomposedGoal,
       sourceMode,
       plan: currentPlan.stages,
       currentStage: 'persist_shortlist_approval',
@@ -626,11 +665,12 @@ export async function runGuardianAutonomousAgent(
       saved,
       retrievalErrors,
       uncertainties,
-      safetyNotice: 'A candidate rating represents an uncertified comparative status based strictly on retrieved text. It does NOT constitute medical or allergy safety certification. Always verify physical manufacturer labels directly before consuming.',
+      safetyNotice: 'Evidence-backed candidates represent uncertified comparative evaluations based strictly on retrieved packaging text. This does NOT constitute medical, food-safety, or allergy-free certification. Always verify physical manufacturer labels directly before consuming.',
       limitations: [
         'Autonomous agent operates within bounded deterministic state machine; arbitrary execution of unverified web URLs is strictly prohibited.',
         'Third-party and crowdsourced public databases (Open Food Facts, community OCR cache) may contain unverified or outdated ingredient formulations.',
-        'A missing allergen declaration does NOT prove the absence of an allergen or cross-contact risk.'
+        'A missing allergen declaration does NOT prove the absence of an allergen or cross-contact risk.',
+        'Product shortlists only include items passing both deterministic allergen safety and category/attribute goal relevance.'
       ]
     }
   } finally {

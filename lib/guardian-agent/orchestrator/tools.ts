@@ -72,7 +72,11 @@ export async function searchInternalReviewedCatalog(
         price: undefined,
         currency,
         gtin: item.barcode,
-        retrievedAt: new Date().toISOString()
+        retrievedAt: new Date().toISOString(),
+        sugarsPer100g: typeof raw.sugars_100g === 'number' ? raw.sugars_100g : (typeof raw.sugars === 'number' ? raw.sugars : undefined),
+        isOrganicDeclared: Boolean(raw.is_organic || raw.organic || (/organic/i.test(item.product_name || '') || /organic/i.test(String(raw.certifications || '')))),
+        certificationsDeclared: Array.isArray(raw.certifications) ? raw.certifications : (raw.certifications ? [String(raw.certifications)] : []),
+        categoriesDeclared: Array.isArray(raw.categories) ? raw.categories : (item.category ? [String(item.category)] : [])
       }
     })
   } catch (err) {
@@ -125,10 +129,20 @@ export async function searchPublicOpenFoodFacts(
 
     let products = await fetchOff(query)
     if (products.length === 0) {
-      const words = query.trim().split(/\s+/)
-      if (words.length > 2) {
-        const fallbackQuery = words.slice(-2).join(' ')
-        products = await fetchOff(fallbackQuery)
+      // Smart fallback: remove generic noise words but preserve key category nouns
+      const stripped = query.replace(/\b(organic|natural|low[ -]?sugar|sugar[ -]?free|healthy|best|premium)\b/gi, '').trim().replace(/\s+/g, ' ')
+      if (stripped && stripped !== query) {
+        products = await fetchOff(stripped)
+      }
+      if (products.length === 0) {
+        const words = query.trim().split(/\s+/)
+        // Avoid stripping to single words that invert category (e.g., "seed butter" -> "butter")
+        if (words.length > 2 && !/seed\s+butter/i.test(query)) {
+          const fallbackQuery = words.slice(-2).join(' ')
+          products = await fetchOff(fallbackQuery)
+        } else if (/seed\s+butter/i.test(query)) {
+          products = await fetchOff('seed butter')
+        }
       }
     }
 
@@ -139,6 +153,17 @@ export async function searchPublicOpenFoodFacts(
       const allergens = (p.allergens_tags || []).map((t: string) => t.replace(/^[a-z]+:/i, '')).join(', ')
 
       const sourceUrl = p.url || (p.code ? `https://world.openfoodfacts.org/product/${p.code}` : undefined)
+
+      const categoriesTags = (p.categories_tags || []).map((t: string) => t.replace(/^[a-z]+:/i, '').replace(/-/g, ' '))
+      const labelsTags = (p.labels_tags || []).map((t: string) => t.replace(/^[a-z]+:/i, '').replace(/-/g, ' '))
+
+      const sugarsPer100g = typeof p.nutriments?.sugars_100g === 'number'
+        ? p.nutriments.sugars_100g
+        : (typeof p.nutriments?.sugars === 'number' ? p.nutriments.sugars : undefined)
+
+      const isOrganicDeclared = labelsTags.some((l: string) => /organic|biologique|bio/i.test(l)) ||
+        /organic/i.test(p.labels || '') ||
+        /organic/i.test(name)
 
       return {
         id: `off_${p.code || Math.random().toString(36).slice(2)}`,
@@ -158,7 +183,11 @@ export async function searchPublicOpenFoodFacts(
         price: undefined,
         currency,
         gtin: p.code,
-        retrievedAt: new Date().toISOString()
+        retrievedAt: new Date().toISOString(),
+        sugarsPer100g,
+        isOrganicDeclared,
+        certificationsDeclared: labelsTags,
+        categoriesDeclared: categoriesTags
       }
     })
   } catch (err) {

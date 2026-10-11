@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { Constraint, Currency } from './types'
+import { Constraint, Currency, DecomposedGoal } from './types'
 
 export interface StructuredPlan {
   mode: 'LLM_STRUCTURED_AUTONOMOUS_PLANNER' | 'BOUNDED_STATE_MACHINE_PLANNER'
@@ -19,6 +19,7 @@ interface PlannerInput {
   allowInternalCatalog: boolean
   allowPublicOffCatalog: boolean
   allowPartnerCatalog: boolean
+  decomposedGoal?: DecomposedGoal
 }
 
 const ToolNameSchema = z.enum(['internal_catalog', 'open_food_facts', 'partner_catalog'])
@@ -76,18 +77,24 @@ export async function createAutonomousExecutionPlan(
     try {
       timer = setTimeout(() => controller.abort(), timeoutMs)
 
+      const categoryContext = input.decomposedGoal ? `
+Required Product Category: "${input.decomposedGoal.requiredCategory}"
+Target Category Keywords: [${input.decomposedGoal.categoryKeywords.join(', ')}]
+Explicitly Excluded Category Keywords (DO NOT SEARCH FOR THESE): [${input.decomposedGoal.excludedCategoryKeywords.join(', ')}]
+` : ''
+
       const prompt = `You are the food safety research planner for ScanSafe Guardian AI.
 Given this research goal: "${input.goal}"
 Active dietary constraints: [${input.constraints.join(', ')}]
 Permitted tools (strict allowlist): [${availableTools.join(', ')}]
-
+${categoryContext}
 Respond strictly in valid JSON matching this schema:
 {
   "reasoning": "Concise 1 sentence explanation of query plan",
   "selectedTools": ["${availableTools.join('", "')}"],
-  "searchQueries": ["core product keyword (1-3 words, e.g. energy bar)", "broader category fallback"]
+  "searchQueries": ["core product keyword (1-3 words)", "broader category fallback"]
 }
-IMPORTANT: searchQueries MUST be 1-3 simple words naming the core food item (e.g. "energy bar", "seed butter", "dipping sauce"). Do NOT include allergen or dietary adjectives like gluten-free or vegan in searchQueries because dietary safety is checked deterministically afterwards.`
+IMPORTANT: searchQueries MUST identify the target food category. For instance, if seeking seed butter, search "seed butter" or "sunflower butter", NEVER ordinary "butter". Do NOT include allergen or dietary adjectives like gluten-free or vegan in searchQueries because dietary safety is checked deterministically afterwards.`
 
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
       const res = await fetch(endpoint, {
@@ -178,18 +185,22 @@ function makeDeterministicPlan(
   availableTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'>
 ): StructuredPlan {
   const defaultQuery = cleanProductSearchQuery(input.goal, input.constraints)
+  const searchQueries = (input.decomposedGoal && input.decomposedGoal.categoryKeywords.length > 0)
+    ? Array.from(new Set([input.decomposedGoal.categoryKeywords[0], defaultQuery, ...input.decomposedGoal.categoryKeywords])).slice(0, 3)
+    : [defaultQuery]
+
   return {
     mode: 'BOUNDED_STATE_MACHINE_PLANNER',
-    reasoning: `Deterministic state-machine plan: prioritize available tools [${availableTools.join(', ') || 'user_evidence_only'}].`,
+    reasoning: `Deterministic state-machine plan: prioritize available tools [${availableTools.join(', ') || 'user_evidence_only'}]. Target category: ${input.decomposedGoal?.requiredCategory || 'general'}.`,
     stages: [
       `Analyze objective and restrict candidate products for [${input.constraints.join(', ')}]`,
       `Assemble multi-source evidence from authorized sources: [${availableTools.join(', ') || 'user provided evidence'}]`,
-      `Execute independent deterministic toxicology & allergen verification (fail-closed, zero false reassurance)`,
-      `Synthesize candidate rankings, assess uncertainty metrics, and flag missing packaging declarations`,
+      `Execute independent deterministic dietary safety verification (fail-closed, 15 allergen classes)`,
+      `Evaluate strict goal relevance across category, nutritional thresholds, and certification standards`,
       `Verify affirmative action approval before persisting shortlist to user vault`
     ],
     selectedTools: availableTools,
-    searchQueries: [defaultQuery],
+    searchQueries,
     replanCount: 0
   }
 }

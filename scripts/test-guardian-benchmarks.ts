@@ -863,9 +863,288 @@ async function main() {
     assert.deepEqual(res.shortlist, ['c1', 'c2'])
   })
 
+  // ===========================================================================
+  // CATEGORY 8: Goal Relevance & Championship Failure Mode Regressions (106 - 115)
+  // ===========================================================================
+  console.log('▶ Category 8: Goal Relevance & Championship Failure Mode Regressions (106 - 115)')
+
+  await runScenario(106, 'Seed butter request strictly excludes ordinary animal dairy butter despite peanut/tree-nut safety', async () => {
+    const dairyButter = createItem({
+      id: 'dairy_butter_1',
+      name: 'Amul Pasteurized Butter',
+      ingredients: 'butterfat, pasteurized cream, common salt, water',
+      allergenStatement: 'Contains: Milk',
+      labelComplete: true,
+      price: 60
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find me an organic seed butter spread that is peanut-free and tree-nut-free',
+      constraints: ['peanut', 'tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [dairyButter]
+    })
+    const p = res.products.find(x => x.id === 'dairy_butter_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED') // Neither peanut nor tree-nut
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.ok(p.reasons.some(r => r.includes('Category Violation') || r.includes('dairy butter')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(107, 'Seed butter request strictly excludes peanut butter and nut butter', async () => {
+    const peanutButter = createItem({
+      id: 'peanut_butter_1',
+      name: 'Pintola Creamy Peanut Butter',
+      ingredients: 'roasted peanuts (100%)',
+      allergenStatement: 'Contains: Peanuts',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find me an organic seed butter spread',
+      constraints: ['tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [peanutButter]
+    })
+    const p = res.products.find(x => x.id === 'peanut_butter_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(108, 'Vegan request strictly excludes animal dairy, whey, egg, and honey ingredients', async () => {
+    const wheyBar = createItem({
+      id: 'whey_bar_1',
+      name: 'Protein Crunch Bar',
+      ingredients: 'whole grain rolled oats, whey protein isolate (from milk), clover honey, almonds, salt',
+      allergenStatement: 'Contains: Milk, Almonds',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find vegan energy bar',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [wheyBar]
+    })
+    const p = res.products.find(x => x.id === 'whey_bar_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED') // User only restricted peanut
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.ok(p.reasons.some(r => r.includes('Vegan Violation') || r.includes('animal-derived')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(109, 'Low-sugar request strictly excludes product exceeding 5g/100g regulatory threshold', async () => {
+    const sugaryBar = createItem({
+      id: 'sugary_bar_1',
+      name: 'Sweet Granola Snack Bar',
+      ingredients: 'rolled oats, brown sugar, cane molasses, sunflower oil, salt',
+      allergenStatement: 'Contains: none',
+      labelComplete: true,
+      sugarsPer100g: 18.5
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find low-sugar snack bar',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [sugaryBar]
+    })
+    const p = res.products.find(x => x.id === 'sugary_bar_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.ok(p.reasons.some(r => r.includes('Low-Sugar Violation') || r.includes('5.0g')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(110, 'Low-sugar request flags missing nutrition panel as NEEDS_REVIEW (never assumes 0g)', async () => {
+    const unverifiedBar = createItem({
+      id: 'no_sugar_panel_bar',
+      name: 'Artisan Oat Snack Bar',
+      ingredients: 'rolled oats, sunflower seeds, sea salt',
+      allergenStatement: 'Contains: none',
+      labelComplete: true,
+      sugarsPer100g: undefined // missing nutrition panel
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find low-sugar snack bar',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [unverifiedBar]
+    })
+    const p = res.products.find(x => x.id === 'no_sugar_panel_bar')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED')
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(111, 'Organic request flags uncertified product as NEEDS_REVIEW and discloses limitation', async () => {
+    const conventionalSeedButter = createItem({
+      id: 'conv_seed_butter',
+      name: 'Sunflower Seed Butter Spread',
+      ingredients: 'roasted sunflower seeds, cane sugar, salt',
+      allergenStatement: 'Contains: none',
+      labelComplete: true,
+      isOrganicDeclared: false,
+      certificationsDeclared: []
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find me an organic seed butter spread that is peanut-free and tree-nut-free',
+      constraints: ['peanut', 'tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [conventionalSeedButter]
+    })
+    const p = res.products.find(x => x.id === 'conv_seed_butter')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED')
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(112, 'Organic seed butter spread with verified credentials qualifies for candidate shortlist', async () => {
+    const organicSunButter = createItem({
+      id: 'organic_sunbutter_1',
+      name: 'Organic SunButter Sunflower Butter',
+      ingredients: 'organic roasted sunflower seeds, organic sugar, sea salt',
+      allergenStatement: 'Contains: None declared',
+      labelComplete: true,
+      isOrganicDeclared: true,
+      certificationsDeclared: ['USDA Organic', 'Non-GMO Project Verified', 'Certified Peanut-Free'],
+      price: 450
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find me an organic seed butter spread that is peanut-free and tree-nut-free',
+      constraints: ['peanut', 'tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [organicSunButter]
+    })
+    const p = res.products.find(x => x.id === 'organic_sunbutter_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED')
+    assert.equal(p.goalRelevanceStatus, 'MATCH')
+    assert.equal(p.status, 'candidate')
+    assert.deepEqual(res.shortlist, ['organic_sunbutter_1'])
+  })
+
+  await runScenario(113, 'Unverified gluten claim with incomplete label fails closed as NEEDS_REVIEW', async () => {
+    const incompleteProduct = createItem({
+      id: 'incomplete_item_1',
+      name: 'Artisan Rice Crackers',
+      ingredients: '', // Incomplete
+      labelComplete: false,
+      allergenStatement: 'No explicit allergen tags'
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find gluten-free crackers',
+      constraints: ['gluten'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [incompleteProduct]
+    })
+    const p = res.products.find(x => x.id === 'incomplete_item_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'UNKNOWN')
+    assert.equal(p.status, 'needs_review')
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(114, 'Shortlist quota protection: never backfills with unreviewed or excluded products', async () => {
+    const qualifyingOrganicSeedButter = createItem({
+      id: 'qualifying_seed_butter',
+      name: 'Organic Sunflower Seed Spread',
+      ingredients: 'organic sunflower seeds, organic cane sugar, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      isOrganicDeclared: true,
+      certificationsDeclared: ['USDA Organic'],
+      price: 350
+    })
+    const dairyButter = createItem({
+      id: 'dairy_butter_excl',
+      name: 'Dairy Table Butter',
+      ingredients: 'pasteurized cream, salt',
+      labelComplete: true
+    })
+    const nutButter = createItem({
+      id: 'nut_butter_excl',
+      name: 'Almond Butter',
+      ingredients: 'roasted almonds',
+      labelComplete: true
+    })
+    const conventionalSeedButter = createItem({
+      id: 'conv_seed_butter_rev',
+      name: 'Conventional Sunflower Butter',
+      ingredients: 'sunflower seeds, sugar, salt',
+      labelComplete: true,
+      isOrganicDeclared: false
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find me an organic seed butter spread that is peanut-free and tree-nut-free',
+      constraints: ['peanut', 'tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [
+        qualifyingOrganicSeedButter,
+        dairyButter,
+        nutButter,
+        conventionalSeedButter
+      ]
+    })
+
+    assert.equal(res.shortlist.length, 1)
+    assert.deepEqual(res.shortlist, ['qualifying_seed_butter'])
+  })
+
+  await runScenario(115, 'Conflicting cross-source evidence marks product NEEDS_REVIEW with high uncertainty and excludes from shortlist', async () => {
+    const itemInternal = createItem({
+      id: 'conflict_internal_1',
+      name: 'Mixed Seed Bar',
+      ingredients: 'sunflower seeds, pumpkin seeds, peanuts, oats',
+      allergenStatement: 'Contains: peanuts',
+      sourceType: 'INTERNAL_VERIFIED_CATALOG',
+      evidenceSource: 'Internal Database'
+    })
+    const itemOff = createItem({
+      id: 'conflict_off_1',
+      name: 'Mixed Seed Bar',
+      ingredients: 'sunflower seeds, pumpkin seeds, oats, honey',
+      allergenStatement: 'Contains: None',
+      sourceType: 'OPEN_FOOD_FACTS_CROWDSOURCED',
+      evidenceSource: 'Open Food Facts'
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find seed snack bar',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [itemInternal, itemOff]
+    })
+
+    const p = res.products.find(x => x.id === 'conflict_internal_1')
+    assert.ok(p)
+    assert.equal(p.status, 'needs_review')
+    assert.equal(p.allergenStatus, 'CONFLICTING')
+    assert.equal(res.shortlist.length, 0)
+    assert.ok(res.uncertainties.length > 0)
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 105`)
+  console.log(`   Passed: ${passedCount} / 115`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

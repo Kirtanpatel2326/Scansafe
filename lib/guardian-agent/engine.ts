@@ -79,9 +79,15 @@ export async function executeGuardianAgent(request: AgentRequest, tools: ToolCon
       budget: validRequest.budget,
       currency: validRequest.currency,
       maxResults: validRequest.maxResults,
-      allowInternalCatalog: validRequest.allowInternalCatalog ?? (validRequest.allowCatalogSearch ? false : true),
-      allowPublicOffCatalog: validRequest.allowPublicOffCatalog ?? false,
-      allowPartnerCatalog: validRequest.allowPartnerCatalog ?? validRequest.allowCatalogSearch ?? false,
+      allowInternalCatalog: request.allowInternalCatalog !== undefined
+        ? validRequest.allowInternalCatalog
+        : (validRequest.allowCatalogSearch ? false : true),
+      allowPublicOffCatalog: request.allowPublicOffCatalog !== undefined
+        ? validRequest.allowPublicOffCatalog
+        : false,
+      allowPartnerCatalog: request.allowPartnerCatalog !== undefined
+        ? validRequest.allowPartnerCatalog
+        : Boolean(validRequest.allowCatalogSearch),
       products: validRequest.products,
       approvedActions: validRequest.approvedActions
     }
