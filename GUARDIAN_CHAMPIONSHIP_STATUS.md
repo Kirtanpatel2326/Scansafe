@@ -1,11 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.2)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.3)
 
-**Document Version:** 8.2.0  
-**Last Updated:** 2026-10-12T12:55:00Z  
+**Document Version:** 8.3.0  
+**Last Updated:** 2026-10-12T13:55:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-autonomous-v2`  
-**Vercel Preview URL:** `https://scansafe-o31d-kh2ua0yb0-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE / PRODUCTION REPLICABLE / FOOD EVIDENCE RELIABILITY VERIFIED  
+**Git Commit SHA:** `4e8db31a0f3bb7983609e8cdd923d8fcadc8b0c0`  
+**Vercel Preview URL:** `https://scansafe-o31d-n2d87bpfm-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE / CERTIFICATION PROVENANCE AUTHENTICATED / 132/132 BENCHMARKS PASSED  
 
 ---
 
@@ -61,14 +62,19 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
                                     |
                                     v
           +---------------------------------------------------+
-          |       Food Evidence Reliability & Goal Verifier   |
-          | - Never treats absent allergens as proof of safe  |
-          | - Organic requires verified certification (USDA,  |
-          |   EU Organic, Ecocert, etc.); name claims = REVIEW|
-          | - Vegan flags ambiguous additives (glycerin,      |
-          |   mono/diglycerides, natural flavors); requires   |
-          |   explicit certification for MATCH                |
-          | - Never guarantees allergy safety; warns review   |
+          |    Trustworthy Certification Provenance Engine    |
+          | - 5-Level Provenance Hierarchy                    |
+          |   (UNVERIFIED_PRODUCT_METADATA ->                 |
+          |    USER_UPLOADED_LABEL_EVIDENCE ->                |
+          |    MANUFACTURER_SELF_DECLARED ->                  |
+          |    DOCUMENTED_THIRD_PARTY_CLAIM ->                |
+          |    INDEPENDENTLY_AUTHENTICATED_CERTIFICATION)     |
+          | - String declarations NEVER establish verified    |
+          |   certification automatically                     |
+          | - Strict identity & active status enforcement     |
+          | - Non-empty evidenceUrl proof audit               |
+          | - Mandatory category matching fail-closed         |
+          | - Direct allergen violation overrules cert claims |
           +---------------------------------------------------+
                                     |
                                     v
@@ -82,61 +88,31 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
 
 ---
 
-## 2. Food Evidence Reliability & Priority Corrections (V8.2)
+## 2. Trustworthy Certification Provenance & Evidence Reliability (V8.3)
 
-### Priority 0: Dietary False-Positive Prevention
-- **Absence of Evidence is Not Proof:** For `peanut_free`, `nut_free`, and `gluten_free`, clean ingredient lists without detected tokens are strictly marked `NEEDS_REVIEW` (never `MATCH`) unless supported by documented independent third-party certifications (`Certified Peanut-Free`, `GFCO`, etc.) or explicit packaging declarations.
-- **Precautionary Statements Screened:** "May contain" and "manufactured on shared equipment" warnings strictly result in `EXCLUDED`.
-- **Zero False Reassurance:** Physical packaging inspection is always required; the engine never claims a product is "guaranteed safe".
+### Priority 0: Trustworthy Certification Provenance Model
+Guardian enforces an immutable 5-level provenance model:
+1. `UNVERIFIED_PRODUCT_METADATA`: Unverified crowdsourced or scrape metadata.
+2. `USER_UPLOADED_LABEL_EVIDENCE`: Photos/OCR submitted directly by end-users.
+3. `MANUFACTURER_SELF_DECLARED`: Claims made on packaging without independent auditing.
+4. `DOCUMENTED_THIRD_PARTY_CLAIM`: Documented claim citing an accredited auditing body.
+5. `INDEPENDENTLY_AUTHENTICATED_CERTIFICATION`: Authenticated via official public registry lookup or third-party database.
 
-### Priority 1: Organic & Vegan Certification Verification
-- **Verified Organic Standards:** Requires documented third-party certification provenance (`USDA Organic`, `EU Organic`, `Ecocert`, `Jaivik Bharat`, `Demeter`, `Bio-Siegel`, etc.). Product-name keywords (`name.includes("organic")`) without certification provenance return `NEEDS_REVIEW`.
-- **Ambiguous Vegan Additives:** Screened for ambiguous additives (`mono- and diglycerides`, `glycerin`, `natural flavors`, `bone char`, `vitamin d3`, `stearic acid`). Uncertified products with ambiguous additives or uncertified plant ingredients return `NEEDS_REVIEW`.
+**Mandatory Integrity Invariants:**
+- For every claimed certification, Guardian stores: `certificationBody`, `certificationId`, `associatedProductId`, `evidenceUrl`, `observedAt`, `verifiedAt`, `verificationMethod`, `provenanceLevel`.
+- **Zero String Inflation:** A string in `certificationsDeclared` alone strictly returns `NEEDS_REVIEW` and cannot establish verified status.
+- **Identity Matching:** Any certificate issued for `associatedProductId` differing from the candidate product identity is rejected as `NEEDS_REVIEW`.
+- **Status Audit:** Expired, revoked, or unverified certificates are strictly rejected.
+- **Proof URL Audit:** Certificates lacking a verifiable `evidenceUrl` are rejected as `NEEDS_REVIEW`.
+- **Allergen Precedence:** Direct allergen tokens or precautionary statements take absolute priority over any certificate claim (contradictory evidence results in strict `EXCLUDED`).
 
-### Priority 2: Product Goal & Shortlist Integrity
-- **Category Separation:** Seed-butter requests strictly exclude ordinary dairy butter and nut butters.
-- **Quota Protection:** When only $K < \text{maxResults}$ products satisfy all criteria, the shortlist strictly contains $K$ items. Zero backfilling of `EXCLUDED` or `NEEDS_REVIEW` products.
-
----
-
-## 3. Real Autonomy Demonstrations (Live Open Food Facts)
-
-Executed via `npx tsx scripts/demonstrate-guardian-autonomy.ts` against real live products:
-
-### Demonstration 1: Low-sugar gluten-free and milk-free vegan energy bars
-- **Goal:** `"Find low-sugar gluten-free and milk-free vegan energy bars"`
-- **Constraints:** `['gluten', 'milk']`
-- **Plan Mode:** `LLM_STRUCTURED_AUTONOMOUS_PLANNER` (Gemini 2.5 Flash)
-- **Result:** Crowdsourced bars lacking verified low-sugar/vegan certification returned `NEEDS_REVIEW` or `EXCLUDED`.
-- **Shortlist:** `[None qualifying]` (Zero false positives admitted).
-
-### Demonstration 2: Nut-free and peanut-free organic seed butter spread
-- **Goal:** `"Find nut-free and peanut-free organic seed butter spread"`
-- **Constraints:** `['peanut', 'tree_nut']`
-- **Plan Mode:** `LLM_STRUCTURED_AUTONOMOUS_PLANNER` (Gemini 2.5 Flash)
-- **Evaluated Products:**
-  - `[#1]` *NuttZo Organic 7 Nut & Seed Butter POWER FUEL*: **EXCLUDED** (`tree_nut: almonds, cashews, hazelnuts, brazil nuts`)
-  - `[#2]` *Vanilla Almond Butter Nut Granola*: **EXCLUDED** (`tree_nut: almonds, cashews`)
-  - `[#3]` *Sunflower Seed Butter (SunButter)*: **NEEDS_REVIEW** (Crowdsourced data without verified packaging cert)
-  - `[#4]` *Sunflower Seed Butter*: **NEEDS_REVIEW**
-  - `[#5]` *Sunflower Seed Butter Chocolate*: **NEEDS_REVIEW**
-- **Shortlist:** `[None qualifying]` (Correctly excluded dairy butter, peanut butter, and unverified entries).
-
-### Demonstration 3: Soy-free and egg-free savory dipping sauce
-- **Goal:** `"Find soy-free and egg-free savory dipping sauce"`
-- **Constraints:** `['soy', 'egg']`
-- **Plan Mode:** `LLM_STRUCTURED_AUTONOMOUS_PLANNER` (Gemini 2.5 Flash)
-- **Evaluated Products:**
-  - `[#1]` *Wasabi sauce (Kikkoman)*: **EXCLUDED** (`soy: soybean, egg: egg`)
-  - `[#2]` *Gyoza Dipping Sauce*: **EXCLUDED** (`soy: soy, soybeans`)
-  - `[#3]` *Yum Yum Dipping Sauce*: **EXCLUDED** (`egg: egg, egg yolk`)
-  - `[#4]` *Tempura Shrimp with Soy Dipping Sauce*: **EXCLUDED** (`soy: soy, soybean`)
-  - `[#5]` *Spring Rolls with Shrimp and cashew sauce*: **NEEDS_REVIEW** (Incomplete declaration)
-- **Shortlist:** `[None qualifying]`.
+### Priority 1: Generic Product-Category Matching
+- Mandatory categories require supporting evidence. Unknown/unverified product categories return `categoryMatch = false` and `NEEDS_REVIEW`.
+- Animal dairy butter is strictly `EXCLUDED` from satisfying seed-butter spread requests.
 
 ---
 
-## 4. Complete Verification Evidence Log
+## 3. Complete Verification Evidence Log
 
 | Verification Suite | Target Checked | Result | Pass Rate |
 | :--- | :--- | :--- | :--- |
@@ -145,7 +121,7 @@ Executed via `npx tsx scripts/demonstrate-guardian-autonomy.ts` against real liv
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 122 championship scenarios | **122 / 122 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:benchmarks` | 132 championship scenarios | **132 / 132 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **24 / 24 passed (0 failed)** | 100% |
 | `npm run test:guardian:rls` | RLS isolation & privilege denial | 9 / 9 passed | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS | 0 critical, 0 warnings | 100% |
