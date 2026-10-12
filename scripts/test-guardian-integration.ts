@@ -430,6 +430,7 @@ async function main() {
         ingredients: 'rolled oats, organic honey, dried cranberries, sunflower seeds',
         allergenStatement: 'Contains: coconut.',
         labelComplete: true,
+        certificationsDeclared: ['Certified Peanut-Free'],
         evidenceSource: 'Verified Catalog Entry',
         sourceType: 'INTERNAL_VERIFIED_CATALOG',
         verificationStatus: 'MANUFACTURER_AUTHORIZED',

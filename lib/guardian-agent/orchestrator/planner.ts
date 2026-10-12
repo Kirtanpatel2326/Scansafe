@@ -56,8 +56,8 @@ export async function createAutonomousExecutionPlan(
 ): Promise<StructuredPlan> {
   const availableTools: Array<'internal_catalog' | 'open_food_facts' | 'partner_catalog'> = []
   if (input.allowInternalCatalog) availableTools.push('internal_catalog')
-  if (input.allowPublicOffCatalog) availableTools.push('open_food_facts')
   if (input.allowPartnerCatalog) availableTools.push('partner_catalog')
+  if (input.allowPublicOffCatalog) availableTools.push('open_food_facts')
 
   // Check for LLM availability
   const hasGemini = Boolean(process.env.GEMINI_API_KEY)

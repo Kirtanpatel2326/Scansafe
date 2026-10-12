@@ -53,7 +53,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 105 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 122 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -761,7 +761,13 @@ async function main() {
       currency: 'INR',
       maxResults: 5,
       approvedActions: [],
-      products: [createItem({ id: 'item_1', name: 'Rice Cake', ingredients: 'rice, salt' })]
+      products: [createItem({
+        id: 'item_1',
+        name: 'Rice Cake',
+        ingredients: 'rice, salt',
+        certificationsDeclared: ['Certified Nut-Free'],
+        allergenStatement: 'Certified nut-free facility'
+      })]
     }, {
       saveShortlist: async () => {
         saveInvoked = true
@@ -779,7 +785,13 @@ async function main() {
       currency: 'INR',
       maxResults: 5,
       approvedActions: ['save_shortlist'],
-      products: [createItem({ id: 'item_safe', name: 'Rice Cake', ingredients: 'rice, salt' })]
+      products: [createItem({
+        id: 'item_safe',
+        name: 'Rice Cake',
+        ingredients: 'rice, salt',
+        certificationsDeclared: ['Certified Nut-Free'],
+        allergenStatement: 'Certified nut-free facility'
+      })]
     }, {
       saveShortlist: async (ids) => {
         savedIds = ids
@@ -1020,7 +1032,7 @@ async function main() {
       allergenStatement: 'Contains: None declared',
       labelComplete: true,
       isOrganicDeclared: true,
-      certificationsDeclared: ['USDA Organic', 'Non-GMO Project Verified', 'Certified Peanut-Free'],
+      certificationsDeclared: ['USDA Organic', 'Non-GMO Project Verified', 'Certified Peanut-Free', 'Certified Tree Nut-Free'],
       price: 450
     })
     const res = await runGuardianAutonomousAgent({
@@ -1068,7 +1080,7 @@ async function main() {
       allergenStatement: 'Contains: none declared',
       labelComplete: true,
       isOrganicDeclared: true,
-      certificationsDeclared: ['USDA Organic'],
+      certificationsDeclared: ['USDA Organic', 'Certified Peanut-Free', 'Certified Tree Nut-Free'],
       price: 350
     })
     const dairyButter = createItem({
@@ -1142,9 +1154,212 @@ async function main() {
     assert.ok(res.uncertainties.length > 0)
   })
 
+  // ===========================================================================
+  // CATEGORY 9: Food Evidence Reliability & False-Positive Mitigations (116 - 122)
+  // ===========================================================================
+  console.log('▶ Category 9: Food Evidence Reliability & False-Positive Mitigations (116 - 122)')
+
+  await runScenario(116, 'Peanut-free requirement: absence of peanut in ingredient list without explicit packaging claim returns NEEDS_REVIEW', async () => {
+    const cleanRiceCracker = createItem({
+      id: 'clean_rice_cracker_1',
+      name: 'Natural Rice Crackers',
+      ingredients: 'organic white rice, sea salt, sunflower oil',
+      allergenStatement: 'Contains: None declared',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find peanut-free crackers',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [cleanRiceCracker]
+    })
+    const p = res.products.find(x => x.id === 'clean_rice_cracker_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED')
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('NEEDS_REVIEW (Peanut-Free)') || r.includes('Absence of peanuts')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(117, 'Peanut-free requirement: product containing peanuts is strictly EXCLUDED', async () => {
+    const peanutChikki = createItem({
+      id: 'peanut_chikki_1',
+      name: 'Roasted Peanut Chikki Bar',
+      ingredients: 'roasted peanuts (60%), jaggery, liquid glucose',
+      allergenStatement: 'Contains: Peanuts',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find peanut-free snack',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [peanutChikki]
+    })
+    const p = res.products.find(x => x.id === 'peanut_chikki_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'CONTAINS')
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(118, 'Allergen-free requirement: precautionary cross-contact warning is strictly EXCLUDED', async () => {
+    const crossContactBar = createItem({
+      id: 'cross_contact_bar_1',
+      name: 'Oat and Berry Energy Bar',
+      ingredients: 'rolled oats, cranberries, sunflower seeds, honey',
+      allergenStatement: 'May contain tree nuts, peanuts. Manufactured in a facility that also processes wheat and soy.',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find nut-free snack',
+      constraints: ['tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [crossContactBar]
+    })
+    const p = res.products.find(x => x.id === 'cross_contact_bar_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.ok(p.reasons.some(r => r.includes('Nut Cross-Contact') || r.includes('cross-contact warning')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(119, 'Vegan requirement: uncertified plant food cannot become a verified MATCH (returns NEEDS_REVIEW)', async () => {
+    const uncertifiedPlantBar = createItem({
+      id: 'uncertified_plant_bar_1',
+      name: 'Chia Seed & Date Energy Bar',
+      ingredients: 'deglet noor dates, organic chia seeds, pumpkin seeds, cinnamon',
+      allergenStatement: 'Contains: None',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find vegan energy bar',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [uncertifiedPlantBar]
+    })
+    const p = res.products.find(x => x.id === 'uncertified_plant_bar_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED')
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('NEEDS_REVIEW (Vegan)') || r.includes('Absence of detected animal tokens')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(120, 'Vegan requirement: ambiguous additives without certified vegan claim return NEEDS_REVIEW', async () => {
+    const ambiguousCracker = createItem({
+      id: 'ambiguous_cracker_1',
+      name: 'Artisan Sourdough Crackers',
+      ingredients: 'wheat flour, extra virgin olive oil, mono- and diglycerides, sea salt, natural flavor',
+      allergenStatement: 'Contains: Wheat',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find vegan crackers',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [ambiguousCracker]
+    })
+    const p = res.products.find(x => x.id === 'ambiguous_cracker_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Ambiguous additives') || r.includes('mono- and diglycerides')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(121, 'Organic requirement: product with organic name keyword but no certification provenance returns NEEDS_REVIEW', async () => {
+    const unverifiedOrganicItem = createItem({
+      id: 'unverified_organic_item_1',
+      name: 'Organic Harvest Oat Clusters',
+      ingredients: 'organic rolled oats, tapioca syrup, coconut oil, vanilla',
+      allergenStatement: 'Contains: Coconut',
+      labelComplete: true,
+      certificationsDeclared: [] // No verified standards (USDA, EU, Ecocert, etc.)
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic oat cereal',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [unverifiedOrganicItem]
+    })
+    const p = res.products.find(x => x.id === 'unverified_organic_item_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('NEEDS_REVIEW (Organic)') || r.includes('lacks independent certification provenance')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(122, 'Shortlist boundedness: when 1 of 5 items satisfies all hard criteria, shortlist size is strictly 1 (never backfills)', async () => {
+    const qualifyingSeedButter = createItem({
+      id: 'strictly_qualifying_1',
+      name: 'Certified Organic Sunflower Butter',
+      ingredients: 'organic roasted sunflower seeds, sea salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      isOrganicDeclared: true,
+      certificationsDeclared: ['USDA Organic', 'Certified Peanut-Free', 'Certified Tree Nut-Free'],
+      price: 400
+    })
+    const dairyButter = createItem({
+      id: 'dairy_violator_1',
+      name: 'Salted Dairy Butter',
+      ingredients: 'cream, salt',
+      labelComplete: true
+    })
+    const peanutButter = createItem({
+      id: 'peanut_violator_1',
+      name: 'Peanut Butter Spread',
+      ingredients: 'roasted peanuts, salt',
+      labelComplete: true
+    })
+    const unverifiedOrganicButter = createItem({
+      id: 'unverified_org_1',
+      name: 'Sunflower Butter Spread',
+      ingredients: 'sunflower seeds, salt',
+      labelComplete: true,
+      isOrganicDeclared: false
+    })
+    const crossContactSeedButter = createItem({
+      id: 'cross_seed_1',
+      name: 'Sunflower Butter Spread',
+      ingredients: 'sunflower seeds, salt',
+      allergenStatement: 'May contain traces of peanuts and almonds.',
+      labelComplete: true,
+      certificationsDeclared: ['USDA Organic']
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find me an organic seed butter spread that is peanut-free and tree-nut-free',
+      constraints: ['peanut', 'tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [
+        qualifyingSeedButter,
+        dairyButter,
+        peanutButter,
+        unverifiedOrganicButter,
+        crossContactSeedButter
+      ]
+    })
+
+    assert.equal(res.shortlist.length, 1)
+    assert.deepEqual(res.shortlist, ['strictly_qualifying_1'])
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 115`)
+  console.log(`   Passed: ${passedCount} / 122`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

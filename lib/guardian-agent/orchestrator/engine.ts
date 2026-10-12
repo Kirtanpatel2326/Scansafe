@@ -281,7 +281,7 @@ export async function runGuardianAutonomousAgent(
         )
         // Dynamic replan on TOOL_FAILURE
         const remainingPermitted = permittedTools.filter(item => !executedTools.has(item))
-        if (remainingPermitted.length > 0 && currentPlan.replanCount < MAX_REPLANS) {
+        if (currentPlan.replanCount < MAX_REPLANS) {
           currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
             reason: 'TOOL_FAILURE',
             exhaustedTool: 'internal_catalog',
@@ -358,7 +358,7 @@ export async function runGuardianAutonomousAgent(
               )
               // Dynamic replan on TOOL_FAILURE
               const remainingPermitted = permittedTools.filter(item => !executedTools.has(item))
-              if (remainingPermitted.length > 0 && currentPlan.replanCount < MAX_REPLANS) {
+              if (currentPlan.replanCount < MAX_REPLANS) {
                 currentPlan = dynamicReplanAfterToolExecution(currentPlan, {
                   reason: 'TOOL_FAILURE',
                   exhaustedTool: 'partner_catalog',
