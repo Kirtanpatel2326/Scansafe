@@ -431,6 +431,18 @@ async function main() {
         allergenStatement: 'Contains: coconut.',
         labelComplete: true,
         certificationsDeclared: ['Certified Peanut-Free'],
+        certifiedRecords: [{
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-7881',
+          associatedProductId: 'oat_bar_1',
+          evidenceUrl: 'https://allergencircles.org/verify/7881',
+          observedAt: '2026-10-01T00:00:00Z',
+          verifiedAt: '2026-10-01T00:00:00Z',
+          verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+          provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+          standard: 'PEANUT_FREE',
+          status: 'ACTIVE'
+        }],
         evidenceSource: 'Verified Catalog Entry',
         sourceType: 'INTERNAL_VERIFIED_CATALOG',
         verificationStatus: 'MANUFACTURER_AUTHORIZED',

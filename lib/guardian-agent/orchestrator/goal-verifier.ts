@@ -1,4 +1,5 @@
 import {
+  ClaimedCertification,
   Constraint,
   Currency,
   DecomposedGoal,
@@ -121,19 +122,19 @@ export function decomposeUserGoal(
   } else {
     // Fallback: extract primary noun phrase
     const cleaned = rawGoal
-      .replace(/^(find|search for|search|look for|check|get|buy|locate|compare)\s+(me\s+)?(a\s+|an\s+|some\s+)?/i, '')
+      .replace(/^(?:find|search for|search|look for|check|get|buy|locate|compare|rank|sort|order|filter|list|show|recommend|suggest|give me|find me)\s+(?:me\s+)?(?:a\s+|an\s+|some\s+|the\s+)?(?:top\s+\d+\s+)?(?:best\s+)?(?:cheapest\s+)?(?:budget\s+)?/i, '')
       .replace(/\b(for\s+[a-z\s_-]+allergy|allergy|allergies|allergic)\b/gi, '')
-      .replace(/\b(organic|vegan|low[- ]sugar|healthy|safe|allergy[- ]safe|nut[- ]free|peanut[- ]free|gluten[- ]free)\b/gi, '')
+      .replace(/\b(organic|vegan|low[- ]sugar|healthy|safe|allergy[- ]safe|nut[- ]free|peanut[- ]free|gluten[- ]free|budget)\b/gi, '')
       .replace(/[^a-zA-Z0-9\s]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
     const firstWord = cleaned.split(/\s+/)[0]?.toLowerCase()
-    if (!firstWord || ['food', 'snack', 'snacks', 'items', 'products', 'brands'].includes(firstWord)) {
+    if (!firstWord || ['food', 'snack', 'snacks', 'item', 'items', 'products', 'product', 'brands', 'options', 'choices'].includes(firstWord)) {
       requiredCategory = 'general_food'
-      categoryKeywords = ['food', 'snack']
+      categoryKeywords = ['food', 'snack', 'item', 'product']
     } else {
       requiredCategory = cleaned.split(/\s+/).slice(0, 3).join('_') || 'packaged_food'
-      categoryKeywords = [cleaned.slice(0, 50)]
+      categoryKeywords = Array.from(new Set([cleaned.slice(0, 50), ...cleaned.split(/\s+/).filter(w => w.length > 2)]))
     }
   }
 
@@ -232,6 +233,126 @@ export function decomposeUserGoal(
   }
 
   return DecomposedGoalSchema.parse(result)
+}
+
+/**
+ * P0: Verify whether a product has independently authenticated certification
+ * satisfying strict provenance requirements.
+ *
+ * Rules:
+ * - A string in certificationsDeclared must NEVER automatically establish verified certification.
+ * - Must match product identity (associatedProductId === product.id).
+ * - Must be active (status === 'ACTIVE').
+ * - Must possess non-empty evidenceUrl.
+ * - Must possess verification timestamp (verifiedAt).
+ * - Must possess authenticated verification method (REGISTRY_LOOKUP_AUTHENTICATED or THIRD_PARTY_AUDIT_DATABASE).
+ * - Provenance level must be INDEPENDENTLY_AUTHENTICATED_CERTIFICATION or DOCUMENTED_THIRD_PARTY_CLAIM.
+ */
+export function findAuthenticatedCertification(
+  product: ProductEvidence,
+  standardKeywords: RegExp
+): {
+  authenticated: boolean
+  record?: ClaimedCertification
+  invalidationReason?: string
+} {
+  const records = product.certifiedRecords || []
+
+  // Find candidate records matching the standard keyword
+  const matchingRecords = records.filter(r => {
+    const s = (r.standard || '').replace(/_/g, ' ')
+    const b = (r.certificationBody || '').replace(/_/g, ' ')
+    const n = (r.notes || '').replace(/_/g, ' ')
+    return (
+      standardKeywords.test(r.standard || '') ||
+      standardKeywords.test(s) ||
+      standardKeywords.test(r.certificationBody || '') ||
+      standardKeywords.test(b) ||
+      standardKeywords.test(r.notes || '') ||
+      standardKeywords.test(n)
+    )
+  })
+
+  if (matchingRecords.length === 0) {
+    const rawMatches = (product.certificationsDeclared || []).filter(c => standardKeywords.test(c))
+    if (rawMatches.length > 0) {
+      return {
+        authenticated: false,
+        invalidationReason: `Unverified claim: Product declares "${rawMatches.join(', ')}" in packaging metadata, but lacks documented third-party certification record or registry authentication. Raw declaration strings cannot establish verified certification.`
+      }
+    }
+    return { authenticated: false }
+  }
+
+  for (const record of matchingRecords) {
+    // 1. Associated product ID identity check
+    if (record.associatedProductId !== product.id) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Certification identity mismatch: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) was issued for product identity "${record.associatedProductId}", which does not match candidate product "${product.id}".`
+      }
+    }
+
+    // 2. Active status check
+    if (record.status === 'EXPIRED') {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Expired certification: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) expired on ${record.verifiedAt || 'prior date'}; cannot establish active compliance.`
+      }
+    }
+    if (record.status === 'REVOKED' || record.status === 'UNVERIFIED' || record.status === 'MISMATCHED') {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Unverified certification status: Certificate from ${record.certificationBody} status is "${record.status}"; not authenticated as active.`
+      }
+    }
+
+    // 3. Provenance level check
+    if (
+      record.provenanceLevel === 'UNVERIFIED_PRODUCT_METADATA' ||
+      record.provenanceLevel === 'USER_UPLOADED_LABEL_EVIDENCE' ||
+      record.provenanceLevel === 'MANUFACTURER_SELF_DECLARED'
+    ) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Manufacturer/unverified claim only: Record from ${record.certificationBody} is marked "${record.provenanceLevel}" without documented third-party audit or independent registry authentication.`
+      }
+    }
+
+    // 4. Missing evidence URL check
+    if (!record.evidenceUrl || !record.evidenceUrl.trim()) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Missing certification source URL: Claimed certificate from ${record.certificationBody} lacks verifiable evidence proof URL.`
+      }
+    }
+
+    // 5. Verification method check
+    if (
+      record.verificationMethod === 'UNVERIFIED_TEXT_MATCH' ||
+      record.verificationMethod === 'MANUFACTURER_SELF_DECLARATION' ||
+      record.verificationMethod === 'PACKAGING_LABEL_INSPECTION'
+    ) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Unverified verification method: Claim from ${record.certificationBody} was observed via "${record.verificationMethod}", not authenticated registry lookup or third-party audit database.`
+      }
+    }
+
+    // All integrity checks passed!
+    return {
+      authenticated: true,
+      record
+    }
+  }
+
+  return { authenticated: false }
 }
 
 /**
@@ -353,8 +474,8 @@ export function evaluateProductGoalRelevance(
       categoryMatch = true
       relevanceReasons.push(`MATCH (Category): Product matches keywords for ${goal.requiredCategory}.`)
     } else {
-      categoryMatch = true
-      relevanceReasons.push(`NEEDS_REVIEW (Category): Generic category match for ${goal.requiredCategory}.`)
+      categoryMatch = false
+      relevanceReasons.push(`NEEDS_REVIEW (Category): Product lacks evidence confirming mandatory category "${goal.requiredCategory}".`)
     }
   }
 
@@ -384,7 +505,6 @@ export function evaluateProductGoalRelevance(
       }
       relevanceReasons.push(`EXCLUDED (Vegan Violation): Product contains animal-derived ingredients (${Array.from(new Set(detectedAnimal)).join(', ')}).`)
     } else {
-      // Priority 1: Flag ambiguous additives
       const AMBIGUOUS_ADDITIVES = [
         'mono- and diglycerides', 'monoglycerides', 'diglycerides', 'mono and diglycerides',
         'glycerin', 'glycerol', 'natural flavor', 'natural flavors', 'natural flavour',
@@ -398,42 +518,59 @@ export function evaluateProductGoalRelevance(
         return re.test(ingredientsLower)
       })
 
-      const explicitVegan =
-        /\b(?:certified vegan|100% vegan|suitable for vegans|vegan suitable)\b/i.test(combinedText) ||
-        labelsList.some(l => /certified-vegan|vegan-society|european-vegetarian-union-vegan/i.test(l)) ||
-        (product.certificationsDeclared || []).some(c => /vegan/i.test(c))
+      const certResult = findAuthenticatedCertification(product, /vegan|plant[- ]based/i)
 
-      if (explicitVegan && detectedAmbiguous.length === 0) {
-        attributeEvidence['vegan'] = {
-          status: 'MATCH',
-          evidence: 'Verified vegan: explicit vegan declaration / certification with zero animal or ambiguous ingredients.'
+      if (certResult.authenticated && certResult.record) {
+        if (detectedAmbiguous.length > 0) {
+          attributeEvidence['vegan'] = {
+            status: 'MATCH',
+            evidence: `Independently authenticated vegan certification (${certResult.record.certificationBody}); additives (${detectedAmbiguous.join(', ')}) certified acceptable under standard.`
+          }
+          relevanceReasons.push(`MATCH (Vegan): Authenticated certification from ${certResult.record.certificationBody}; additives (${detectedAmbiguous.join(', ')}) verified compliant.`)
+        } else {
+          attributeEvidence['vegan'] = {
+            status: 'MATCH',
+            evidence: `Verified vegan: Authenticated record from ${certResult.record.certificationBody} (ID: ${certResult.record.certificationId || 'N/A'}, Proof: ${certResult.record.evidenceUrl}). Zero animal or ambiguous ingredients.`
+          }
+          relevanceReasons.push(`MATCH (Vegan): Verified by authenticated certificate from ${certResult.record.certificationBody}.`)
         }
-        relevanceReasons.push('MATCH (Vegan): Explicit certified vegan declaration with zero animal ingredients.')
-      } else if (explicitVegan && detectedAmbiguous.length > 0) {
+      } else if (certResult.invalidationReason) {
         attributeEvidence['vegan'] = {
-          status: 'MATCH',
-          evidence: `Certified vegan declaration on packaging; additives (${detectedAmbiguous.join(', ')}) certified acceptable.`
+          status: 'NEEDS_REVIEW',
+          evidence: certResult.invalidationReason
         }
-        relevanceReasons.push(`MATCH (Vegan): Packaging carries certified vegan declaration; additives (${detectedAmbiguous.join(', ')}) certified acceptable.`)
+        relevanceReasons.push(`NEEDS_REVIEW (Vegan): ${certResult.invalidationReason}`)
       } else if (detectedAmbiguous.length > 0) {
         attributeEvidence['vegan'] = {
           status: 'NEEDS_REVIEW',
           evidence: `Ambiguous additives detected: Contains ${detectedAmbiguous.join(', ')} which may be animal- or plant-derived. Unverified source origin.`
         }
         relevanceReasons.push(`NEEDS_REVIEW (Vegan): Ambiguous additives (${detectedAmbiguous.join(', ')}) require manufacturer source confirmation.`)
-      } else if (product.labelComplete && product.ingredients) {
-        // Priority 1: Never declare a product definitively vegan solely because no known animal ingredient was detected
-        attributeEvidence['vegan'] = {
-          status: 'NEEDS_REVIEW',
-          evidence: 'Ingredient-based assessment only: Declared ingredients appear plant-derived, but product lacks explicit vegan certification or manufacturer claim. Processing aids cannot be confirmed without explicit declaration.'
-        }
-        relevanceReasons.push('NEEDS_REVIEW (Vegan): Absence of detected animal tokens alone cannot certify a product as definitively vegan without explicit packaging claim.')
       } else {
-        attributeEvidence['vegan'] = {
-          status: 'NEEDS_REVIEW',
-          evidence: 'Vegan status unverified: ingredients panel is incomplete.'
+        const explicitClaim =
+          /\b(?:certified vegan|100% vegan|suitable for vegans|vegan suitable)\b/i.test(combinedText) ||
+          (product.certificationsDeclared || []).some(c => /vegan/i.test(c)) ||
+          labelsList.some(l => /vegan/i.test(l))
+
+        if (explicitClaim) {
+          attributeEvidence['vegan'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Unverified manufacturer packaging claim: Package declares vegan, but lacks independently authenticated certification registry proof. Processing aids and sub-ingredients cannot be confirmed without authenticated proof.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Vegan): Package carries manufacturer claim, but lacks independently authenticated certification.')
+        } else if (product.labelComplete && product.ingredients) {
+          attributeEvidence['vegan'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Ingredient-based assessment only: Declared ingredients appear plant-derived, but product lacks independently authenticated certification. Absence of detected animal tokens alone cannot certify a product as definitively vegan without explicit packaging claim.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Vegan): Absence of detected animal tokens alone cannot certify a product as definitively vegan without independently authenticated certification.')
+        } else {
+          attributeEvidence['vegan'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Vegan status unverified: ingredients panel is incomplete.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Vegan): Incomplete ingredient declaration prevents definitive vegan verification.')
         }
-        relevanceReasons.push('NEEDS_REVIEW (Vegan): Incomplete ingredient declaration prevents definitive vegan verification.')
       }
     }
   }
@@ -476,42 +613,40 @@ export function evaluateProductGoalRelevance(
   // Validate certification provenance. Never upgrade product-name keywords into verified certification.
   // -------------------------------------------------------------------------
   if (goal.requiredAttributes.includes('organic')) {
-    const VERIFIED_ORGANIC_STANDARDS = [
-      'usda organic', 'eu organic', 'ecocert', 'jaivik bharat', 'india organic',
-      'soil association', 'bio-siegel', 'ab-agriculture-biologique', 'demeter',
-      'ccof', 'qai', 'certified organic'
-    ]
-
-    const verifiedFromCerts = (product.certificationsDeclared || []).filter(c =>
-      VERIFIED_ORGANIC_STANDARDS.some(std => c.toLowerCase().includes(std))
-    )
-    const verifiedFromLabels = labelsList.filter(l =>
-      /usda-organic|eu-organic|ecocert|ab-agriculture-biologique|bio-siegel|certified-organic/i.test(l)
+    const certResult = findAuthenticatedCertification(
+      product,
+      /organic|usda organic|eu organic|ecocert|bio-siegel|soil association|demeter|ccof|qai|jaivik bharat/i
     )
 
-    const hasVerifiedProvenance = verifiedFromCerts.length > 0 || verifiedFromLabels.length > 0 || (product.isOrganicDeclared && (product.certificationsDeclared || []).length > 0)
-    const mentionsOrganicKeyword = /\borganic\b/i.test(nameLower) || /\borganic\b/i.test(ingredientsLower) || Boolean(product.isOrganicDeclared)
-
-    if (hasVerifiedProvenance) {
-      const prov = [...verifiedFromCerts, ...verifiedFromLabels].join(', ') || 'Documented Organic Certification'
+    if (certResult.authenticated && certResult.record) {
       attributeEvidence['organic'] = {
         status: 'MATCH',
-        evidence: `Verified organic certification: Documented independent certification provenance (${prov}).`
+        evidence: `Verified organic certification: Authenticated record from ${certResult.record.certificationBody} (ID: ${certResult.record.certificationId || 'N/A'}, Registry Proof: ${certResult.record.evidenceUrl}).`
       }
-      relevanceReasons.push(`MATCH (Organic): Independent third-party organic certification verified (${prov}).`)
-    } else if (mentionsOrganicKeyword) {
-      // Priority 1: Never upgrade a product-name keyword into verified certification
+      relevanceReasons.push(`MATCH (Organic): Independent third-party organic certification verified (${certResult.record.certificationBody}).`)
+    } else if (certResult.invalidationReason) {
       attributeEvidence['organic'] = {
         status: 'NEEDS_REVIEW',
-        evidence: 'Unverified manufacturer claim: Product mentions \'organic\' in title or ingredients, but lacks documented third-party certification provenance (e.g. USDA Organic, EU Organic, Ecocert). Product-name keywords cannot be upgraded to verified certification.'
+        evidence: certResult.invalidationReason
       }
-      relevanceReasons.push('NEEDS_REVIEW (Organic): Product-name or ingredient keyword \'organic\' lacks independent certification provenance; requires verification.')
+      relevanceReasons.push(`NEEDS_REVIEW (Organic): ${certResult.invalidationReason}`)
     } else {
-      attributeEvidence['organic'] = {
-        status: 'NEEDS_REVIEW',
-        evidence: 'Organic unverified: Product lacks verified organic certification or organic ingredient declaration. Unverified conventional status cannot be upgraded to MATCH.'
+      const mentionsOrganicKeyword = /\borganic\b/i.test(nameLower) || /\borganic\b/i.test(ingredientsLower) || Boolean(product.isOrganicDeclared)
+      const declaredStringCerts = (product.certificationsDeclared || []).filter(c => /organic/i.test(c))
+
+      if (declaredStringCerts.length > 0 || mentionsOrganicKeyword) {
+        attributeEvidence['organic'] = {
+          status: 'NEEDS_REVIEW',
+          evidence: 'Unverified manufacturer / packaging claim: Product states organic in metadata or product title, but lacks independently authenticated certification record (provenance level INDEPENDENTLY_AUTHENTICATED_CERTIFICATION or DOCUMENTED_THIRD_PARTY_CLAIM with registry proof). String declarations alone cannot establish verified certification.'
+        }
+        relevanceReasons.push('NEEDS_REVIEW (Organic): Packaging claim lacks independently authenticated certification provenance; status is unverified.')
+      } else {
+        attributeEvidence['organic'] = {
+          status: 'NEEDS_REVIEW',
+          evidence: 'Organic unverified: Product lacks verified organic certification or organic ingredient declaration. Conventional products cannot satisfy organic requirements.'
+        }
+        relevanceReasons.push('NEEDS_REVIEW (Organic): Product lacks verified organic certification or organic ingredient declaration.')
       }
-      relevanceReasons.push('NEEDS_REVIEW (Organic): Product lacks verified organic certification or organic ingredient declaration.')
     }
   }
 
@@ -526,14 +661,15 @@ export function evaluateProductGoalRelevance(
     const hasGlutenGrain = GLUTEN_GRAINS.some(g => new RegExp(`(^|[^a-z0-9])${g}([^a-z0-9]|$)`, 'i').test(ingredientsLower))
     const hasPrecautionaryGluten = /(?:may contain|traces of|shared (?:equipment|facility|line)|processed (?:in|on)|handled in).*(?:gluten|wheat|barley|rye)/i.test(allergenLower) ||
       /(?:may contain|traces of).*(?:gluten|wheat|barley|rye)/i.test(ingredientsLower)
+    const hasDirectAllergenGluten = /\b(?:gluten|wheat|barley|rye)\b/i.test(allergenLower) && !/\b(?:no|without|zero|free from)\s+(?:gluten|wheat|barley|rye)\b/i.test(allergenLower)
 
-    if (hasGlutenGrain) {
+    if (hasGlutenGrain || hasDirectAllergenGluten) {
       hardExclusion = true
       attributeEvidence['gluten_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Contains explicit gluten-containing grains in ingredients.'
+        evidence: 'Contains explicit gluten-containing grains or declared gluten allergen in ingredients or allergen statement.'
       }
-      relevanceReasons.push('EXCLUDED (Gluten Violation): Contains gluten-containing grains.')
+      relevanceReasons.push('EXCLUDED (Gluten Violation): Contains gluten-containing grains or declared gluten allergen.')
     } else if (hasPrecautionaryGluten) {
       hardExclusion = true
       attributeEvidence['gluten_free'] = {
@@ -542,33 +678,38 @@ export function evaluateProductGoalRelevance(
       }
       relevanceReasons.push('EXCLUDED (Gluten Cross-Contact): Packaging declares precautionary cross-contact warning for gluten/wheat.')
     } else {
-      const verifiedCerts = (product.certificationsDeclared || []).filter(c =>
-        /gluten[- ]free|gfco|celiac/i.test(c)
-      )
-      const verifiedLabels = labelsList.filter(l =>
-        /no-gluten|gluten-free|gfco/i.test(l)
-      )
-      const explicitClaim = /\b(?:gluten[- ]free|certified gluten[- ]free|no gluten|sans gluten|\bgf\b)\b/i.test(combinedText)
+      const certResult = findAuthenticatedCertification(product, /gluten[- ]free|gfco|celiac/i)
 
-      if (verifiedCerts.length > 0 || verifiedLabels.length > 0) {
+      if (certResult.authenticated && certResult.record) {
         attributeEvidence['gluten_free'] = {
           status: 'MATCH',
-          evidence: `Verified gluten-free certification: Documented independent certification (${[...verifiedCerts, ...verifiedLabels].join(', ')}). Physical packaging inspection required before consumption; zero false reassurance.`
+          evidence: `Verified gluten-free certification: Authenticated record from ${certResult.record.certificationBody} (ID: ${certResult.record.certificationId || 'N/A'}, Proof: ${certResult.record.evidenceUrl}). Physical packaging inspection required before consumption; zero false reassurance.`
         }
-        relevanceReasons.push('MATCH (Gluten-Free): Documented independent gluten-free certification on packaging.')
-      } else if (explicitClaim) {
-        attributeEvidence['gluten_free'] = {
-          status: 'MATCH',
-          evidence: 'Explicit manufacturer packaging claim: Package explicitly declares gluten-free. Physical packaging inspection required before consumption; zero false reassurance.'
-        }
-        relevanceReasons.push('MATCH (Gluten-Free): Package carries explicit manufacturer gluten-free claim.')
-      } else {
-        // Priority 0: Never treat an ingredient list without detected allergens as proof of allergen-free status
+        relevanceReasons.push(`MATCH (Gluten-Free): Authenticated independent gluten-free certification verified (${certResult.record.certificationBody}).`)
+      } else if (certResult.invalidationReason) {
         attributeEvidence['gluten_free'] = {
           status: 'NEEDS_REVIEW',
-          evidence: 'Insufficient evidence: Ingredient list lacks detected gluten grains, but packaging lacks an explicit gluten-free declaration or certification. An ingredient list without detected allergens cannot be treated as proof of allergen-free status or lack of facility cross-contact.'
+          evidence: certResult.invalidationReason
         }
-        relevanceReasons.push('NEEDS_REVIEW (Gluten-Free): Absence of gluten grains in ingredient list alone does not prove allergen-free status without explicit packaging claim or certification.')
+        relevanceReasons.push(`NEEDS_REVIEW (Gluten-Free): ${certResult.invalidationReason}`)
+      } else {
+        const explicitClaim = /\b(?:gluten[- ]free|certified gluten[- ]free|no gluten|sans gluten|\bgf\b)\b/i.test(combinedText) ||
+          (product.certificationsDeclared || []).some(c => /gluten/i.test(c))
+
+        if (explicitClaim) {
+          attributeEvidence['gluten_free'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Unverified manufacturer packaging claim: Package explicitly declares gluten-free, but lacks independently authenticated certification registry proof. Physical packaging inspection required before consumption; zero false reassurance.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Gluten-Free): Package carries manufacturer claim, but lacks independently authenticated certification.')
+        } else {
+          // Priority 0: Never treat an ingredient list without detected allergens as proof of allergen-free status
+          attributeEvidence['gluten_free'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Insufficient evidence: Ingredient list lacks detected gluten grains, but packaging lacks independently authenticated gluten-free certification. An ingredient list without detected allergens cannot be treated as proof of allergen-free status or lack of facility cross-contact.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Gluten-Free): Absence of gluten grains in ingredient list alone does not prove allergen-free status without independently authenticated certification.')
+        }
       }
     }
   }
@@ -596,32 +737,40 @@ export function evaluateProductGoalRelevance(
       }
       relevanceReasons.push('EXCLUDED (Peanut Cross-Contact): Packaging declares precautionary cross-contact warning for peanuts.')
     } else {
-      const verifiedCerts = (product.certificationsDeclared || []).filter(c =>
-        /peanut[- ]free/i.test(c)
-      )
-      const explicitClaim =
-        /\b(?:peanut[- ]free|no peanuts|peanut[- ]free facility|dedicated peanut[- ]free)\b/i.test(combinedText) ||
-        labelsList.some(l => /peanut-free/i.test(l))
+      const certResult = findAuthenticatedCertification(product, /peanut[- ]free/i)
 
-      if (verifiedCerts.length > 0) {
+      if (certResult.authenticated && certResult.record) {
         attributeEvidence['peanut_free'] = {
           status: 'MATCH',
-          evidence: `Verified peanut-free certification: Documented independent certification (${verifiedCerts.join(', ')}). Physical packaging inspection required before consumption; zero false reassurance.`
+          evidence: `Verified peanut-free certification: Authenticated record from ${certResult.record.certificationBody} (ID: ${certResult.record.certificationId || 'N/A'}, Proof: ${certResult.record.evidenceUrl}). Physical packaging inspection required before consumption; zero false reassurance.`
         }
-        relevanceReasons.push('MATCH (Peanut-Free): Documented independent peanut-free certification on packaging.')
-      } else if (explicitClaim) {
-        attributeEvidence['peanut_free'] = {
-          status: 'MATCH',
-          evidence: 'Explicit manufacturer packaging claim: Package explicitly declares peanut-free. Physical packaging inspection required before consumption; zero false reassurance.'
-        }
-        relevanceReasons.push('MATCH (Peanut-Free): Package carries explicit manufacturer peanut-free declaration.')
-      } else {
-        // Priority 0: Never treat an ingredient list without detected allergens as proof of allergen-free status
+        relevanceReasons.push(`MATCH (Peanut-Free): Authenticated independent peanut-free certification verified (${certResult.record.certificationBody}).`)
+      } else if (certResult.invalidationReason) {
         attributeEvidence['peanut_free'] = {
           status: 'NEEDS_REVIEW',
-          evidence: 'Insufficient evidence: Ingredient list lacks detected peanuts, but packaging lacks an explicit peanut-free declaration or certification. An ingredient list without detected allergens cannot be treated as proof of allergen-free status or lack of facility cross-contact.'
+          evidence: certResult.invalidationReason
         }
-        relevanceReasons.push('NEEDS_REVIEW (Peanut-Free): Absence of peanuts in ingredient list alone does not prove allergen-free status without explicit packaging claim or certification.')
+        relevanceReasons.push(`NEEDS_REVIEW (Peanut-Free): ${certResult.invalidationReason}`)
+      } else {
+        const explicitClaim =
+          /\b(?:peanut[- ]free|no peanuts|peanut[- ]free facility|dedicated peanut[- ]free)\b/i.test(combinedText) ||
+          (product.certificationsDeclared || []).some(c => /peanut/i.test(c)) ||
+          labelsList.some(l => /peanut-free/i.test(l))
+
+        if (explicitClaim) {
+          attributeEvidence['peanut_free'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Unverified manufacturer packaging claim: Package explicitly declares peanut-free, but lacks independently authenticated certification registry proof. Physical packaging inspection required before consumption; zero false reassurance.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Peanut-Free): Package carries manufacturer claim, but lacks independently authenticated certification.')
+        } else {
+          // Priority 0: Never treat an ingredient list without detected allergens as proof of allergen-free status
+          attributeEvidence['peanut_free'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Insufficient evidence: Ingredient list lacks detected peanuts, but packaging lacks independently authenticated peanut-free certification. An ingredient list without detected allergens cannot be treated as proof of allergen-free status or lack of facility cross-contact.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Peanut-Free): Absence of peanuts in ingredient list alone does not prove allergen-free status without independently authenticated certification.')
+        }
       }
     }
   }
@@ -634,14 +783,15 @@ export function evaluateProductGoalRelevance(
     const hasTreeNut = TREE_NUTS.some(n => new RegExp(`(^|[^a-z0-9])${n}([^a-z0-9]|$)`, 'i').test(ingredientsLower))
     const hasPrecautionaryNut = /(?:may contain|traces of|shared (?:equipment|facility|line)|processed (?:in|on)|handled in).*(?:nut|almond|cashew|walnut|pecan|hazelnut|pistachio)/i.test(allergenLower) ||
       /(?:may contain|traces of).*(?:nut|almond|cashew|walnut|pecan|hazelnut|pistachio)/i.test(ingredientsLower)
+    const hasDirectAllergenNut = /\b(?:tree nut|almond|cashew|walnut|pecan|hazelnut|pistachio)\b/i.test(allergenLower) && !/\b(?:no|without|zero|free from)\s+(?:tree nut|nut|almond|cashew|walnut|pecan|hazelnut|pistachio)s?\b/i.test(allergenLower)
 
-    if (hasTreeNut) {
+    if (hasTreeNut || hasDirectAllergenNut) {
       hardExclusion = true
       attributeEvidence['nut_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Contains tree nut ingredients.'
+        evidence: 'Contains tree nut ingredients or declared nut allergen.'
       }
-      relevanceReasons.push('EXCLUDED (Nut Violation): Contains tree nut ingredients.')
+      relevanceReasons.push('EXCLUDED (Nut Violation): Contains tree nut ingredients or declared nut allergen.')
     } else if (hasPrecautionaryNut) {
       hardExclusion = true
       attributeEvidence['nut_free'] = {
@@ -650,55 +800,60 @@ export function evaluateProductGoalRelevance(
       }
       relevanceReasons.push('EXCLUDED (Nut Cross-Contact): Packaging declares precautionary cross-contact warning for tree nuts.')
     } else {
-      const verifiedCerts = (product.certificationsDeclared || []).filter(c =>
-        /nut[- ]free|tree[- ]nut[- ]free/i.test(c)
-      )
-      const explicitClaim =
-        /\b(?:nut[- ]free|tree nut[- ]free|no nuts|nut[- ]free facility|dedicated nut[- ]free)\b/i.test(combinedText) ||
-        labelsList.some(l => /no-nuts/i.test(l))
+      const certResult = findAuthenticatedCertification(product, /nut[- ]free|tree[- ]nut[- ]free/i)
 
-      if (verifiedCerts.length > 0) {
+      if (certResult.authenticated && certResult.record) {
         attributeEvidence['nut_free'] = {
           status: 'MATCH',
-          evidence: `Verified nut-free certification: Documented independent certification (${verifiedCerts.join(', ')}). Physical packaging inspection required before consumption; zero false reassurance.`
+          evidence: `Verified nut-free certification: Authenticated record from ${certResult.record.certificationBody} (ID: ${certResult.record.certificationId || 'N/A'}, Proof: ${certResult.record.evidenceUrl}). Physical packaging inspection required before consumption; zero false reassurance.`
         }
-        relevanceReasons.push('MATCH (Nut-Free): Documented independent nut-free certification on packaging.')
-      } else if (explicitClaim) {
-        attributeEvidence['nut_free'] = {
-          status: 'MATCH',
-          evidence: 'Explicit manufacturer packaging claim: Package explicitly declares tree nut-free. Physical packaging inspection required before consumption; zero false reassurance.'
-        }
-        relevanceReasons.push('MATCH (Nut-Free): Package carries explicit manufacturer tree nut-free declaration.')
-      } else {
-        // Priority 0: Never treat an ingredient list without detected allergens as proof of allergen-free status
+        relevanceReasons.push(`MATCH (Nut-Free): Authenticated independent nut-free certification verified (${certResult.record.certificationBody}).`)
+      } else if (certResult.invalidationReason) {
         attributeEvidence['nut_free'] = {
           status: 'NEEDS_REVIEW',
-          evidence: 'Insufficient evidence: Ingredient list lacks detected tree nuts, but packaging lacks an explicit nut-free declaration or certification. An ingredient list without detected allergens cannot be treated as proof of allergen-free status or lack of facility cross-contact.'
+          evidence: certResult.invalidationReason
         }
-        relevanceReasons.push('NEEDS_REVIEW (Nut-Free): Absence of tree nuts in ingredient list alone does not prove allergen-free status without explicit packaging claim or certification.')
+        relevanceReasons.push(`NEEDS_REVIEW (Nut-Free): ${certResult.invalidationReason}`)
+      } else {
+        const explicitClaim =
+          /\b(?:nut[- ]free|tree nut[- ]free|no nuts|nut[- ]free facility|dedicated nut[- ]free)\b/i.test(combinedText) ||
+          (product.certificationsDeclared || []).some(c => /nut/i.test(c)) ||
+          labelsList.some(l => /no-nuts/i.test(l))
+
+        if (explicitClaim) {
+          attributeEvidence['nut_free'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Unverified manufacturer packaging claim: Package explicitly declares tree nut-free, but lacks independently authenticated certification registry proof. Physical packaging inspection required before consumption; zero false reassurance.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Nut-Free): Package carries manufacturer claim, but lacks independently authenticated certification.')
+        } else {
+          // Priority 0: Never treat an ingredient list without detected allergens as proof of allergen-free status
+          attributeEvidence['nut_free'] = {
+            status: 'NEEDS_REVIEW',
+            evidence: 'Insufficient evidence: Ingredient list lacks detected tree nuts, but packaging lacks independently authenticated certification. An ingredient list without detected allergens cannot be treated as proof of allergen-free status or lack of facility cross-contact.'
+          }
+          relevanceReasons.push('NEEDS_REVIEW (Nut-Free): Absence of tree nuts in ingredient list alone does not prove allergen-free status without independently authenticated certification.')
+        }
       }
     }
   }
 
   // -------------------------------------------------------------------------
-  // 7. COMPUTE OVERALL RELEVANCE OUTCOME
+  // 8. COMPUTE OVERALL RELEVANCE OUTCOME
   // -------------------------------------------------------------------------
   let overallStatus: GoalRelevanceStatus = 'MATCH'
 
-  if (hardExclusion || !categoryMatch) {
-    overallStatus = 'EXCLUDED'
-  } else {
-    // Check attributes
-    const hasNeedsReview = Object.values(attributeEvidence).some(a => a.status === 'NEEDS_REVIEW')
-    const hasAttributeExcluded = Object.values(attributeEvidence).some(a => a.status === 'EXCLUDED')
+  const hasAttributeExcluded = Object.values(attributeEvidence).some(a => a.status === 'EXCLUDED')
+  const hasNeedsReview = Object.values(attributeEvidence).some(a => a.status === 'NEEDS_REVIEW')
 
-    if (hasAttributeExcluded) {
-      overallStatus = 'EXCLUDED'
-    } else if (hasNeedsReview) {
-      overallStatus = 'NEEDS_REVIEW'
-    } else {
-      overallStatus = 'MATCH'
-    }
+  if (hardExclusion || hasAttributeExcluded) {
+    overallStatus = 'EXCLUDED'
+  } else if (!categoryMatch) {
+    overallStatus = 'NEEDS_REVIEW'
+  } else if (hasNeedsReview) {
+    overallStatus = 'NEEDS_REVIEW'
+  } else {
+    overallStatus = 'MATCH'
   }
 
   return {

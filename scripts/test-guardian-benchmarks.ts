@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict'
 import { evaluateDeterministicSafety, COMPREHENSIVE_ALLERGEN_ALIASES } from '../lib/guardian-agent/orchestrator/verifier'
 import { runGuardianAutonomousAgent } from '../lib/guardian-agent/orchestrator/engine'
-import { ProductEvidence, Constraint } from '../lib/guardian-agent/orchestrator/types'
+import { ProductEvidence, Constraint, ClaimedCertification } from '../lib/guardian-agent/orchestrator/types'
 
 let passedCount = 0
 let failedCount = 0
@@ -24,13 +24,29 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105) {
+    if (id % 15 === 0 || id === 105 || id === 132) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
     failedCount++
     console.error(`  ❌ Benchmark #${id} FAILED: [${name}] - ${err.message}`)
     throw err
+  }
+}
+
+function createValidCert(associatedProductId: string, overrides: Partial<ClaimedCertification> = {}): ClaimedCertification {
+  return {
+    certificationBody: overrides.certificationBody || 'Independent Standards Registry',
+    certificationId: overrides.certificationId || 'CERT-REG-101',
+    associatedProductId,
+    evidenceUrl: overrides.evidenceUrl || 'https://registry.standards.org/verify/101',
+    observedAt: '2026-10-01T00:00:00Z',
+    verifiedAt: '2026-10-01T00:00:00Z',
+    verificationMethod: overrides.verificationMethod || 'REGISTRY_LOOKUP_AUTHENTICATED',
+    provenanceLevel: overrides.provenanceLevel || 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+    standard: overrides.standard || 'ORGANIC',
+    status: overrides.status || 'ACTIVE',
+    ...overrides
   }
 }
 
@@ -53,7 +69,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 122 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 132 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -745,7 +761,18 @@ async function main() {
       externalCatalogSearch: async () => {
         callCount++
         if (callCount === 1) throw new Error('Temporary gateway timeout')
-        return [createItem({ id: 'gf_penne', name: 'GF Penne', ingredients: 'corn flour, rice flour', price: 90 })]
+        return [createItem({
+          id: 'gf_penne',
+          name: 'GF Penne',
+          ingredients: 'corn flour, rice flour',
+          price: 90,
+          certifiedRecords: [createValidCert('gf_penne', {
+            standard: 'GLUTEN_FREE',
+            certificationBody: 'Gluten-Free Certification Organization (GFCO)',
+            certificationId: 'GF-9921',
+            evidenceUrl: 'https://gfco.org/verify/GF-9921'
+          })]
+        })]
       }
     })
     assert.equal(callCount, 2)
@@ -766,7 +793,13 @@ async function main() {
         name: 'Rice Cake',
         ingredients: 'rice, salt',
         certificationsDeclared: ['Certified Nut-Free'],
-        allergenStatement: 'Certified nut-free facility'
+        allergenStatement: 'Certified nut-free facility',
+        certifiedRecords: [createValidCert('item_1', {
+          standard: 'NUT_FREE',
+          certificationBody: 'Safe Quality Food Institute',
+          certificationId: 'SQF-8812',
+          evidenceUrl: 'https://sqfi.com/verify/8812'
+        })]
       })]
     }, {
       saveShortlist: async () => {
@@ -790,7 +823,13 @@ async function main() {
         name: 'Rice Cake',
         ingredients: 'rice, salt',
         certificationsDeclared: ['Certified Nut-Free'],
-        allergenStatement: 'Certified nut-free facility'
+        allergenStatement: 'Certified nut-free facility',
+        certifiedRecords: [createValidCert('item_safe', {
+          standard: 'NUT_FREE',
+          certificationBody: 'Safe Quality Food Institute',
+          certificationId: 'SQF-8812',
+          evidenceUrl: 'https://sqfi.com/verify/8812'
+        })]
       })]
     }, {
       saveShortlist: async (ids) => {
@@ -1033,6 +1072,26 @@ async function main() {
       labelComplete: true,
       isOrganicDeclared: true,
       certificationsDeclared: ['USDA Organic', 'Non-GMO Project Verified', 'Certified Peanut-Free', 'Certified Tree Nut-Free'],
+      certifiedRecords: [
+        createValidCert('organic_sunbutter_1', {
+          standard: 'ORGANIC',
+          certificationBody: 'USDA National Organic Program',
+          certificationId: 'NOP-4421',
+          evidenceUrl: 'https://organic.ams.usda.gov/integrity/4421'
+        }),
+        createValidCert('organic_sunbutter_1', {
+          standard: 'PEANUT_FREE',
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-771',
+          evidenceUrl: 'https://allergencircles.org/verify/771'
+        }),
+        createValidCert('organic_sunbutter_1', {
+          standard: 'NUT_FREE',
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-772',
+          evidenceUrl: 'https://allergencircles.org/verify/772'
+        })
+      ],
       price: 450
     })
     const res = await runGuardianAutonomousAgent({
@@ -1081,6 +1140,26 @@ async function main() {
       labelComplete: true,
       isOrganicDeclared: true,
       certificationsDeclared: ['USDA Organic', 'Certified Peanut-Free', 'Certified Tree Nut-Free'],
+      certifiedRecords: [
+        createValidCert('qualifying_seed_butter', {
+          standard: 'ORGANIC',
+          certificationBody: 'USDA National Organic Program',
+          certificationId: 'NOP-8831',
+          evidenceUrl: 'https://organic.ams.usda.gov/integrity/8831'
+        }),
+        createValidCert('qualifying_seed_butter', {
+          standard: 'PEANUT_FREE',
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-991',
+          evidenceUrl: 'https://allergencircles.org/verify/991'
+        }),
+        createValidCert('qualifying_seed_butter', {
+          standard: 'NUT_FREE',
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-992',
+          evidenceUrl: 'https://allergencircles.org/verify/992'
+        })
+      ],
       price: 350
     })
     const dairyButter = createItem({
@@ -1309,6 +1388,26 @@ async function main() {
       labelComplete: true,
       isOrganicDeclared: true,
       certificationsDeclared: ['USDA Organic', 'Certified Peanut-Free', 'Certified Tree Nut-Free'],
+      certifiedRecords: [
+        createValidCert('strictly_qualifying_1', {
+          standard: 'ORGANIC',
+          certificationBody: 'USDA National Organic Program',
+          certificationId: 'NOP-5511',
+          evidenceUrl: 'https://organic.ams.usda.gov/integrity/5511'
+        }),
+        createValidCert('strictly_qualifying_1', {
+          standard: 'PEANUT_FREE',
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-331',
+          evidenceUrl: 'https://allergencircles.org/verify/331'
+        }),
+        createValidCert('strictly_qualifying_1', {
+          standard: 'NUT_FREE',
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-332',
+          evidenceUrl: 'https://allergencircles.org/verify/332'
+        })
+      ],
       price: 400
     })
     const dairyButter = createItem({
@@ -1357,9 +1456,293 @@ async function main() {
     assert.deepEqual(res.shortlist, ['strictly_qualifying_1'])
   })
 
+  // ===========================================================================
+  // CATEGORY 10: Trustworthy Certification Provenance & Category Integrity (123 - 132)
+  // ===========================================================================
+  console.log('▶ Category 10: Trustworthy Certification Provenance & Category Integrity (123 - 132)')
+
+  await runScenario(123, 'Fake certification text in product record: raw string without certifiedRecords fails as NEEDS_REVIEW', async () => {
+    const fakeCertItem = createItem({
+      id: 'fake_cert_product_1',
+      name: 'Artisan Flax Butter',
+      ingredients: 'roasted flaxseeds, cold-pressed sunflower oil, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certificationsDeclared: ['USDA Organic', 'Certified Organic by International Agency'],
+      certifiedRecords: []
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [fakeCertItem]
+    })
+    const p = res.products.find(x => x.id === 'fake_cert_product_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('NEEDS_REVIEW (Organic)') || r.includes('Unverified claim') || r.includes('cannot establish verified certification')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(124, 'Expired certification: record marked EXPIRED fails compliance as NEEDS_REVIEW', async () => {
+    const expiredCertItem = createItem({
+      id: 'expired_cert_product_1',
+      name: 'Organic Pumpkin Seed Butter',
+      ingredients: 'organic pumpkin seeds, sea salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('expired_cert_product_1', {
+        standard: 'ORGANIC',
+        certificationBody: 'Ecocert France',
+        status: 'EXPIRED'
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [expiredCertItem]
+    })
+    const p = res.products.find(x => x.id === 'expired_cert_product_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Expired certification') || r.includes('expired')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(125, 'Manufacturer claim without independent certification: MANUFACTURER_SELF_DECLARED provenance level returns NEEDS_REVIEW', async () => {
+    const selfDeclaredItem = createItem({
+      id: 'self_declared_product_1',
+      name: 'Sunflower Seed Butter',
+      ingredients: 'sunflower seeds, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('self_declared_product_1', {
+        standard: 'PEANUT_FREE',
+        certificationBody: 'Brand Packaging Department',
+        provenanceLevel: 'MANUFACTURER_SELF_DECLARED',
+        verificationMethod: 'MANUFACTURER_SELF_DECLARATION'
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find peanut-free seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [selfDeclaredItem]
+    })
+    const p = res.products.find(x => x.id === 'self_declared_product_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Manufacturer/unverified claim only') || r.includes('MANUFACTURER_SELF_DECLARED')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(126, 'Verified certification tied to a different product: associatedProductId mismatch returns NEEDS_REVIEW', async () => {
+    const mismatchedItem = createItem({
+      id: 'candidate_item_actual_123',
+      name: 'Artisan Sunflower Butter Spread',
+      ingredients: 'sunflower seeds, organic sugar, sea salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('completely_different_product_999', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        certificationId: 'NOP-999-MISMATCH',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/999'
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [mismatchedItem]
+    })
+    const p = res.products.find(x => x.id === 'candidate_item_actual_123')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('identity mismatch') || r.includes('does not match candidate product')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(127, 'Missing certification source URL: empty or whitespace evidenceUrl returns NEEDS_REVIEW', async () => {
+    const missingUrlItem = createItem({
+      id: 'missing_url_item_1',
+      name: 'Organic Sesame Tahini Spread',
+      ingredients: 'organic roasted sesame seeds, salt',
+      allergenStatement: 'Contains: sesame',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('missing_url_item_1', {
+        standard: 'ORGANIC',
+        certificationBody: 'Ecocert',
+        evidenceUrl: ''
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [missingUrlItem]
+    })
+    const p = res.products.find(x => x.id === 'missing_url_item_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Missing certification source URL') || r.includes('lacks verifiable evidence proof URL')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(128, 'Contradictory allergen and certification evidence: certified peanut-free + contains peanuts strictly EXCLUDED', async () => {
+    const contradictoryItem = createItem({
+      id: 'contradictory_item_1',
+      name: 'Seed & Nut Crunch Spread',
+      ingredients: 'sunflower seeds, roasted peanuts, sea salt',
+      allergenStatement: 'Contains: peanuts',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('contradictory_item_1', {
+        standard: 'PEANUT_FREE',
+        certificationBody: 'Bogus Authenticator',
+        evidenceUrl: 'https://bogus.com/verify/1'
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find peanut-free seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [contradictoryItem]
+    })
+    const p = res.products.find(x => x.id === 'contradictory_item_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'CONTAINS')
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.ok(p.reasons.some(r => r.includes('Peanut Violation') || r.includes('Contains peanut')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(129, 'Incomplete ingredient declarations: labelComplete false with empty ingredients fails closed as NEEDS_REVIEW', async () => {
+    const incompleteDeclarationItem = createItem({
+      id: 'incomplete_decl_item_1',
+      name: 'Mystery Roasted Seed Spread',
+      ingredients: '',
+      labelComplete: false,
+      allergenStatement: 'None stated'
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find peanut-free seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [incompleteDeclarationItem]
+    })
+    const p = res.products.find(x => x.id === 'incomplete_decl_item_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'UNKNOWN')
+    assert.equal(p.status, 'needs_review')
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(130, 'Unknown product categories: mandatory category without evidence returns categoryMatch false and NEEDS_REVIEW', async () => {
+    const unrelatedItem = createItem({
+      id: 'unrelated_item_1',
+      name: 'Sparkling Mineral Spring Water',
+      ingredients: 'carbonated natural spring water',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find gluten-free pasta',
+      constraints: ['gluten'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [unrelatedItem]
+    })
+    const p = res.products.find(x => x.id === 'unrelated_item_1')
+    assert.ok(p)
+    assert.equal(p.categoryMatch, false)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('NEEDS_REVIEW (Category)')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(131, 'Valid seed butter vs dairy butter: dairy butter strictly EXCLUDED, genuine certified seed butter MATCHES', async () => {
+    const dairyButter = createItem({
+      id: 'dairy_butter_table',
+      name: 'Pure Dairy Cow Butter',
+      ingredients: 'pasteurized cream, salt',
+      labelComplete: true
+    })
+    const genuineSeedButter = createItem({
+      id: 'genuine_sun_butter',
+      name: 'SunButter Organic Sunflower Seed Butter',
+      ingredients: 'organic sunflower seeds, organic sugar, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      isOrganicDeclared: true,
+      certificationsDeclared: ['USDA Organic'],
+      certifiedRecords: [createValidCert('genuine_sun_butter', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        certificationId: 'NOP-888',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/888'
+      })],
+      price: 320
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [dairyButter, genuineSeedButter]
+    })
+    const dairy = res.products.find(x => x.id === 'dairy_butter_table')
+    const seed = res.products.find(x => x.id === 'genuine_sun_butter')
+    assert.ok(dairy)
+    assert.ok(seed)
+    assert.equal(dairy.status, 'excluded')
+    assert.equal(dairy.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(seed.status, 'candidate')
+    assert.equal(seed.goalRelevanceStatus, 'MATCH')
+    assert.deepEqual(res.shortlist, ['genuine_sun_butter'])
+  })
+
+  await runScenario(132, 'Insufficient evidence for requested dietary restrictions: clean ingredients without certification returns NEEDS_REVIEW', async () => {
+    const cleanNoClaimsItem = createItem({
+      id: 'clean_no_claims_1',
+      name: 'Roasted Sunflower Spread',
+      ingredients: 'sunflower seeds, sunflower oil, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find peanut-free and tree-nut-free seed butter spread',
+      constraints: ['peanut', 'tree_nut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [cleanNoClaimsItem]
+    })
+    const p = res.products.find(x => x.id === 'clean_no_claims_1')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'NO_RESTRICTED_TOKENS_DETECTED')
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Absence of peanuts') || r.includes('Absence of tree nuts') || r.includes('NEEDS_REVIEW')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 122`)
+  console.log(`   Passed: ${passedCount} / 132`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

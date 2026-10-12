@@ -76,6 +76,49 @@ export const DecomposedGoalSchema = z.object({
 })
 export type DecomposedGoal = z.infer<typeof DecomposedGoalSchema>
 
+export const CertificationProvenanceLevelEnum = z.enum([
+  'UNVERIFIED_PRODUCT_METADATA',
+  'USER_UPLOADED_LABEL_EVIDENCE',
+  'MANUFACTURER_SELF_DECLARED',
+  'DOCUMENTED_THIRD_PARTY_CLAIM',
+  'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION'
+])
+export type CertificationProvenanceLevel = z.infer<typeof CertificationProvenanceLevelEnum>
+
+export const VerificationMethodEnum = z.enum([
+  'UNVERIFIED_TEXT_MATCH',
+  'MANUFACTURER_SELF_DECLARATION',
+  'PACKAGING_LABEL_INSPECTION',
+  'THIRD_PARTY_AUDIT_DATABASE',
+  'REGISTRY_LOOKUP_AUTHENTICATED',
+  'EXTERNAL_STANDARDS_VERIFIER'
+])
+export type VerificationMethod = z.infer<typeof VerificationMethodEnum>
+
+export const CertificationStatusEnum = z.enum([
+  'ACTIVE',
+  'EXPIRED',
+  'REVOKED',
+  'UNVERIFIED',
+  'MISMATCHED'
+])
+export type CertificationStatus = z.infer<typeof CertificationStatusEnum>
+
+export const ClaimedCertificationSchema = z.object({
+  certificationBody: z.string().trim().min(1).max(200),
+  certificationId: z.string().trim().max(100).optional(),
+  associatedProductId: z.string().trim().min(1).max(100),
+  evidenceUrl: z.string().max(1000).optional(),
+  observedAt: z.string(),
+  verifiedAt: z.string().optional(),
+  verificationMethod: VerificationMethodEnum.default('UNVERIFIED_TEXT_MATCH'),
+  provenanceLevel: CertificationProvenanceLevelEnum.default('UNVERIFIED_PRODUCT_METADATA'),
+  standard: z.string().optional(),
+  status: CertificationStatusEnum.default('UNVERIFIED'),
+  notes: z.string().optional()
+})
+export type ClaimedCertification = z.infer<typeof ClaimedCertificationSchema>
+
 export const ProductEvidenceSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(200),
@@ -95,6 +138,7 @@ export const ProductEvidenceSchema = z.object({
   sugarsPer100g: z.number().finite().nonnegative().optional(),
   isOrganicDeclared: z.boolean().optional(),
   certificationsDeclared: z.array(z.string()).optional(),
+  certifiedRecords: z.array(ClaimedCertificationSchema).optional(),
   categoriesDeclared: z.array(z.string()).optional()
 })
 export type ProductEvidence = z.infer<typeof ProductEvidenceSchema>
@@ -149,7 +193,8 @@ export const EvaluatedProductSchema = z.object({
   evidenceLimitations: z.array(z.string()).optional(),
   sourceUrl: z.string().optional(),
   gtin: z.string().optional(),
-  retrievedAt: z.string().optional()
+  retrievedAt: z.string().optional(),
+  certifiedRecords: z.array(ClaimedCertificationSchema).optional()
 })
 export type EvaluatedProduct = z.infer<typeof EvaluatedProductSchema>
 
