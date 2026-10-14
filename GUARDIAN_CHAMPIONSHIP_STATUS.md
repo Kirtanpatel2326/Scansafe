@@ -4,8 +4,8 @@
 **Last Updated:** 2026-10-14T08:25:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-autonomous-v2`  
-**Git Commit SHA:** `PENDING_COMMIT` (V8.5 Zero-Trust Boundary Release)  
-**Vercel Preview URL:** `PENDING_DEPLOY`  
+**Git Commit SHA:** `812f44c` (V8.5 Zero-Trust Boundary Release)  
+**Vercel Preview URL:** `https://scansafe-o31d-mk5vslzqx-kirtanpatel2326s-projects.vercel.app`  
 **Status:** VERCEL PREVIEW ACTIVE / ZERO-TRUST BOUNDARY HARDENED / 150/150 BENCHMARKS PASSED  
 
 ---
