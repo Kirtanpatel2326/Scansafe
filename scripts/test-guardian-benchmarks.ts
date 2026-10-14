@@ -24,7 +24,7 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105 || id === 132) {
+    if (id % 15 === 0 || id === 105 || id === 132 || id === 142) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
@@ -42,10 +42,14 @@ function createValidCert(associatedProductId: string, overrides: Partial<Claimed
     evidenceUrl: overrides.evidenceUrl || 'https://registry.standards.org/verify/101',
     observedAt: '2026-10-01T00:00:00Z',
     verifiedAt: '2026-10-01T00:00:00Z',
+    validFrom: overrides.validFrom || '2026-01-01T00:00:00Z',
+    validUntil: overrides.validUntil || '2027-01-01T00:00:00Z',
     verificationMethod: overrides.verificationMethod || 'REGISTRY_LOOKUP_AUTHENTICATED',
     provenanceLevel: overrides.provenanceLevel || 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
     standard: overrides.standard || 'ORGANIC',
     status: overrides.status || 'ACTIVE',
+    registryConfirmed: overrides.registryConfirmed !== undefined ? overrides.registryConfirmed : true,
+    isRevoked: overrides.isRevoked !== undefined ? overrides.isRevoked : false,
     ...overrides
   }
 }
@@ -69,7 +73,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 132 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 142 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -1740,9 +1744,333 @@ async function main() {
     assert.equal(res.shortlist.length, 0)
   })
 
+  // ===========================================================================
+  // CATEGORY 11: Certification Trust-Boundary & Adversarial Authentication (133 - 142)
+  // ===========================================================================
+  console.log('▶ Category 11: Certification Trust-Boundary & Adversarial Authentication (133 - 142)')
+
+  await runScenario(133, 'Adversarial 1: Forged certification record with plausible unapproved URL fails closed as NEEDS_REVIEW', async () => {
+    const forgedItem = createItem({
+      id: 'forged_cert_item_1',
+      name: 'Organic Sunflower Butter Spread',
+      ingredients: 'sunflower seeds, organic cane sugar, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('forged_cert_item_1', {
+        standard: 'ORGANIC',
+        certificationBody: 'Global Organic Verification Bureau',
+        evidenceUrl: 'https://plausible-cert-registry.net/verify/101', // Plausible but unapproved domain
+        registryConfirmed: true
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [forgedItem]
+    })
+    const p = res.products.find(x => x.id === 'forged_cert_item_1')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Forged or unapproved registry URL') || r.includes('NEEDS_REVIEW')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(134, 'Adversarial 2: ACTIVE status without registry confirmation fails closed as NEEDS_REVIEW', async () => {
+    const unconfirmedItem = createItem({
+      id: 'unconfirmed_cert_item_2',
+      name: 'Organic Sesame Seed Tahini',
+      ingredients: 'sesame seeds, salt',
+      allergenStatement: 'Contains: sesame',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('unconfirmed_cert_item_2', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/202',
+        status: 'ACTIVE',
+        registryConfirmed: false // Crucial: claims ACTIVE status without registry confirmation
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [unconfirmedItem]
+    })
+    const p = res.products.find(x => x.id === 'unconfirmed_cert_item_2')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('ACTIVE status without registry confirmation') || r.includes('NEEDS_REVIEW')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(135, 'Adversarial 3: Missing verification timestamp fails closed as NEEDS_REVIEW', async () => {
+    const missingTimeItem = createItem({
+      id: 'missing_time_item_3',
+      name: 'Organic Pumpkin Seed Butter',
+      ingredients: 'organic pumpkin seeds, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('missing_time_item_3', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/303',
+        verifiedAt: '' // Missing timestamp
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [missingTimeItem]
+    })
+    const p = res.products.find(x => x.id === 'missing_time_item_3')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Missing verification timestamp') || r.includes('NEEDS_REVIEW')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(136, 'Adversarial 4: Future-dated verification timestamp fails closed as NEEDS_REVIEW', async () => {
+    const futureTimeItem = createItem({
+      id: 'future_time_item_4',
+      name: 'Organic Watermelon Seed Butter',
+      ingredients: 'organic watermelon seeds, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('future_time_item_4', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/404',
+        verifiedAt: '2099-01-01T00:00:00Z' // Future timestamp
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [futureTimeItem]
+    })
+    const p = res.products.find(x => x.id === 'future_time_item_4')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Future-dated verification timestamp') || r.includes('NEEDS_REVIEW')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(137, 'Adversarial 5: Unsupported verification method fails closed as NEEDS_REVIEW', async () => {
+    const unsupportedMethodItem = createItem({
+      id: 'unsupported_method_item_5',
+      name: 'Organic Hemp Seed Butter',
+      ingredients: 'organic hemp seeds, sea salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('unsupported_method_item_5', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/505',
+        verificationMethod: 'PACKAGING_LABEL_INSPECTION' as any // Unsupported method (only REGISTRY_LOOKUP_AUTHENTICATED or EXTERNAL_STANDARDS_VERIFIER approved)
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [unsupportedMethodItem]
+    })
+    const p = res.products.find(x => x.id === 'unsupported_method_item_5')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Unsupported verification method') || r.includes('NEEDS_REVIEW')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(138, 'Adversarial 6: Certificate associated with another product or brand mismatch fails closed as NEEDS_REVIEW', async () => {
+    const brandMismatchItem = createItem({
+      id: 'sun_butter_actual_brand',
+      name: 'SunPure Artisan Sunflower Butter',
+      brand: 'SunPure',
+      ingredients: 'sunflower seeds, organic sugar, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('sun_butter_actual_brand', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/606',
+        brand: 'CompletelyDifferentBrand' // Brand binding mismatch
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [brandMismatchItem]
+    })
+    const p = res.products.find(x => x.id === 'sun_butter_actual_brand')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Brand identity mismatch') || r.includes('does not match product brand')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(139, 'Adversarial 7: Expired, revoked, and unverifiable certificates fail closed as NEEDS_REVIEW', async () => {
+    const revokedItem = createItem({
+      id: 'revoked_cert_item_7',
+      name: 'Organic Flax Seed Butter',
+      ingredients: 'organic roasted flax seeds, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('revoked_cert_item_7', {
+        standard: 'ORGANIC',
+        certificationBody: 'USDA National Organic Program',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/707',
+        status: 'REVOKED',
+        isRevoked: true // Explicitly revoked
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [revokedItem]
+    })
+    const p = res.products.find(x => x.id === 'revoked_cert_item_7')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('Revoked certification') || r.includes('revoked')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(140, 'Adversarial 8: DOCUMENTED_THIRD_PARTY_CLAIM without authentication cannot establish verified certification', async () => {
+    const thirdPartyClaimItem = createItem({
+      id: 'third_party_claim_item_8',
+      name: 'Organic Chia Seed Spread',
+      ingredients: 'organic chia seeds, cold-pressed sunflower oil, salt',
+      allergenStatement: 'Contains: none declared',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('third_party_claim_item_8', {
+        standard: 'ORGANIC',
+        certificationBody: 'Third-Party Distributor Claim',
+        evidenceUrl: 'https://organic.ams.usda.gov/integrity/808',
+        provenanceLevel: 'DOCUMENTED_THIRD_PARTY_CLAIM' // Equated claim rejection test
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [thirdPartyClaimItem]
+    })
+    const p = res.products.find(x => x.id === 'third_party_claim_item_8')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.ok(p.reasons.some(r => r.includes('DOCUMENTED_THIRD_PARTY_CLAIM') || r.includes('cannot be equated')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(141, 'Adversarial 9: Conflicting certification and ingredient evidence strictly EXCLUDED by deterministic safety', async () => {
+    const conflictItem = createItem({
+      id: 'conflict_cert_item_9',
+      name: 'Sunflower & Peanut Fusion Butter',
+      ingredients: 'sunflower seeds, roasted peanuts, sea salt',
+      allergenStatement: 'Contains: peanuts.',
+      labelComplete: true,
+      certifiedRecords: [createValidCert('conflict_cert_item_9', {
+        standard: 'PEANUT_FREE',
+        certificationBody: 'Allergen Control Group',
+        evidenceUrl: 'https://allergencircles.org/verify/909',
+        status: 'ACTIVE',
+        registryConfirmed: true
+      })]
+    })
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find peanut-free seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [conflictItem]
+    })
+    const p = res.products.find(x => x.id === 'conflict_cert_item_9')
+    assert.ok(p)
+    assert.equal(p.allergenStatus, 'CONTAINS')
+    assert.equal(p.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(p.status, 'excluded')
+    assert.ok(p.reasons.some(r => r.includes('Peanut Violation') || r.includes('Contains peanut')))
+    assert.ok(p.reasons.some(r => r.includes('Conflicting certification claimed')))
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(142, 'Adversarial 10: Attempted injection of trusted status through public API requests fails closed as NEEDS_REVIEW', async () => {
+    const { POST } = await import('../app/api/guardian/agent/route')
+    const injectedBody = {
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      products: [{
+        id: 'injected_cert_item_10',
+        name: 'Untrusted Uploaded Sunflower Butter',
+        ingredients: 'sunflower seeds, cane sugar, salt',
+        allergenStatement: 'Contains: none declared',
+        labelComplete: true,
+        sourceType: 'USER_UPLOADED_LABEL',
+        verificationStatus: 'MANUALLY_PROVIDED',
+        evidenceSource: 'Public User Upload',
+        certifiedRecords: [{
+          certificationBody: 'USDA National Organic Program',
+          certificationId: 'NOP-INJECTED-10',
+          associatedProductId: 'injected_cert_item_10',
+          evidenceUrl: 'https://organic.ams.usda.gov/integrity/injected-10',
+          observedAt: '2026-10-01T00:00:00Z',
+          verifiedAt: '2026-10-01T00:00:00Z',
+          validFrom: '2026-01-01T00:00:00Z',
+          validUntil: '2027-01-01T00:00:00Z',
+          verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+          provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION', // Attempted injection
+          standard: 'ORGANIC',
+          status: 'ACTIVE',
+          registryConfirmed: true // Attempted injection
+        }]
+      }]
+    }
+
+    const req = new Request('http://localhost:3000/api/guardian/agent', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-forwarded-for': '198.51.100.188'
+      },
+      body: JSON.stringify(injectedBody)
+    })
+
+    const response = await POST(req)
+    assert.equal(response.status, 200)
+    const json = await response.json()
+    const p = json.products.find((x: any) => x.id === 'injected_cert_item_10')
+    assert.ok(p, 'Product must be evaluated')
+    // Untrusted public API client injection must be sanitized and fail closed as NEEDS_REVIEW
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.equal(json.shortlist.length, 0, 'Injected record must not enter shortlist')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 132`)
+  console.log(`   Passed: ${passedCount} / 142`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

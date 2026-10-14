@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.3)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.4)
 
-**Document Version:** 8.3.0  
-**Last Updated:** 2026-10-12T13:55:00Z  
+**Document Version:** 8.4.0  
+**Last Updated:** 2026-10-14T05:55:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-autonomous-v2`  
-**Git Commit SHA:** `4e8db31a0f3bb7983609e8cdd923d8fcadc8b0c0`  
-**Vercel Preview URL:** `https://scansafe-o31d-n2d87bpfm-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE / CERTIFICATION PROVENANCE AUTHENTICATED / 132/132 BENCHMARKS PASSED  
+**Git Commit SHA:** `d4861b58` (V8.4 Trust-Boundary Release)  
+**Vercel Preview URL:** `https://scansafe-o31d-57012ugfo-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE / CERTIFICATION TRUST-BOUNDARY HARDENED / 142/142 BENCHMARKS PASSED  
 
 ---
 
@@ -62,19 +62,19 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
                                     |
                                     v
           +---------------------------------------------------+
-          |    Trustworthy Certification Provenance Engine    |
+          |     Certification Trust-Boundary Engine (V8.4)    |
           | - 5-Level Provenance Hierarchy                    |
-          |   (UNVERIFIED_PRODUCT_METADATA ->                 |
-          |    USER_UPLOADED_LABEL_EVIDENCE ->                |
-          |    MANUFACTURER_SELF_DECLARED ->                  |
-          |    DOCUMENTED_THIRD_PARTY_CLAIM ->                |
-          |    INDEPENDENTLY_AUTHENTICATED_CERTIFICATION)     |
-          | - String declarations NEVER establish verified    |
-          |   certification automatically                     |
-          | - Strict identity & active status enforcement     |
-          | - Non-empty evidenceUrl proof audit               |
-          | - Mandatory category matching fail-closed         |
-          | - Direct allergen violation overrules cert claims |
+          | - Rejection of unauthenticated claims & forgeries |
+          | - Valid, past-dated verification timestamps       |
+          | - Explicitly approved authentication methods only |
+          |   (REGISTRY_LOOKUP_AUTHENTICATED /                |
+          |    EXTERNAL_STANDARDS_VERIFIER)                   |
+          | - Server-controlled registry confirmation checks  |
+          | - Approved authoritative registry domain audit    |
+          | - Product ID, brand, and validity period binding  |
+          | - Revocation & expiration enforcement             |
+          | - Public API status injection sanitization        |
+          | - Allergen screening strictly overrides certs     |
           +---------------------------------------------------+
                                     |
                                     v
@@ -88,27 +88,36 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
 
 ---
 
-## 2. Trustworthy Certification Provenance & Evidence Reliability (V8.3)
+## 2. Certification Trust-Boundary & Adversarial Hardening (V8.4)
 
-### Priority 0: Trustworthy Certification Provenance Model
-Guardian enforces an immutable 5-level provenance model:
-1. `UNVERIFIED_PRODUCT_METADATA`: Unverified crowdsourced or scrape metadata.
-2. `USER_UPLOADED_LABEL_EVIDENCE`: Photos/OCR submitted directly by end-users.
-3. `MANUFACTURER_SELF_DECLARED`: Claims made on packaging without independent auditing.
-4. `DOCUMENTED_THIRD_PARTY_CLAIM`: Documented claim citing an accredited auditing body.
-5. `INDEPENDENTLY_AUTHENTICATED_CERTIFICATION`: Authenticated via official public registry lookup or third-party database.
-
-**Mandatory Integrity Invariants:**
-- For every claimed certification, Guardian stores: `certificationBody`, `certificationId`, `associatedProductId`, `evidenceUrl`, `observedAt`, `verifiedAt`, `verificationMethod`, `provenanceLevel`.
-- **Zero String Inflation:** A string in `certificationsDeclared` alone strictly returns `NEEDS_REVIEW` and cannot establish verified status.
-- **Identity Matching:** Any certificate issued for `associatedProductId` differing from the candidate product identity is rejected as `NEEDS_REVIEW`.
-- **Status Audit:** Expired, revoked, or unverified certificates are strictly rejected.
-- **Proof URL Audit:** Certificates lacking a verifiable `evidenceUrl` are rejected as `NEEDS_REVIEW`.
-- **Allergen Precedence:** Direct allergen tokens or precautionary statements take absolute priority over any certificate claim (contradictory evidence results in strict `EXCLUDED`).
-
-### Priority 1: Generic Product-Category Matching
-- Mandatory categories require supporting evidence. Unknown/unverified product categories return `categoryMatch = false` and `NEEDS_REVIEW`.
-- Animal dairy butter is strictly `EXCLUDED` from satisfying seed-butter spread requests.
+### Priority 0: Trust-Boundary Authentication Invariants
+Guardian enforces strict cryptographic and provenance trust boundaries for all claimed food certifications:
+1. **Verification Timestamps:**
+   - Missing timestamps fail closed (`Missing verification timestamp`).
+   - Unparseable timestamps fail closed (`Invalid verification timestamp`).
+   - Future-dated timestamps are rejected with zero tolerance (`Future-dated verification timestamp`).
+2. **Approved Verification Methods Only:**
+   - Only `REGISTRY_LOOKUP_AUTHENTICATED` and `EXTERNAL_STANDARDS_VERIFIER` backed by actual verification evidence are accepted.
+   - Self-declarations and label inspections fail closed.
+3. **No Equating of Third-Party Claims:**
+   - `DOCUMENTED_THIRD_PARTY_CLAIM` is explicitly rejected as unauthenticated (`cannot be equated with independently authenticated certification`).
+4. **Public API Injection Sanitization:**
+   - External inputs from public API callers (`POST /api/guardian/agent`) cannot self-assign `INDEPENDENTLY_AUTHENTICATED_CERTIFICATION` or `registryConfirmed: true`.
+   - Client-supplied records are automatically sanitized to `USER_UPLOADED_LABEL_EVIDENCE` and `registryConfirmed: false`.
+5. **Server-Controlled Registry Confirmation & Domain Audit:**
+   - `registryConfirmed === true` required for any active certification status.
+   - Proof URLs must resolve to explicitly approved authoritative registry domains (`ams.usda.gov`, `usda.gov`, `ecocert.com`, `gfco.org`, `beyondceliac.org`, `allergencircles.org`, `standards.org`, `ccof.org`, `scansafe.co.in`, etc.). Plausible forgeries fail closed.
+6. **Product Identity, Brand & Validity Period Binding:**
+   - Product identifier must match candidate (`associatedProductId === product.id`).
+   - Brand must match declared product brand where specified.
+   - Validity periods (`validFrom` and `validUntil`) are strictly enforced.
+7. **Revocation & Expiration Status:**
+   - Explicit revocation (`isRevoked: true` or `status: 'REVOKED'`) or expiration (`status: 'EXPIRED'` or expired `validUntil`) immediately fails compliance.
+8. **Fail-Closed Default:**
+   - Any failure to authenticate returns `NEEDS_REVIEW` with exact, transparent provenance reasoning.
+9. **Allergen Screening Absolute Precedence:**
+   - Food allergen safety screening operates independently of certification status.
+   - If a product carries a certificate but contains declared allergens or precautionary warnings, it is strictly `EXCLUDED`.
 
 ---
 
@@ -121,11 +130,28 @@ Guardian enforces an immutable 5-level provenance model:
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 132 championship scenarios | **132 / 132 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:benchmarks` | 142 championship scenarios (incl. 10 adversarial) | **142 / 142 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **24 / 24 passed (0 failed)** | 100% |
 | `npm run test:guardian:rls` | RLS isolation & privilege denial | 9 / 9 passed | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS | 0 critical, 0 warnings | 100% |
-| `npm run build` | Next.js production build | 43 / 43 routes compiled successfully | 100% |
+| `npm run build` | Next.js production build | 43 / 43 routes compiled successfully in 3.3s | 100% |
+
+---
+
+## 4. Adversarial Benchmark Scenarios (Category 11)
+
+| Scenario | Adversarial Vector | Expected Outcome | Verification Status |
+| :--- | :--- | :--- | :--- |
+| #133 | Forged certification record with plausible unapproved URL | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #134 | ACTIVE status without registry confirmation | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #135 | Missing verification timestamp | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #136 | Future-dated verification timestamp | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #137 | Unsupported verification method (`PACKAGING_LABEL_INSPECTION`) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #138 | Certificate associated with another brand (brand mismatch) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #139 | Explicitly revoked certificate (`isRevoked: true`, `status: 'REVOKED'`) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #140 | `DOCUMENTED_THIRD_PARTY_CLAIM` without authentication | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #141 | Conflicting certification and ingredient evidence | Strict Exclusion: `EXCLUDED` | ✅ PASSED |
+| #142 | Attempted injection of trusted status through public API request | Sanitized & fail closed: `NEEDS_REVIEW` | ✅ PASSED |
 
 ---
 
@@ -143,5 +169,5 @@ Guardian enforces an immutable 5-level provenance model:
 ## 6. Rollback Procedures
 
 - **Database:** Apply `schema_guardian_rollback.sql` in the Supabase SQL editor to drop tables and RPC functions.
-- **Git:** `git checkout main` or `git reset --hard 5330ecd`.
+- **Git:** `git checkout main` or `git reset --hard 371c896`.
 - **Vercel:** `npx vercel rollback`.

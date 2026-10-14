@@ -108,13 +108,18 @@ export const ClaimedCertificationSchema = z.object({
   certificationBody: z.string().trim().min(1).max(200),
   certificationId: z.string().trim().max(100).optional(),
   associatedProductId: z.string().trim().min(1).max(100),
+  brand: z.string().trim().max(100).optional(),
   evidenceUrl: z.string().max(1000).optional(),
   observedAt: z.string(),
   verifiedAt: z.string().optional(),
+  validFrom: z.string().optional(),
+  validUntil: z.string().optional(),
   verificationMethod: VerificationMethodEnum.default('UNVERIFIED_TEXT_MATCH'),
   provenanceLevel: CertificationProvenanceLevelEnum.default('UNVERIFIED_PRODUCT_METADATA'),
   standard: z.string().optional(),
   status: CertificationStatusEnum.default('UNVERIFIED'),
+  registryConfirmed: z.boolean().default(false),
+  isRevoked: z.boolean().default(false),
   notes: z.string().optional()
 })
 export type ClaimedCertification = z.infer<typeof ClaimedCertificationSchema>

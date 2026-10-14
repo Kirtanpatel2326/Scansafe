@@ -438,10 +438,13 @@ async function main() {
           evidenceUrl: 'https://allergencircles.org/verify/7881',
           observedAt: '2026-10-01T00:00:00Z',
           verifiedAt: '2026-10-01T00:00:00Z',
+          validFrom: '2026-01-01T00:00:00Z',
+          validUntil: '2027-01-01T00:00:00Z',
           verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
           provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
           standard: 'PEANUT_FREE',
-          status: 'ACTIVE'
+          status: 'ACTIVE',
+          registryConfirmed: true
         }],
         evidenceSource: 'Verified Catalog Entry',
         sourceType: 'INTERNAL_VERIFIED_CATALOG',

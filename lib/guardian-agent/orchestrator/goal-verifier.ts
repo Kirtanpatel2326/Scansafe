@@ -235,18 +235,46 @@ export function decomposeUserGoal(
   return DecomposedGoalSchema.parse(result)
 }
 
+export const APPROVED_REGISTRY_DOMAINS = [
+  'ams.usda.gov',
+  'usda.gov',
+  'ecocert.com',
+  'gfco.org',
+  'beyondceliac.org',
+  'celiac.org',
+  'allergencircles.org',
+  'sqfi.com',
+  'brcgs.com',
+  'vegansociety.com',
+  'vegan.org',
+  'v-label.com',
+  'standards.org',
+  'ccof.org',
+  'qai-inc.com',
+  'soilassociation.org',
+  'demeter.net',
+  'scansafe.co.in'
+]
+
+export const APPROVED_VERIFICATION_METHODS = new Set([
+  'REGISTRY_LOOKUP_AUTHENTICATED',
+  'EXTERNAL_STANDARDS_VERIFIER'
+])
+
 /**
  * P0: Verify whether a product has independently authenticated certification
  * satisfying strict provenance requirements.
  *
  * Rules:
  * - A string in certificationsDeclared must NEVER automatically establish verified certification.
- * - Must match product identity (associatedProductId === product.id).
- * - Must be active (status === 'ACTIVE').
- * - Must possess non-empty evidenceUrl.
- * - Must possess verification timestamp (verifiedAt).
- * - Must possess authenticated verification method (REGISTRY_LOOKUP_AUTHENTICATED or THIRD_PARTY_AUDIT_DATABASE).
- * - Provenance level must be INDEPENDENTLY_AUTHENTICATED_CERTIFICATION or DOCUMENTED_THIRD_PARTY_CLAIM.
+ * - Must match product identity (associatedProductId === product.id) and brand where declared.
+ * - Must be active (status === 'ACTIVE') and not revoked (isRevoked !== true).
+ * - Must possess a non-empty, valid evidenceUrl belonging to an approved authoritative registry domain.
+ * - Must possess a valid, non-future-dated verification timestamp (verifiedAt).
+ * - Must possess an explicitly approved verification method (REGISTRY_LOOKUP_AUTHENTICATED or EXTERNAL_STANDARDS_VERIFIER).
+ * - Provenance level must strictly be INDEPENDENTLY_AUTHENTICATED_CERTIFICATION.
+ * - Must have server-controlled registry confirmation (registryConfirmed === true).
+ * - Must satisfy certificate validity period (validFrom and validUntil).
  */
 export function findAuthenticatedCertification(
   product: ProductEvidence,
@@ -294,15 +322,37 @@ export function findAuthenticatedCertification(
       }
     }
 
-    // 2. Active status check
+    // 2. Brand identity binding check (if both certificate and product specify a brand)
+    if (record.brand && product.brand) {
+      const recBrandNorm = record.brand.trim().toLowerCase()
+      const prodBrandNorm = product.brand.trim().toLowerCase()
+      if (!recBrandNorm.includes(prodBrandNorm) && !prodBrandNorm.includes(recBrandNorm)) {
+        return {
+          authenticated: false,
+          record,
+          invalidationReason: `Brand identity mismatch: Certificate from ${record.certificationBody} was issued for brand "${record.brand}", which does not match product brand "${product.brand}".`
+        }
+      }
+    }
+
+    // 3. Revocation status check
+    if (record.isRevoked || record.status === 'REVOKED') {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Revoked certification: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) has been revoked by issuing authority.`
+      }
+    }
+
+    // 4. Active status check & expiration
     if (record.status === 'EXPIRED') {
       return {
         authenticated: false,
         record,
-        invalidationReason: `Expired certification: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) expired on ${record.verifiedAt || 'prior date'}; cannot establish active compliance.`
+        invalidationReason: `Expired certification: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) has expired; cannot establish active compliance.`
       }
     }
-    if (record.status === 'REVOKED' || record.status === 'UNVERIFIED' || record.status === 'MISMATCHED') {
+    if (record.status !== 'ACTIVE') {
       return {
         authenticated: false,
         record,
@@ -310,20 +360,88 @@ export function findAuthenticatedCertification(
       }
     }
 
-    // 3. Provenance level check
-    if (
-      record.provenanceLevel === 'UNVERIFIED_PRODUCT_METADATA' ||
-      record.provenanceLevel === 'USER_UPLOADED_LABEL_EVIDENCE' ||
-      record.provenanceLevel === 'MANUFACTURER_SELF_DECLARED'
-    ) {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Manufacturer/unverified claim only: Record from ${record.certificationBody} is marked "${record.provenanceLevel}" without documented third-party audit or independent registry authentication.`
+    // 5. Validity period bounds (validFrom and validUntil)
+    if (record.validFrom) {
+      const validFromMs = Date.parse(record.validFrom)
+      if (!Number.isNaN(validFromMs) && validFromMs > Date.now()) {
+        return {
+          authenticated: false,
+          record,
+          invalidationReason: `Certificate validity period not yet started: Certificate from ${record.certificationBody} is only valid starting ${record.validFrom}.`
+        }
+      }
+    }
+    if (record.validUntil) {
+      const validUntilMs = Date.parse(record.validUntil)
+      if (!Number.isNaN(validUntilMs) && validUntilMs < Date.now()) {
+        return {
+          authenticated: false,
+          record,
+          invalidationReason: `Expired certificate validity: Certificate from ${record.certificationBody} expired on ${record.validUntil}.`
+        }
       }
     }
 
-    // 4. Missing evidence URL check
+    // 6. Verification timestamp validation (missing, unparseable, or future-dated)
+    if (!record.verifiedAt || !record.verifiedAt.trim()) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Missing verification timestamp: Certificate from ${record.certificationBody} lacks a verified timestamp.`
+      }
+    }
+    const verifiedMs = Date.parse(record.verifiedAt)
+    if (Number.isNaN(verifiedMs)) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Invalid verification timestamp: Certificate from ${record.certificationBody} contains unparseable timestamp "${record.verifiedAt}".`
+      }
+    }
+    // Reject future timestamps, allowing up to 60s for clock drift
+    if (verifiedMs > Date.now() + 60000) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Future-dated verification timestamp: Certificate from ${record.certificationBody} contains future timestamp "${record.verifiedAt}".`
+      }
+    }
+
+    // 7. Provenance level check (Strictly INDEPENDENTLY_AUTHENTICATED_CERTIFICATION)
+    if (record.provenanceLevel === 'DOCUMENTED_THIRD_PARTY_CLAIM') {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Documented third-party claim without authentication: Record from ${record.certificationBody} is marked "DOCUMENTED_THIRD_PARTY_CLAIM", which cannot be equated with independently authenticated certification.`
+      }
+    }
+    if (record.provenanceLevel !== 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION') {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Manufacturer/unverified claim only: Record from ${record.certificationBody} is marked "${record.provenanceLevel}" without independent registry authentication.`
+      }
+    }
+
+    // 8. Explicitly approved authentication methods backed by real verification evidence
+    if (!APPROVED_VERIFICATION_METHODS.has(record.verificationMethod)) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `Unsupported verification method: Claim from ${record.certificationBody} used "${record.verificationMethod}", but only explicitly approved methods (REGISTRY_LOOKUP_AUTHENTICATED, EXTERNAL_STANDARDS_VERIFIER) backed by real verification evidence are accepted.`
+      }
+    }
+
+    // 9. Server-controlled registry confirmation
+    if (!record.registryConfirmed) {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: `ACTIVE status without registry confirmation: Certificate from ${record.certificationBody} claims active status but lacks server-controlled registry confirmation.`
+      }
+    }
+
+    // 10. Evidence URL & Authoritative Registry Domain Validation
     if (!record.evidenceUrl || !record.evidenceUrl.trim()) {
       return {
         authenticated: false,
@@ -331,21 +449,28 @@ export function findAuthenticatedCertification(
         invalidationReason: `Missing certification source URL: Claimed certificate from ${record.certificationBody} lacks verifiable evidence proof URL.`
       }
     }
-
-    // 5. Verification method check
-    if (
-      record.verificationMethod === 'UNVERIFIED_TEXT_MATCH' ||
-      record.verificationMethod === 'MANUFACTURER_SELF_DECLARATION' ||
-      record.verificationMethod === 'PACKAGING_LABEL_INSPECTION'
-    ) {
+    try {
+      const parsedUrl = new URL(record.evidenceUrl)
+      const hostname = parsedUrl.hostname.toLowerCase()
+      const isApproved = APPROVED_REGISTRY_DOMAINS.some(
+        domain => hostname === domain || hostname.endsWith(`.${domain}`)
+      )
+      if (!isApproved) {
+        return {
+          authenticated: false,
+          record,
+          invalidationReason: `Forged or unapproved registry URL: Certificate proof URL "${record.evidenceUrl}" (host: ${hostname}) is not from an approved authoritative registry domain.`
+        }
+      }
+    } catch {
       return {
         authenticated: false,
         record,
-        invalidationReason: `Unverified verification method: Claim from ${record.certificationBody} was observed via "${record.verificationMethod}", not authenticated registry lookup or third-party audit database.`
+        invalidationReason: `Malformed certification proof URL: Certificate proof URL "${record.evidenceUrl}" is invalid.`
       }
     }
 
-    // All integrity checks passed!
+    // All integrity and authentication checks passed!
     return {
       authenticated: true,
       record
@@ -663,20 +788,23 @@ export function evaluateProductGoalRelevance(
       /(?:may contain|traces of).*(?:gluten|wheat|barley|rye)/i.test(ingredientsLower)
     const hasDirectAllergenGluten = /\b(?:gluten|wheat|barley|rye)\b/i.test(allergenLower) && !/\b(?:no|without|zero|free from)\s+(?:gluten|wheat|barley|rye)\b/i.test(allergenLower)
 
+    const declaredCert = (product.certifiedRecords || []).find(r => /gluten[-_ ]free|gfco|celiac/i.test(r.standard || '') || /gluten[-_ ]free|gfco|celiac/i.test(r.certificationBody || ''))
     if (hasGlutenGrain || hasDirectAllergenGluten) {
       hardExclusion = true
+      const certNote = declaredCert ? ` Conflicting certification claimed (${declaredCert.certificationBody}); allergen safety screening strictly overrides certification status.` : ''
       attributeEvidence['gluten_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Contains explicit gluten-containing grains or declared gluten allergen in ingredients or allergen statement.'
+        evidence: `Contains explicit gluten-containing grains or declared gluten allergen in ingredients or allergen statement.${certNote}`
       }
-      relevanceReasons.push('EXCLUDED (Gluten Violation): Contains gluten-containing grains or declared gluten allergen.')
+      relevanceReasons.push(`EXCLUDED (Gluten Violation): Contains gluten-containing grains or declared gluten allergen.${certNote}`)
     } else if (hasPrecautionaryGluten) {
       hardExclusion = true
+      const certNote = declaredCert ? ` Conflicting certification claimed (${declaredCert.certificationBody}); precautionary allergen cross-contact strictly overrides certification.` : ''
       attributeEvidence['gluten_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Precautionary cross-contact warning detected on packaging ("may contain wheat/gluten" or shared facility).'
+        evidence: `Precautionary cross-contact warning detected on packaging ("may contain wheat/gluten" or shared facility).${certNote}`
       }
-      relevanceReasons.push('EXCLUDED (Gluten Cross-Contact): Packaging declares precautionary cross-contact warning for gluten/wheat.')
+      relevanceReasons.push(`EXCLUDED (Gluten Cross-Contact): Packaging declares precautionary cross-contact warning for gluten/wheat.${certNote}`)
     } else {
       const certResult = findAuthenticatedCertification(product, /gluten[- ]free|gfco|celiac/i)
 
@@ -722,20 +850,23 @@ export function evaluateProductGoalRelevance(
     const hasPrecautionaryPeanut = /(?:may contain|traces of|shared (?:equipment|facility|line)|processed (?:in|on)|handled in).*(?:peanut|groundnut)/i.test(allergenLower) ||
       /(?:may contain|traces of).*(?:peanut|groundnut)/i.test(ingredientsLower)
 
+    const declaredCert = (product.certifiedRecords || []).find(r => /peanut[-_ ]free/i.test(r.standard || '') || /peanut[-_ ]free/i.test(r.certificationBody || ''))
     if (hasPeanut) {
       hardExclusion = true
+      const certNote = declaredCert ? ` Conflicting certification claimed (${declaredCert.certificationBody}); allergen safety screening strictly overrides certification status.` : ''
       attributeEvidence['peanut_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Contains peanut in ingredients or allergen declaration.'
+        evidence: `Contains peanut in ingredients or allergen declaration.${certNote}`
       }
-      relevanceReasons.push('EXCLUDED (Peanut Violation): Contains peanut in ingredients or allergen declaration.')
+      relevanceReasons.push(`EXCLUDED (Peanut Violation): Contains peanut in ingredients or allergen declaration.${certNote}`)
     } else if (hasPrecautionaryPeanut) {
       hardExclusion = true
+      const certNote = declaredCert ? ` Conflicting certification claimed (${declaredCert.certificationBody}); precautionary allergen cross-contact strictly overrides certification.` : ''
       attributeEvidence['peanut_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Precautionary cross-contact warning detected on packaging ("may contain peanuts" or shared facility).'
+        evidence: `Precautionary cross-contact warning detected on packaging ("may contain peanuts" or shared facility).${certNote}`
       }
-      relevanceReasons.push('EXCLUDED (Peanut Cross-Contact): Packaging declares precautionary cross-contact warning for peanuts.')
+      relevanceReasons.push(`EXCLUDED (Peanut Cross-Contact): Packaging declares precautionary cross-contact warning for peanuts.${certNote}`)
     } else {
       const certResult = findAuthenticatedCertification(product, /peanut[- ]free/i)
 
@@ -785,20 +916,23 @@ export function evaluateProductGoalRelevance(
       /(?:may contain|traces of).*(?:nut|almond|cashew|walnut|pecan|hazelnut|pistachio)/i.test(ingredientsLower)
     const hasDirectAllergenNut = /\b(?:tree nut|almond|cashew|walnut|pecan|hazelnut|pistachio)\b/i.test(allergenLower) && !/\b(?:no|without|zero|free from)\s+(?:tree nut|nut|almond|cashew|walnut|pecan|hazelnut|pistachio)s?\b/i.test(allergenLower)
 
+    const declaredCert = (product.certifiedRecords || []).find(r => /nut[-_ ]free|tree[-_ ]nut[-_ ]free/i.test(r.standard || '') || /nut[-_ ]free|tree[-_ ]nut[-_ ]free/i.test(r.certificationBody || ''))
     if (hasTreeNut || hasDirectAllergenNut) {
       hardExclusion = true
+      const certNote = declaredCert ? ` Conflicting certification claimed (${declaredCert.certificationBody}); allergen safety screening strictly overrides certification status.` : ''
       attributeEvidence['nut_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Contains tree nut ingredients or declared nut allergen.'
+        evidence: `Contains tree nut ingredients or declared nut allergen.${certNote}`
       }
-      relevanceReasons.push('EXCLUDED (Nut Violation): Contains tree nut ingredients or declared nut allergen.')
+      relevanceReasons.push(`EXCLUDED (Nut Violation): Contains tree nut ingredients or declared nut allergen.${certNote}`)
     } else if (hasPrecautionaryNut) {
       hardExclusion = true
+      const certNote = declaredCert ? ` Conflicting certification claimed (${declaredCert.certificationBody}); precautionary allergen cross-contact strictly overrides certification.` : ''
       attributeEvidence['nut_free'] = {
         status: 'EXCLUDED',
-        evidence: 'Precautionary cross-contact warning detected on packaging ("may contain tree nuts" or shared facility).'
+        evidence: `Precautionary cross-contact warning detected on packaging ("may contain tree nuts" or shared facility).${certNote}`
       }
-      relevanceReasons.push('EXCLUDED (Nut Cross-Contact): Packaging declares precautionary cross-contact warning for tree nuts.')
+      relevanceReasons.push(`EXCLUDED (Nut Cross-Contact): Packaging declares precautionary cross-contact warning for tree nuts.${certNote}`)
     } else {
       const certResult = findAuthenticatedCertification(product, /nut[- ]free|tree[- ]nut[- ]free/i)
 
