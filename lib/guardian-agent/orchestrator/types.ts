@@ -119,7 +119,9 @@ export const ClaimedCertificationSchema = z.object({
   standard: z.string().optional(),
   status: CertificationStatusEnum.default('UNVERIFIED'),
   registryConfirmed: z.boolean().default(false),
-  isRevoked: z.boolean().default(false),
+  isRevoked: z.boolean().default(false).optional(),
+  serverAttestationToken: z.string().optional(),
+  registryId: z.string().optional(),
   notes: z.string().optional()
 })
 export type ClaimedCertification = z.infer<typeof ClaimedCertificationSchema>

@@ -417,11 +417,11 @@ async function main() {
   await runTest('POST /api/guardian/agent executes complete workflow returning HTTP 200 with bounded plan', async () => {
     const { POST } = await import('../app/api/guardian/agent/route')
     const validBody = {
-      goal: 'Find safe peanut-free breakfast granola',
+      goal: 'Find safe breakfast granola bar',
       constraints: ['peanut'],
       budget: 500,
       currency: 'INR',
-      allowInternalCatalog: true,
+      allowInternalCatalog: false,
       allowPublicOffCatalog: false,
       allowPartnerCatalog: false,
       products: [{
@@ -430,25 +430,9 @@ async function main() {
         ingredients: 'rolled oats, organic honey, dried cranberries, sunflower seeds',
         allergenStatement: 'Contains: coconut.',
         labelComplete: true,
-        certificationsDeclared: ['Certified Peanut-Free'],
-        certifiedRecords: [{
-          certificationBody: 'Allergen Control Group',
-          certificationId: 'ACG-7881',
-          associatedProductId: 'oat_bar_1',
-          evidenceUrl: 'https://allergencircles.org/verify/7881',
-          observedAt: '2026-10-01T00:00:00Z',
-          verifiedAt: '2026-10-01T00:00:00Z',
-          validFrom: '2026-01-01T00:00:00Z',
-          validUntil: '2027-01-01T00:00:00Z',
-          verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
-          provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
-          standard: 'PEANUT_FREE',
-          status: 'ACTIVE',
-          registryConfirmed: true
-        }],
-        evidenceSource: 'Verified Catalog Entry',
-        sourceType: 'INTERNAL_VERIFIED_CATALOG',
-        verificationStatus: 'MANUFACTURER_AUTHORIZED',
+        evidenceSource: 'User Label Upload',
+        sourceType: 'USER_UPLOADED_LABEL',
+        verificationStatus: 'MANUALLY_PROVIDED',
         evidenceLimitations: [],
         price: 250,
         currency: 'INR'
@@ -471,7 +455,63 @@ async function main() {
     assert(typeof data.runId === 'string', 'Expected valid runId')
     assert(Array.isArray(data.shortlist), 'Expected shortlist array')
     assert(Array.isArray(data.steps), 'Expected steps array')
-    assert(data.shortlist.includes('oat_bar_1'), 'Expected verified oat bar in shortlist')
+    assert(data.shortlist.includes('oat_bar_1'), 'Expected safe oat bar in shortlist')
+  })
+
+  await runTest('POST /api/guardian/agent strips client-supplied INTERNAL_VERIFIED_CATALOG and fails closed for unauthenticated certification claims', async () => {
+    const { POST } = await import('../app/api/guardian/agent/route')
+    const spoofedRequest = {
+      goal: 'Find safe peanut-free breakfast granola',
+      constraints: ['peanut'],
+      budget: 500,
+      currency: 'INR',
+      products: [{
+        id: 'spoofed_oat_bar',
+        name: 'Spoofed Oat Granola Bar',
+        ingredients: 'rolled oats, organic honey, cranberries, sunflower seeds',
+        allergenStatement: 'Contains: coconut.',
+        labelComplete: true,
+        sourceType: 'INTERNAL_VERIFIED_CATALOG', // Spoofed client field
+        verificationStatus: 'MANUFACTURER_AUTHORIZED', // Spoofed client field
+        evidenceSource: 'Client Injected Verified Catalog',
+        certifiedRecords: [{
+          certificationBody: 'Allergen Control Group',
+          certificationId: 'ACG-7881',
+          associatedProductId: 'spoofed_oat_bar',
+          evidenceUrl: 'https://allergencircles.org/verify/7881',
+          observedAt: '2026-10-01T00:00:00Z',
+          verifiedAt: '2026-10-01T00:00:00Z',
+          validFrom: '2026-01-01T00:00:00Z',
+          validUntil: '2027-01-01T00:00:00Z',
+          verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+          provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+          standard: 'PEANUT_FREE',
+          status: 'ACTIVE',
+          registryConfirmed: true
+        }],
+        price: 250,
+        currency: 'INR'
+      }]
+    }
+
+    const req = new Request('http://localhost:3000/api/guardian/agent', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-forwarded-for': '198.51.100.191'
+      },
+      body: JSON.stringify(spoofedRequest)
+    })
+
+    const res = await POST(req)
+    assert(res.status === 200, `Expected 200, got ${res.status}`)
+    const data = await res.json()
+    const p = data.products.find((x: any) => x.id === 'spoofed_oat_bar')
+    assert(p, 'Product must be evaluated')
+    // Must be sanitized to untrusted and fail closed as NEEDS_REVIEW
+    assert(p.goalRelevanceStatus === 'NEEDS_REVIEW', 'Expected NEEDS_REVIEW status')
+    assert(p.status === 'needs_review', 'Overall status must be needs_review')
+    assert(!data.shortlist.includes('spoofed_oat_bar'), 'Spoofed item must NOT be shortlisted')
   })
 
   await runTest('POST /api/guardian validates input schema and duplicate product IDs', async () => {

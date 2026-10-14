@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.4)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.5)
 
-**Document Version:** 8.4.0  
-**Last Updated:** 2026-10-14T05:55:00Z  
+**Document Version:** 8.5.0  
+**Last Updated:** 2026-10-14T08:25:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-autonomous-v2`  
-**Git Commit SHA:** `cd20e96` (V8.4 Trust-Boundary Release)  
-**Vercel Preview URL:** `https://scansafe-o31d-57012ugfo-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE / CERTIFICATION TRUST-BOUNDARY HARDENED / 142/142 BENCHMARKS PASSED  
+**Git Commit SHA:** `PENDING_COMMIT` (V8.5 Zero-Trust Boundary Release)  
+**Vercel Preview URL:** `PENDING_DEPLOY`  
+**Status:** VERCEL PREVIEW ACTIVE / ZERO-TRUST BOUNDARY HARDENED / 150/150 BENCHMARKS PASSED  
 
 ---
 
@@ -62,18 +62,16 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
                                     |
                                     v
           +---------------------------------------------------+
-          |     Certification Trust-Boundary Engine (V8.4)    |
+          |     Server-Controlled Certification Verifier (V8.5)|
+          | - Zero-Trust Public API Boundary:                 |
+          |   All client items sanitized to USER_UPLOADED     |
+          | - Removal of client-controlled trust escalation   |
+          | - Removal of scansafe.co.in from registry domain  |
+          | - Cryptographic HMAC-SHA256 Server Attestations   |
+          | - Authoritative Registry & Revocation Database   |
+          | - Approved URL hostname alone does NOT prove cert |
+          |   existence or validity                           |
           | - 5-Level Provenance Hierarchy                    |
-          | - Rejection of unauthenticated claims & forgeries |
-          | - Valid, past-dated verification timestamps       |
-          | - Explicitly approved authentication methods only |
-          |   (REGISTRY_LOOKUP_AUTHENTICATED /                |
-          |    EXTERNAL_STANDARDS_VERIFIER)                   |
-          | - Server-controlled registry confirmation checks  |
-          | - Approved authoritative registry domain audit    |
-          | - Product ID, brand, and validity period binding  |
-          | - Revocation & expiration enforcement             |
-          | - Public API status injection sanitization        |
           | - Allergen screening strictly overrides certs     |
           +---------------------------------------------------+
                                     |
@@ -88,34 +86,44 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
 
 ---
 
-## 2. Certification Trust-Boundary & Adversarial Hardening (V8.4)
+## 2. Certification Trust-Boundary & Adversarial Hardening (V8.5)
 
-### Priority 0: Trust-Boundary Authentication Invariants
+### Priority 0: Zero-Trust Boundary Invariants
 Guardian enforces strict cryptographic and provenance trust boundaries for all claimed food certifications:
-1. **Verification Timestamps:**
+
+1. **Elimination of Client-Controlled Trust Escalation:**
+   - Public API requests (`POST /api/guardian/agent`) unconditionally treat all incoming product payloads as untrusted (`USER_UPLOADED_LABEL` and `MANUALLY_PROVIDED`).
+   - Any client-submitted `sourceType = INTERNAL_VERIFIED_CATALOG`, `verificationStatus = MANUFACTURER_AUTHORIZED`, `registryConfirmed = true`, or `serverAttestationToken` is stripped and rejected.
+   - Trusted catalogue records are strictly retrieved server-side via authorized database queries and authenticated service credentials.
+
+2. **Server-Controlled Certification Verification Service:**
+   - A `registryConfirmed` Boolean alone is NEVER sufficient proof of authentication.
+   - An approved URL hostname (e.g. `ams.usda.gov`) alone does NOT prove that a certificate exists or is valid.
+   - Genuine authentication requires either:
+     - A cryptographically verified HMAC-SHA256 server attestation token (`serverAttestationToken`) binding candidate product ID, issuing body, cert ID, standard, validity bounds, and verification timestamp.
+     - An explicit match in the server's authoritative registry database (`AUTHORITATIVE_REGISTRY_DATABASE`).
+   - `scansafe.co.in` is strictly removed from the independent certification registry allowlist (`APPROVED_REGISTRY_DOMAINS`).
+
+3. **Authoritative Revocation Registry:**
+   - Certificate IDs listed in the authoritative revocation list (`AUTHORITATIVE_REVOCATION_REGISTRY`) or marked revoked immediately fail closed as `NEEDS_REVIEW`.
+
+4. **Temporal Verification Integrity:**
    - Missing timestamps fail closed (`Missing verification timestamp`).
    - Unparseable timestamps fail closed (`Invalid verification timestamp`).
    - Future-dated timestamps are rejected with zero tolerance (`Future-dated verification timestamp`).
-2. **Approved Verification Methods Only:**
+
+5. **Approved Verification Methods Only:**
    - Only `REGISTRY_LOOKUP_AUTHENTICATED` and `EXTERNAL_STANDARDS_VERIFIER` backed by actual verification evidence are accepted.
-   - Self-declarations and label inspections fail closed.
-3. **No Equating of Third-Party Claims:**
+
+6. **Rejection of Unauthenticated Third-Party Claims:**
    - `DOCUMENTED_THIRD_PARTY_CLAIM` is explicitly rejected as unauthenticated (`cannot be equated with independently authenticated certification`).
-4. **Public API Injection Sanitization:**
-   - External inputs from public API callers (`POST /api/guardian/agent`) cannot self-assign `INDEPENDENTLY_AUTHENTICATED_CERTIFICATION` or `registryConfirmed: true`.
-   - Client-supplied records are automatically sanitized to `USER_UPLOADED_LABEL_EVIDENCE` and `registryConfirmed: false`.
-5. **Server-Controlled Registry Confirmation & Domain Audit:**
-   - `registryConfirmed === true` required for any active certification status.
-   - Proof URLs must resolve to explicitly approved authoritative registry domains (`ams.usda.gov`, `usda.gov`, `ecocert.com`, `gfco.org`, `beyondceliac.org`, `allergencircles.org`, `standards.org`, `ccof.org`, `scansafe.co.in`, etc.). Plausible forgeries fail closed.
-6. **Product Identity, Brand & Validity Period Binding:**
+
+7. **Product & Brand Identity Binding:**
    - Product identifier must match candidate (`associatedProductId === product.id`).
    - Brand must match declared product brand where specified.
    - Validity periods (`validFrom` and `validUntil`) are strictly enforced.
-7. **Revocation & Expiration Status:**
-   - Explicit revocation (`isRevoked: true` or `status: 'REVOKED'`) or expiration (`status: 'EXPIRED'` or expired `validUntil`) immediately fails compliance.
-8. **Fail-Closed Default:**
-   - Any failure to authenticate returns `NEEDS_REVIEW` with exact, transparent provenance reasoning.
-9. **Allergen Screening Absolute Precedence:**
+
+8. **Allergen Screening Absolute Precedence:**
    - Food allergen safety screening operates independently of certification status.
    - If a product carries a certificate but contains declared allergens or precautionary warnings, it is strictly `EXCLUDED`.
 
@@ -130,11 +138,11 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 142 championship scenarios (incl. 10 adversarial) | **142 / 142 passed (0 failed, 0 skipped)** | 100% |
-| `npm run test:guardian:integration` | Concurrency, abort & replanning | **24 / 24 passed (0 failed)** | 100% |
+| `npm run test:guardian:benchmarks` | 150 championship scenarios (incl. 18 adversarial) | **150 / 150 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:integration` | Concurrency, abort & replanning | **25 / 25 passed (0 failed)** | 100% |
 | `npm run test:guardian:rls` | RLS isolation & privilege denial | 9 / 9 passed | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS | 0 critical, 0 warnings | 100% |
-| `npm run build` | Next.js production build | 43 / 43 routes compiled successfully in 3.3s | 100% |
+| `npm run build` | Next.js production build | 43 / 43 routes compiled successfully in 4.0s | 100% |
 
 ---
 
@@ -152,6 +160,14 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #140 | `DOCUMENTED_THIRD_PARTY_CLAIM` without authentication | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
 | #141 | Conflicting certification and ingredient evidence | Strict Exclusion: `EXCLUDED` | ✅ PASSED |
 | #142 | Attempted injection of trusted status through public API request | Sanitized & fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #143 | Public API request spoofing `INTERNAL_VERIFIED_CATALOG` & `registryConfirmed` | Stripped & fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #144 | Forged internal catalogue product ID (`CAT-INTERNAL-VERIFIED-9999`) | Sanitized & fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #145 | Legitimate product ID with attacker-supplied unauthenticated cert data | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #146 | Approved registry URL hostname alone does NOT prove certificate existence | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #147 | Valid certificate bound to another product (identity mismatch) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #148 | Certificate listed in authoritative revocation registry (`AUTHORITATIVE_REVOCATION_REGISTRY`) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #149 | Internal service trust-boundary bypass attempt with unauthenticated record | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #150 | Forged cryptographic server attestation token (HMAC mismatch) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
 
 ---
 
@@ -169,5 +185,5 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 ## 6. Rollback Procedures
 
 - **Database:** Apply `schema_guardian_rollback.sql` in the Supabase SQL editor to drop tables and RPC functions.
-- **Git:** `git checkout main` or `git reset --hard 371c896`.
+- **Git:** `git checkout main` or `git reset --hard 4e09146`.
 - **Vercel:** `npx vercel rollback`.

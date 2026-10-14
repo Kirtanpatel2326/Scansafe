@@ -93,25 +93,29 @@ export async function POST(request: Request) {
     }
     const requestData = parsed.data
 
-    // P0: Trust-boundary enforcement for public API requests.
-    // Externally imported / client-supplied records cannot self-assign trusted verification status.
+    // P0: Strict trust-boundary enforcement for public API requests.
+    // Treat ALL product objects received through public APIs as untrusted, regardless of
+    // client-supplied sourceType, verificationStatus, registryConfirmed, or provenanceLevel.
+    // Trusted catalogue records are strictly retrieved server-side via authorized database queries
+    // or partner service credentials; client payloads can NEVER elevate verification status.
     const sanitizedProducts = requestData.products?.map(p => {
-      const isInternalVerified =
-        p.sourceType === 'INTERNAL_VERIFIED_CATALOG' &&
-        p.verificationStatus === 'MANUFACTURER_AUTHORIZED'
-      if (!isInternalVerified) {
-        return {
-          ...p,
-          certifiedRecords: p.certifiedRecords?.map(rec => ({
-            ...rec,
-            provenanceLevel: 'USER_UPLOADED_LABEL_EVIDENCE' as const,
-            verificationMethod: 'UNVERIFIED_TEXT_MATCH' as const,
-            registryConfirmed: false,
-            status: 'UNVERIFIED' as const
-          }))
-        }
+      return {
+        ...p,
+        sourceType: 'USER_UPLOADED_LABEL' as const,
+        verificationStatus: 'MANUALLY_PROVIDED' as const,
+        evidenceLimitations: [
+          ...(p.evidenceLimitations || []),
+          'User-supplied packaging data submitted via public API. Unverified by internal registry.'
+        ],
+        certifiedRecords: p.certifiedRecords?.map(rec => ({
+          ...rec,
+          provenanceLevel: 'USER_UPLOADED_LABEL_EVIDENCE' as const,
+          verificationMethod: 'UNVERIFIED_TEXT_MATCH' as const,
+          registryConfirmed: false,
+          status: 'UNVERIFIED' as const,
+          serverAttestationToken: undefined
+        }))
       }
-      return p
     })
 
     // Execute with affirmative persistence gate and reliable error handling

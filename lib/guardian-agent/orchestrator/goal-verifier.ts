@@ -235,31 +235,17 @@ export function decomposeUserGoal(
   return DecomposedGoalSchema.parse(result)
 }
 
-export const APPROVED_REGISTRY_DOMAINS = [
-  'ams.usda.gov',
-  'usda.gov',
-  'ecocert.com',
-  'gfco.org',
-  'beyondceliac.org',
-  'celiac.org',
-  'allergencircles.org',
-  'sqfi.com',
-  'brcgs.com',
-  'vegansociety.com',
-  'vegan.org',
-  'v-label.com',
-  'standards.org',
-  'ccof.org',
-  'qai-inc.com',
-  'soilassociation.org',
-  'demeter.net',
-  'scansafe.co.in'
-]
-
-export const APPROVED_VERIFICATION_METHODS = new Set([
-  'REGISTRY_LOOKUP_AUTHENTICATED',
-  'EXTERNAL_STANDARDS_VERIFIER'
-])
+export {
+  APPROVED_REGISTRY_DOMAINS,
+  APPROVED_VERIFICATION_METHODS,
+  AUTHORITATIVE_REVOCATION_REGISTRY,
+  isCertificateRevoked,
+  generateServerAttestation,
+  verifyServerAttestation,
+  AUTHORITATIVE_REGISTRY_DATABASE,
+  verifyClaimedCertification
+} from './certification-verifier'
+import { verifyClaimedCertification } from './certification-verifier'
 
 /**
  * P0: Verify whether a product has independently authenticated certification
@@ -268,13 +254,15 @@ export const APPROVED_VERIFICATION_METHODS = new Set([
  * Rules:
  * - A string in certificationsDeclared must NEVER automatically establish verified certification.
  * - Must match product identity (associatedProductId === product.id) and brand where declared.
- * - Must be active (status === 'ACTIVE') and not revoked (isRevoked !== true).
+ * - Must be active (status === 'ACTIVE') and not revoked (isRevoked !== true, not in revocation registry).
  * - Must possess a non-empty, valid evidenceUrl belonging to an approved authoritative registry domain.
+ * - scansafe.co.in is strictly removed from approved registry domains.
+ * - An approved URL hostname or registryConfirmed flag alone does NOT prove certificate existence or validity.
+ * - Must possess a valid server attestation token or match an authoritative registry database entry.
  * - Must possess a valid, non-future-dated verification timestamp (verifiedAt).
  * - Must possess an explicitly approved verification method (REGISTRY_LOOKUP_AUTHENTICATED or EXTERNAL_STANDARDS_VERIFIER).
  * - Provenance level must strictly be INDEPENDENTLY_AUTHENTICATED_CERTIFICATION.
- * - Must have server-controlled registry confirmation (registryConfirmed === true).
- * - Must satisfy certificate validity period (validFrom and validUntil).
+ * - Fails closed on any inconsistency or missing proof.
  */
 export function findAuthenticatedCertification(
   product: ProductEvidence,
@@ -313,172 +301,24 @@ export function findAuthenticatedCertification(
   }
 
   for (const record of matchingRecords) {
-    // 1. Associated product ID identity check
-    if (record.associatedProductId !== product.id) {
+    const verifyRes = verifyClaimedCertification(record, product)
+    if (verifyRes.authenticated) {
+      return {
+        authenticated: true,
+        record
+      }
+    } else {
       return {
         authenticated: false,
         record,
-        invalidationReason: `Certification identity mismatch: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) was issued for product identity "${record.associatedProductId}", which does not match candidate product "${product.id}".`
+        invalidationReason: verifyRes.invalidationReason
       }
-    }
-
-    // 2. Brand identity binding check (if both certificate and product specify a brand)
-    if (record.brand && product.brand) {
-      const recBrandNorm = record.brand.trim().toLowerCase()
-      const prodBrandNorm = product.brand.trim().toLowerCase()
-      if (!recBrandNorm.includes(prodBrandNorm) && !prodBrandNorm.includes(recBrandNorm)) {
-        return {
-          authenticated: false,
-          record,
-          invalidationReason: `Brand identity mismatch: Certificate from ${record.certificationBody} was issued for brand "${record.brand}", which does not match product brand "${product.brand}".`
-        }
-      }
-    }
-
-    // 3. Revocation status check
-    if (record.isRevoked || record.status === 'REVOKED') {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Revoked certification: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) has been revoked by issuing authority.`
-      }
-    }
-
-    // 4. Active status check & expiration
-    if (record.status === 'EXPIRED') {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Expired certification: Certificate from ${record.certificationBody} (ID: ${record.certificationId || 'N/A'}) has expired; cannot establish active compliance.`
-      }
-    }
-    if (record.status !== 'ACTIVE') {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Unverified certification status: Certificate from ${record.certificationBody} status is "${record.status}"; not authenticated as active.`
-      }
-    }
-
-    // 5. Validity period bounds (validFrom and validUntil)
-    if (record.validFrom) {
-      const validFromMs = Date.parse(record.validFrom)
-      if (!Number.isNaN(validFromMs) && validFromMs > Date.now()) {
-        return {
-          authenticated: false,
-          record,
-          invalidationReason: `Certificate validity period not yet started: Certificate from ${record.certificationBody} is only valid starting ${record.validFrom}.`
-        }
-      }
-    }
-    if (record.validUntil) {
-      const validUntilMs = Date.parse(record.validUntil)
-      if (!Number.isNaN(validUntilMs) && validUntilMs < Date.now()) {
-        return {
-          authenticated: false,
-          record,
-          invalidationReason: `Expired certificate validity: Certificate from ${record.certificationBody} expired on ${record.validUntil}.`
-        }
-      }
-    }
-
-    // 6. Verification timestamp validation (missing, unparseable, or future-dated)
-    if (!record.verifiedAt || !record.verifiedAt.trim()) {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Missing verification timestamp: Certificate from ${record.certificationBody} lacks a verified timestamp.`
-      }
-    }
-    const verifiedMs = Date.parse(record.verifiedAt)
-    if (Number.isNaN(verifiedMs)) {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Invalid verification timestamp: Certificate from ${record.certificationBody} contains unparseable timestamp "${record.verifiedAt}".`
-      }
-    }
-    // Reject future timestamps, allowing up to 60s for clock drift
-    if (verifiedMs > Date.now() + 60000) {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Future-dated verification timestamp: Certificate from ${record.certificationBody} contains future timestamp "${record.verifiedAt}".`
-      }
-    }
-
-    // 7. Provenance level check (Strictly INDEPENDENTLY_AUTHENTICATED_CERTIFICATION)
-    if (record.provenanceLevel === 'DOCUMENTED_THIRD_PARTY_CLAIM') {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Documented third-party claim without authentication: Record from ${record.certificationBody} is marked "DOCUMENTED_THIRD_PARTY_CLAIM", which cannot be equated with independently authenticated certification.`
-      }
-    }
-    if (record.provenanceLevel !== 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION') {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Manufacturer/unverified claim only: Record from ${record.certificationBody} is marked "${record.provenanceLevel}" without independent registry authentication.`
-      }
-    }
-
-    // 8. Explicitly approved authentication methods backed by real verification evidence
-    if (!APPROVED_VERIFICATION_METHODS.has(record.verificationMethod)) {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Unsupported verification method: Claim from ${record.certificationBody} used "${record.verificationMethod}", but only explicitly approved methods (REGISTRY_LOOKUP_AUTHENTICATED, EXTERNAL_STANDARDS_VERIFIER) backed by real verification evidence are accepted.`
-      }
-    }
-
-    // 9. Server-controlled registry confirmation
-    if (!record.registryConfirmed) {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `ACTIVE status without registry confirmation: Certificate from ${record.certificationBody} claims active status but lacks server-controlled registry confirmation.`
-      }
-    }
-
-    // 10. Evidence URL & Authoritative Registry Domain Validation
-    if (!record.evidenceUrl || !record.evidenceUrl.trim()) {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Missing certification source URL: Claimed certificate from ${record.certificationBody} lacks verifiable evidence proof URL.`
-      }
-    }
-    try {
-      const parsedUrl = new URL(record.evidenceUrl)
-      const hostname = parsedUrl.hostname.toLowerCase()
-      const isApproved = APPROVED_REGISTRY_DOMAINS.some(
-        domain => hostname === domain || hostname.endsWith(`.${domain}`)
-      )
-      if (!isApproved) {
-        return {
-          authenticated: false,
-          record,
-          invalidationReason: `Forged or unapproved registry URL: Certificate proof URL "${record.evidenceUrl}" (host: ${hostname}) is not from an approved authoritative registry domain.`
-        }
-      }
-    } catch {
-      return {
-        authenticated: false,
-        record,
-        invalidationReason: `Malformed certification proof URL: Certificate proof URL "${record.evidenceUrl}" is invalid.`
-      }
-    }
-
-    // All integrity and authentication checks passed!
-    return {
-      authenticated: true,
-      record
     }
   }
 
   return { authenticated: false }
 }
+
 
 /**
  * Priority 1: Goal-Matching Verification Engine.
