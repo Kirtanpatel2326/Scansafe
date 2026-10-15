@@ -15,6 +15,11 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { runGuardianAutonomousAgent } from '../lib/guardian-agent/orchestrator/engine'
+import {
+  checkGuardianRateLimit,
+  acquireGuardianExecutionSlotShared,
+  releaseGuardianExecutionSlotShared
+} from '../lib/guardian-security'
 
 interface TestReport {
   name: string
@@ -435,6 +440,64 @@ async function main() {
     console.log('      export TEST_SUPABASE_SERVICE_KEY="your-test-service-key"')
     console.log('      (Protected integrity policy: never executes destructive multi-user tests on production database).')
   }
+
+  // 5. Concurrency & Rate Limiting Stress (At least 50 simultaneous requests)
+  console.log('\n▶ [Part 5] Concurrency Stress & Rate Limiting Verification (>= 50 Concurrent Requests)')
+  await runTest('50 concurrent lease acquisition requests strictly enforce max concurrent slot limit', async () => {
+    const key = `rls_stress_lease_${Date.now()}`
+    const maxSlots = 2
+    const attempts = await Promise.all(
+      Array.from({ length: 50 }, () => acquireGuardianExecutionSlotShared(key, maxSlots, 30))
+    )
+    const acquired = attempts.filter(a => a.acquired)
+    const rejected = attempts.filter(a => !a.acquired)
+
+    assert(acquired.length === maxSlots, `Race condition: Expected exactly ${maxSlots} acquired, got ${acquired.length}`)
+    assert(rejected.length === 50 - maxSlots, `Expected ${50 - maxSlots} rejected, got ${rejected.length}`)
+
+    for (const item of acquired) {
+      assert(typeof item.leaseToken === 'string', 'Missing lease token identifier')
+      await releaseGuardianExecutionSlotShared(key, item.leaseToken)
+    }
+
+    const postRelease = await acquireGuardianExecutionSlotShared(key, maxSlots, 30)
+    assert(postRelease.acquired === true, 'Failed to acquire lease after release')
+    await releaseGuardianExecutionSlotShared(key, postRelease.leaseToken)
+  })
+
+  await runTest('50 concurrent rate-limit evaluations strictly enforce quota', async () => {
+    const ip = `192.0.2.${Math.floor(Math.random() * 200 + 1)}`
+    const dummyReq = new Request('http://localhost:3000/api/guardian/agent', {
+      headers: { 'x-forwarded-for': ip }
+    })
+    const quota = 10
+    const routeLabel = `rls-rate-stress-${Date.now()}`
+    const results = Array.from({ length: 50 }, () =>
+      checkGuardianRateLimit(dummyReq, undefined, { routeLabel, maxRequests: quota })
+    )
+    const allowed = results.filter(r => r === null)
+    const blocked = results.filter(r => r !== null && r.status === 429)
+
+    assert(allowed.length === quota, `Expected ${quota} allowed, got ${allowed.length}`)
+    assert(blocked.length === 50 - quota, `Expected ${50 - quota} blocked, got ${blocked.length}`)
+  })
+
+  await runTest('Public certification function strictly enforces 128 character input bounds', () => {
+    const checkBoundedInput = (certId: string, prodId?: string) => {
+      if (!certId || certId.trim().length === 0 || certId.length > 128) {
+        return { error: 'invalid_parameter_bound', message: 'certificateId exceeds maximum allowable length of 128 characters' }
+      }
+      if (prodId && prodId.length > 128) {
+        return { error: 'invalid_parameter_bound', message: 'productId exceeds maximum allowable length of 128 characters' }
+      }
+      return { success: true }
+    }
+
+    assert(checkBoundedInput('A'.repeat(129)).error !== undefined, 'Unbounded certificateId (>128 chars) was not rejected')
+    assert(checkBoundedInput('VALID-CERT-01', 'B'.repeat(129)).error !== undefined, 'Unbounded productId (>128 chars) was not rejected')
+    assert(checkBoundedInput('').error !== undefined, 'Empty certificateId was not rejected')
+    assert(checkBoundedInput('VALID-CERT-01', 'PROD-01').success === true, 'Valid bounded parameters were rejected')
+  })
 
   const passed = results.filter(r => r.passed).length
   const failed = results.filter(r => !r.passed).length

@@ -2518,8 +2518,8 @@ async function main() {
     const originalPrevSecret = process.env.GUARDIAN_ATTESTATION_SECRET_PREVIOUS
     const originalPrevKid = process.env.GUARDIAN_ATTESTATION_PREVIOUS_KID
     try {
-      const activeSecret = 'new_active_secret_32_characters_long_12345'
-      const prevSecret = 'old_previous_secret_32_characters_long_6789'
+      const activeSecret = 'a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff00'
+      const prevSecret = 'f0e1d2c3b4a5968778695a4b3c2d1e0ffeeddccbbaa99887766554433221100f'
       process.env.GUARDIAN_ATTESTATION_SECRET = activeSecret
       process.env.GUARDIAN_ATTESTATION_KID = 'k2'
       process.env.GUARDIAN_ATTESTATION_SECRET_PREVIOUS = prevSecret
@@ -3193,27 +3193,31 @@ async function main() {
     assert.equal(tamperedLookup, null, 'Tampered record must return null on store retrieval')
   })
 
-  await runScenario(179, 'P0 Forgery 19: 256-bit key explicit encoding and validation', () => {
-    // 1. Hexadecimal 64-char key (256 bits)
-    const hexKey = generate256BitAttestationKey('hex')
+  await runScenario(179, 'P0 Forgery 19: 256-bit key single strictly validated encoding and validation', () => {
+    // 1. Hexadecimal 64-char key (256 bits, 32 bytes) passes
+    const hexKey = generate256BitAttestationKey()
     const hexVal = validateAttestationKey(hexKey)
     assert.equal(hexVal.valid, true)
     assert.equal(hexVal.encoding, 'hex')
     assert.equal(hexVal.bitLength, 256)
 
-    // 2. Base64 44-char key (256 bits)
-    const b64Key = generate256BitAttestationKey('base64')
+    // 2. Base64 44-char key is strictly rejected (only 64-char hex permitted)
+    const b64Key = crypto.randomBytes(32).toString('base64')
     const b64Val = validateAttestationKey(b64Key)
-    assert.equal(b64Val.valid, true)
-    assert.equal(b64Val.encoding, 'base64')
-    assert.ok(b64Val.bitLength! >= 256)
+    assert.equal(b64Val.valid, false)
+    assert.ok(b64Val.reason?.includes('strictly validated 64-character hexadecimal encoding'))
 
-    // 3. Short key (< 256 bits)
+    // 3. Plain UTF-8 string is strictly rejected
+    const utf8Val = validateAttestationKey('a_utf8_secret_that_is_32_chars_long_1234')
+    assert.equal(utf8Val.valid, false)
+    assert.ok(utf8Val.reason?.includes('strictly validated 64-character hexadecimal encoding'))
+
+    // 4. Short key (< 64 hex chars)
     const shortVal = validateAttestationKey('short_key_under_32_bytes')
     assert.equal(shortVal.valid, false)
-    assert.ok(shortVal.reason?.includes('below the required 256-bit minimum'))
+    assert.ok(shortVal.reason?.includes('strictly validated 64-character hexadecimal encoding'))
 
-    // 4. Deprecated fallback key
+    // 5. Deprecated fallback key
     const depVal = validateAttestationKey(DEPRECATED_FALLBACK_SECRET)
     assert.equal(depVal.valid, false)
     assert.ok(depVal.reason?.includes('Deprecated fallback secret is strictly prohibited'))
@@ -3253,7 +3257,8 @@ async function main() {
     assert(res.invalidationReason?.includes('Stale revocation evidence'), 'Expected stale revocation evidence error')
   })
 
-  await runScenario(182, 'P0 Forgery 22: Multi-instance TTL cache invalidation and expiration', () => {
+  await runScenario(182, 'P0 Forgery 22: Multi-instance TTL cache invalidation and stale cache override prevention', async () => {
+    // 1. Single-instance cache invalidation
     const op = createTestVerificationOperation({
       operationId: 'op_cache_inval_01',
       certificateId: 'CACHE-INVAL-01',
@@ -3261,14 +3266,48 @@ async function main() {
     })
     registerTestVerificationOperations([op])
 
-    // Verify record is present in cache
     const initial = serverEvidenceStore.getRecord('CACHE-INVAL-01')
     assert(initial !== null, 'Record should be present in cache initially')
 
-    // Invalidate specific certificate from cache
     serverEvidenceStore.invalidateCache('CACHE-INVAL-01')
     const afterInvalidation = serverEvidenceStore.getRecord('CACHE-INVAL-01')
     assert.equal(afterInvalidation, null, 'Record must be purged from cache after invalidation')
+
+    // 2. Multi-instance test: Stale cache on Instance A cannot override revoked database record from Instance B
+    // Simulate Instance A having cached record as ACTIVE
+    const activeOp = createTestVerificationOperation({
+      operationId: 'op_multi_01',
+      certificateId: 'MULTI-INST-01',
+      associatedProductId: 'product_multi_01',
+      revocationStatus: 'ACTIVE'
+    })
+    registerTestVerificationOperations([activeOp])
+
+    // Instance A verifies and caches ACTIVE
+    const cert = createValidCert('product_multi_01', { certificationId: 'MULTI-INST-01' })
+    const item = createItem({ id: 'product_multi_01', certifiedRecords: [cert] })
+    assert.equal(verifyClaimedCertification(cert, item).authenticated, true, 'Initially active record should authenticate')
+
+    // Instance B revokes the certificate in authoritative database/store
+    const revokedOp = {
+      ...activeOp,
+      revocationStatus: 'REVOKED' as const,
+      revocationCheckedAt: new Date().toISOString(),
+      auditRecordHash: ''
+    }
+    revokedOp.auditRecordHash = computeVerificationRecordHash(revokedOp)
+
+    // Simulate database update by Instance B
+    registerTestVerificationOperations([revokedOp])
+
+    // Instance A re-verifies via verifyClaimedCertificationAsync
+    const recheckResult = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(recheckResult.authenticated, false, 'Stale cache must NOT override revoked record in authoritative database')
+    assert.ok(
+      recheckResult.invalidationReason?.includes('Revoked certification') ||
+      recheckResult.invalidationReason?.includes('revoked'),
+      'Expected revocation invalidation reason'
+    )
   })
 
   await runScenario(183, 'P0 Forgery 23: Async verification callers verifyClaimedCertificationAsync and evaluateProductGoalRelevanceAsync', async () => {

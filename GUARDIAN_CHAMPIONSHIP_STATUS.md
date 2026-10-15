@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.10)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.11)
 
-**Document Version:** 8.10.0  
-**Last Updated:** 2026-10-15T07:55:00Z  
+**Document Version:** 8.11.0  
+**Last Updated:** 2026-10-15T08:15:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `d0aeb7d` (V8.10 Production Evidence Store & Async Verification)  
-**Vercel Preview URL:** `https://scansafe-o31d-hcozrrkk4-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 185/185 BENCHMARKS PASSED  
+**Git Commit SHA:** `dd73d3f` (V8.11 Release Completion & Multi-Instance Consistency)  
+**Vercel Preview URL:** `https://scansafe-o31d-bljqten2g-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 185/185 BENCHMARKS PASSED / 13/13 RLS PASSED  
 
 ---
 
@@ -159,7 +159,7 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
 | `npm run test:guardian:benchmarks` | 185 championship scenarios (incl. 53 adversarial, anti-forgery, key & store tests) | **185 / 185 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **25 / 25 passed (0 failed)** | 100% |
-| `npm run test:guardian:rls` | RLS isolation, privilege denial & evidence store policies | 10 / 10 passed | 100% |
+| `npm run test:guardian:rls` | RLS isolation, privilege denial, bounds & 50 concurrent requests | **13 / 13 passed** | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS on all 10 tables | 0 critical, 0 warnings | 100% |
 | `npm run build` | Next.js production build | 44 / 44 routes compiled successfully | 100% |
 

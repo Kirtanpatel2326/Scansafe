@@ -36,9 +36,16 @@ export async function GET(request: NextRequest) {
   const certificateId = searchParams.get('certificateId')?.trim()
   const productId = searchParams.get('productId')?.trim()
 
-  if (!certificateId) {
+  if (!certificateId || certificateId.length > 128) {
     return NextResponse.json(
-      { success: false, error: 'Missing mandatory query parameter: certificateId' },
+      { success: false, error: 'Invalid or missing mandatory query parameter: certificateId (maximum 128 characters allowed)' },
+      { status: 400 }
+    )
+  }
+
+  if (productId && productId.length > 128) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid query parameter: productId exceeds maximum allowable length of 128 characters' },
       { status: 400 }
     )
   }

@@ -88,6 +88,14 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
+  -- Enforce bounded inputs: max 128 characters, reject empty strings
+  if p_certificate_id is null or length(trim(p_certificate_id)) = 0 or length(p_certificate_id) > 128 then
+    return;
+  end if;
+  if p_product_id is not null and length(p_product_id) > 128 then
+    return;
+  end if;
+
   return query
   select 
     e.certificate_id,
@@ -112,4 +120,4 @@ end;
 $$;
 
 revoke all on function public.guardian_get_public_certification(text, text) from public, anon;
-grant execute on function public.guardian_get_public_certification(text, text) to authenticated;
+grant execute on function public.guardian_get_public_certification(text, text) to authenticated, service_role;

@@ -207,11 +207,13 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
 
       if (error || !data) {
         if (error) console.warn(`[EvidenceStore] DB lookup error for ${normId}:`, error.message)
-        // In production, failure or missing record in database MUST fail closed!
+        // If DB query returned no data, the record does not exist or was removed from authoritative database.
+        // Stale in-memory cache must NEVER override the authoritative database!
+        VERIFIED_OPERATIONS_CACHE.delete(normId)
         if (process.env.NODE_ENV === 'production') {
           return null
         }
-        return this.getRecord(normId)
+        return error ? this.getRecord(normId) : null
       }
 
       const op: AuditableVerificationOperation = {
@@ -237,10 +239,11 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
       const expectedHash = computeVerificationRecordHash(op)
       if (expectedHash !== op.auditRecordHash) {
         console.error(`[EvidenceStore] Database tamper violation: Hash mismatch for cert ${normId}`)
+        VERIFIED_OPERATIONS_CACHE.delete(normId)
         return null
       }
 
-      // Cache verified record with bounded TTL for multi-instance cache consistency
+      // Authoritative database record strictly overrides any stale in-memory cached state across instances
       const ttl = options.ttlMs || DEFAULT_CACHE_TTL_MS
       const now = Date.now()
       VERIFIED_OPERATIONS_CACHE.set(normId, {
@@ -252,6 +255,7 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
     } catch (err: any) {
       console.warn(`[EvidenceStore] Database connection error: ${err.message}`)
       if (process.env.NODE_ENV === 'production') {
+        VERIFIED_OPERATIONS_CACHE.delete(normId)
         return null
       }
       return this.getRecord(normId)
