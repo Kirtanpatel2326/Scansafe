@@ -20,49 +20,24 @@ import { ProductEvidence, Constraint, ClaimedCertification } from '../lib/guardi
 import {
   generateServerAttestation,
   verifyServerAttestation,
-  registerTestAuthoritativeCertificates,
   verifyClaimedCertification,
+  isValidAttestationSecret,
   DEPRECATED_FALLBACK_SECRET
 } from '../lib/guardian-agent/orchestrator/certification-verifier'
+import {
+  registerTestVerificationOperations,
+  createTestVerificationOperation,
+  initializeBenchmarkTestFixtures,
+  clearTestVerificationOperations
+} from '../lib/guardian-agent/orchestrator/test-evidence-store'
 
 // Setup verified test signing secret (64 characters)
 if (!process.env.GUARDIAN_ATTESTATION_SECRET) {
   process.env.GUARDIAN_ATTESTATION_SECRET = '6c8d1798e4f16b7f3a9e2d5c1b0a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a'
 }
 
-// Register test fixture certificates for benchmark scenarios
-registerTestAuthoritativeCertificates({
-  'CERT-REG-101': {
-    certificationId: 'CERT-REG-101',
-    certificationBody: 'Independent Standards Registry',
-    standard: 'ORGANIC',
-    associatedProductId: 'strictly_qualifying_1',
-    evidenceUrl: 'https://registry.standards.org/verify/101',
-    status: 'ACTIVE',
-    validFrom: '2026-01-01T00:00:00Z',
-    validUntil: '2027-01-01T00:00:00Z'
-  },
-  'USDA-NOP-101': {
-    certificationId: 'USDA-NOP-101',
-    certificationBody: 'USDA National Organic Program',
-    standard: 'ORGANIC',
-    associatedProductId: 'organic_sunbutter_1',
-    evidenceUrl: 'https://organic.ams.usda.gov/integrity/101',
-    status: 'ACTIVE',
-    validFrom: '2026-01-01T00:00:00Z',
-    validUntil: '2027-01-01T00:00:00Z'
-  },
-  'ACG-7881': {
-    certificationId: 'ACG-7881',
-    certificationBody: 'Allergen Control Group',
-    standard: 'PEANUT_FREE',
-    associatedProductId: 'oat_bar_1',
-    evidenceUrl: 'https://allergencircles.org/verify/7881',
-    status: 'ACTIVE',
-    validFrom: '2026-01-01T00:00:00Z',
-    validUntil: '2027-01-01T00:00:00Z'
-  }
-})
+// Register test fixture certificates for benchmark scenarios via protected test harness
+initializeBenchmarkTestFixtures()
 
 let passedCount = 0
 let failedCount = 0
@@ -71,7 +46,7 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171) {
+    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171 || id === 175) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
@@ -100,7 +75,7 @@ function createValidCert(associatedProductId: string, overrides: Partial<Claimed
     ...overrides
   }
 
-  // Issue authentic server attestation for valid benchmark records unless an override is provided
+  // Register auditable verification operation and issue authentic server attestation for valid benchmark records
   if (
     overrides.serverAttestationToken === undefined &&
     !cert.isRevoked &&
@@ -108,6 +83,19 @@ function createValidCert(associatedProductId: string, overrides: Partial<Claimed
     cert.registryConfirmed &&
     cert.provenanceLevel === 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION'
   ) {
+    registerTestVerificationOperations([
+      createTestVerificationOperation({
+        certificateId: cert.certificationId!,
+        issuingAuthority: cert.certificationBody,
+        standard: cert.standard || 'ORGANIC',
+        associatedProductId,
+        evidenceUrl: cert.evidenceUrl || 'https://registry.standards.org/default',
+        validFrom: cert.validFrom || '2026-01-01T00:00:00Z',
+        validUntil: cert.validUntil || '2027-01-01T00:00:00Z',
+        revocationStatus: 'ACTIVE',
+        brand: cert.brand
+      })
+    ])
     cert.serverAttestationToken = generateServerAttestation(cert, associatedProductId)
   }
 
@@ -133,7 +121,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 171 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 175 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -2268,7 +2256,7 @@ async function main() {
     assert.ok(p)
     assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
     assert.equal(p.status, 'needs_review')
-    assert.ok(p.reasons.some(r => r.includes('Unauthenticated registry claim') || r.includes('lacks authoritative registry confirmation')))
+    assert.ok(p.reasons.some(r => r.includes('Unauthenticated registry claim') || r.includes('lacks authoritative registry confirmation') || r.includes('Authoritative registry verification unavailable')))
     assert.equal(res.shortlist.length, 0)
   })
 
@@ -2407,7 +2395,7 @@ async function main() {
     const evaluation = evaluateProductGoalRelevance(item, goal)
     assert.equal(evaluation.status, 'NEEDS_REVIEW')
     assert.equal(evaluation.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
-    assert.ok(evaluation.relevanceReasons.some(r => r.includes('Unauthenticated registry claim') || r.includes('approved URL hostname alone does not prove')))
+    assert.ok(evaluation.relevanceReasons.some(r => r.includes('Unauthenticated registry claim') || r.includes('approved URL hostname alone does not prove') || r.includes('Authoritative registry verification unavailable')))
   })
 
   await runScenario(150, 'Adversarial 18: Forged cryptographic server attestation token fails timing-safe verification', async () => {
@@ -2446,7 +2434,7 @@ async function main() {
     assert.ok(p)
     assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
     assert.equal(p.status, 'needs_review')
-    assert.ok(p.reasons.some(r => r.includes('Unauthenticated registry claim') || r.includes('approved URL hostname alone does not prove')))
+    assert.ok(p.reasons.some(r => r.includes('Unauthenticated registry claim') || r.includes('approved URL hostname alone does not prove') || r.includes('Authoritative registry verification unavailable') || r.includes('Invalid cryptographic attestation token')))
     assert.equal(res.shortlist.length, 0)
   })
 
@@ -2874,28 +2862,28 @@ async function main() {
   })
 
   await runScenario(168, 'P0 Forgery 8: Expired or revoked certificates fail closed in registry and attestation', () => {
-    registerTestAuthoritativeCertificates({
-      'TEST-REVOKED-01': {
-        certificationId: 'TEST-REVOKED-01',
-        certificationBody: 'Independent Standards Registry',
+    registerTestVerificationOperations([
+      createTestVerificationOperation({
+        certificateId: 'TEST-REVOKED-01',
+        issuingAuthority: 'Independent Standards Registry',
         standard: 'ORGANIC',
         associatedProductId: 'revoked_prod_01',
         evidenceUrl: 'https://registry.standards.org/verify/revoked-01',
-        status: 'REVOKED',
+        revocationStatus: 'REVOKED',
         validFrom: '2025-01-01T00:00:00Z',
         validUntil: '2027-01-01T00:00:00Z'
-      },
-      'TEST-EXPIRED-01': {
-        certificationId: 'TEST-EXPIRED-01',
-        certificationBody: 'Independent Standards Registry',
+      }),
+      createTestVerificationOperation({
+        certificateId: 'TEST-EXPIRED-01',
+        issuingAuthority: 'Independent Standards Registry',
         standard: 'ORGANIC',
         associatedProductId: 'expired_prod_01',
         evidenceUrl: 'https://registry.standards.org/verify/expired-01',
-        status: 'EXPIRED',
+        revocationStatus: 'EXPIRED',
         validFrom: '2024-01-01T00:00:00Z',
         validUntil: '2025-01-01T00:00:00Z'
-      }
-    })
+      })
+    ])
 
     const revokedItem = createItem({ id: 'revoked_prod_01' })
     const revokedCert: ClaimedCertification = {
@@ -3038,9 +3026,77 @@ async function main() {
     assert.ok(verification.invalidationReason?.includes('Internally generated evidence without completed verification operation'))
   })
 
+  await runScenario(172, 'P0 Forgery 12: Legacy unversioned 64-character hex attestation tokens are strictly rejected', () => {
+    const cert = createValidCert('legacy_unversioned_item', { serverAttestationToken: 'placeholder' })
+    const legacyToken = 'a'.repeat(64)
+    const res = verifyServerAttestation({
+      ...cert,
+      serverAttestationToken: legacyToken
+    }, 'legacy_unversioned_item')
+    assert.equal(res, false, 'Legacy unversioned tokens must be strictly rejected')
+  })
+
+  await runScenario(173, 'P0 Forgery 13: Valid internal signature alone cannot establish independent certification authenticity without auditable verification record', () => {
+    const certWithoutOp: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'GENUINE-LOOKING-CERT-999',
+      associatedProductId: 'unregistered_signed_item',
+      evidenceUrl: 'https://registry.standards.org/verify/999',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+    const token = generateServerAttestation(certWithoutOp, 'unregistered_signed_item')
+    certWithoutOp.serverAttestationToken = token
+
+    // Cryptographic signature is valid
+    assert.equal(verifyServerAttestation(certWithoutOp, 'unregistered_signed_item'), true)
+
+    // BUT without an auditable verification record in the server evidence store, verification MUST fail closed!
+    const item = createItem({ id: 'unregistered_signed_item' })
+    const verification = verifyClaimedCertification(certWithoutOp, item)
+    assert.equal(verification.authenticated, false)
+    assert.ok(verification.invalidationReason?.includes('An internal attestation signature cannot by itself establish independent certification authenticity'))
+  })
+
+  await runScenario(174, 'P0 Forgery 14: Low-entropy or trivial attestation secrets fail validation', () => {
+    // 32-char repeating character secret
+    assert.equal(isValidAttestationSecret('a'.repeat(32)), false, 'Repeating characters must fail entropy check')
+    // 32-char low-entropy secret (< 8 unique characters)
+    assert.equal(isValidAttestationSecret('12121212121212121212121212121212'), false, 'Trivial repeating sequence must fail entropy check')
+    // Valid high-entropy secret (>= 32 chars, >= 8 unique chars)
+    assert.equal(isValidAttestationSecret('6c8d1798e4f16b7f3a9e2d5c1b0a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a'), true)
+  })
+
+  await runScenario(175, 'P0 Forgery 15: Production runtime strictly prohibits injection of test verification fixtures', () => {
+    const originalEnv = process.env.NODE_ENV
+    try {
+      ;(process.env as any).NODE_ENV = 'production'
+      assert.throws(() => {
+        registerTestVerificationOperations([
+          createTestVerificationOperation({
+            certificateId: 'TEST-PROD-INJECT-01',
+            issuingAuthority: 'Attacker Authority',
+            standard: 'ORGANIC',
+            associatedProductId: 'attacker_prod',
+            evidenceUrl: 'https://registry.standards.org/verify/inject'
+          })
+        ])
+      }, /SecurityError: Test fixture registration is strictly prohibited in production/i)
+    } finally {
+      ;(process.env as any).NODE_ENV = originalEnv
+    }
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 171`)
+  console.log(`   Passed: ${passedCount} / 175`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

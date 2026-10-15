@@ -288,6 +288,9 @@ console.log(`${colors.bright}${colors.cyan}=====================================
 
 if (issuesCount > 0) {
   process.exit(1);
+} else if (warningsCount > 0) {
+  console.log(`\n${colors.bright}${colors.yellow}⚠️  SECURITY CONTROLS PASSED WITH ${warningsCount} WARNING(S) (0 Critical Issues)${colors.reset}\n`);
+  process.exit(0);
 } else {
   console.log(`\n${colors.bright}${colors.green}🎉 ALL 5 SECURITY CONTROLS ARE VERIFIED & SECURE! 🎉${colors.reset}\n`);
   process.exit(0);

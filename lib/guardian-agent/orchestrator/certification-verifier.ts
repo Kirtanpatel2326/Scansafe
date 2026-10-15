@@ -3,6 +3,7 @@ import {
   ClaimedCertification,
   ProductEvidence
 } from './types'
+import { serverEvidenceStore } from './evidence-store'
 
 /**
  * Server-Controlled Certification Verification Service
@@ -65,13 +66,25 @@ export const DEPRECATED_FALLBACK_STRING = Buffer.from(
 export const DEPRECATED_FALLBACK_SECRET = DEPRECATED_FALLBACK_STRING
 
 /**
- * Validates whether a secret key meets the minimum cryptographic strength requirements:
- * non-empty, minimum 32 characters, and strictly non-deprecated.
+ * Validates whether a secret key meets strict cryptographic requirements:
+ * 1. Must be a valid string of minimum 32 characters (256 bits).
+ * 2. Strictly rejects known deprecated or fallback secrets.
+ * 3. High-entropy check: requires at least 8 unique characters, preventing repeating or trivial keys.
+ *
+ * Key Encoding: UTF-8 string or 32+ byte hexadecimal/base64 representation.
+ * Key Rotation: Supported across active key (GUARDIAN_ATTESTATION_KID) and previous key (GUARDIAN_ATTESTATION_SECRET_PREVIOUS).
+ * Key Expiry: Enforced per-token through ISO expiresAt timestamp (max 30 days).
  */
 export function isValidAttestationSecret(secret?: string | null): boolean {
   if (!secret || typeof secret !== 'string') return false
-  if (secret.trim().length < 32) return false
-  if (secret.trim() === DEPRECATED_FALLBACK_SECRET) return false
+  const trimmed = secret.trim()
+  if (trimmed.length < 32) return false
+  if (trimmed === DEPRECATED_FALLBACK_SECRET) return false
+
+  // High-entropy validation: require at least 8 distinct characters
+  const uniqueChars = new Set(trimmed)
+  if (uniqueChars.size < 8) return false
+
   return true
 }
 
@@ -219,68 +232,8 @@ export function verifyServerAttestation(
     }
   }
 
-  // 2. Legacy v0 format backward compatibility: 64-char hex string
-  if (!token.includes('.') && /^[a-f0-9]{64}$/i.test(token)) {
-    const activeSecret = process.env.GUARDIAN_ATTESTATION_SECRET
-    if (!isValidAttestationSecret(activeSecret)) {
-      return false
-    }
-    const legacyPayload = [
-      productId.trim(),
-      cert.associatedProductId.trim(),
-      cert.certificationBody.trim().toLowerCase(),
-      (cert.certificationId || '').trim().toLowerCase(),
-      (cert.standard || '').trim().toLowerCase(),
-      (cert.evidenceUrl || '').trim(),
-      (cert.validUntil || '').trim(),
-      (cert.verifiedAt || '').trim()
-    ].join('|')
-
-    try {
-      const expected = crypto.createHmac('sha256', activeSecret!.trim()).update(legacyPayload).digest('hex')
-      if (expected.length !== token.length) {
-        return false
-      }
-      return crypto.timingSafeEqual(
-        Buffer.from(expected, 'utf8'),
-        Buffer.from(token, 'utf8')
-      )
-    } catch {
-      return false
-    }
-  }
-
+  // 2. Legacy unversioned tokens strictly rejected (all legitimate tokens must be versioned v1)
   return false
-}
-
-export interface AuthoritativeRegistryRecord {
-  certificationId: string
-  certificationBody: string
-  standard: string
-  associatedProductId: string
-  brand?: string
-  evidenceUrl: string
-  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED'
-  validFrom: string
-  validUntil: string
-}
-
-/**
- * Authoritative Server-Controlled Registry Database.
- * Empty in production. Explicit fixtures are registered via registerTestAuthoritativeCertificates.
- */
-export const AUTHORITATIVE_REGISTRY_DATABASE: Record<string, AuthoritativeRegistryRecord> = {}
-
-export function registerTestAuthoritativeCertificates(
-  records: Record<string, AuthoritativeRegistryRecord>
-): void {
-  Object.assign(AUTHORITATIVE_REGISTRY_DATABASE, records)
-}
-
-export function clearAuthoritativeCertificates(): void {
-  for (const key of Object.keys(AUTHORITATIVE_REGISTRY_DATABASE)) {
-    delete AUTHORITATIVE_REGISTRY_DATABASE[key]
-  }
 }
 
 /**
@@ -445,103 +398,108 @@ export function verifyClaimedCertification(
 
   // 12. CRITICAL TRUST BOUNDARY CHECK:
   // A registryConfirmed boolean or approved URL hostname alone is NOT sufficient proof of authentication.
-  // Must possess a valid server-side signed attestation OR match an authentic record in the authoritative registry database.
-  const hasValidAttestation = verifyServerAttestation(record, product.id)
-  
-  const registryEntry = record.certificationId
-    ? AUTHORITATIVE_REGISTRY_DATABASE[record.certificationId.trim().toUpperCase()]
-    : undefined
+  // Requirement 6: A valid internal signature cannot by itself establish independent certification authenticity.
+  // Requirement 2: Independently authenticated records must originate from a completed, auditable verification operation.
+  // Requirement 5: Bind authenticated certification status to product identity, issuing authority, applicable standard,
+  // evidence URL, validity dates, revocation status and a real verification record.
+  const verifiedOp = record.certificationId
+    ? serverEvidenceStore.getRecord(record.certificationId.trim().toUpperCase())
+    : null
 
-  let matchesAuthoritativeRegistry = false
-  if (registryEntry) {
-    // 1. Revocation check on registry entry
-    if (registryEntry.status === 'REVOKED' || isCertificateRevoked(registryEntry.certificationId)) {
-      return {
-        authenticated: false,
-        invalidationReason: `Revoked certification in authoritative registry: Certificate ID "${record.certificationId}" has been revoked by issuing authority.`
-      }
-    }
-
-    // 2. Expiration check on registry entry
-    if (registryEntry.status === 'EXPIRED') {
-      return {
-        authenticated: false,
-        invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" is marked expired.`
-      }
-    }
-    if (registryEntry.validUntil) {
-      const untilMs = Date.parse(registryEntry.validUntil)
-      if (!Number.isNaN(untilMs) && untilMs < Date.now()) {
-        return {
-          authenticated: false,
-          invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" expired on ${registryEntry.validUntil}.`
-        }
-      }
-    }
-
-    // 3. Product identity binding in registry
-    if (registryEntry.associatedProductId !== product.id || registryEntry.associatedProductId !== record.associatedProductId) {
-      return {
-        authenticated: false,
-        invalidationReason: `Product identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued for product identity "${registryEntry.associatedProductId}", which does not match candidate product "${product.id}".`
-      }
-    }
-
-    // 4. Standard binding in registry
-    if (record.standard && registryEntry.standard) {
-      const regStd = registryEntry.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
-      const recStd = record.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
-      if (regStd !== recStd && !regStd.includes(recStd) && !recStd.includes(regStd)) {
-        return {
-          authenticated: false,
-          invalidationReason: `Standard mismatch in authoritative registry: Certificate ID "${record.certificationId}" is registered for standard "${registryEntry.standard}", which does not match claimed standard "${record.standard}".`
-        }
-      }
-    }
-
-    // 5. Evidence URL binding in registry
-    if (record.evidenceUrl && registryEntry.evidenceUrl) {
-      if (record.evidenceUrl.trim().toLowerCase() !== registryEntry.evidenceUrl.trim().toLowerCase()) {
-        return {
-          authenticated: false,
-          invalidationReason: `Evidence URL mismatch in authoritative registry: Claimed evidence URL "${record.evidenceUrl}" does not match authoritative registry proof URL "${registryEntry.evidenceUrl}" for certificate ID "${record.certificationId}".`
-        }
-      }
-    }
-
-    // 6. Certification body binding in registry
-    if (record.certificationBody && registryEntry.certificationBody) {
-      const regBody = registryEntry.certificationBody.trim().toLowerCase()
-      const recBody = record.certificationBody.trim().toLowerCase()
-      if (regBody !== recBody && !regBody.includes(recBody) && !recBody.includes(regBody)) {
-        return {
-          authenticated: false,
-          invalidationReason: `Issuing authority mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued by "${registryEntry.certificationBody}", which does not match claimed authority "${record.certificationBody}".`
-        }
-      }
-    }
-
-    // 7. Brand binding (if both specify)
-    if (registryEntry.brand && product.brand) {
-      const regBrand = registryEntry.brand.trim().toLowerCase()
-      const prodBrand = product.brand.trim().toLowerCase()
-      if (!regBrand.includes(prodBrand) && !prodBrand.includes(regBrand)) {
-        return {
-          authenticated: false,
-          invalidationReason: `Brand identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was registered for brand "${registryEntry.brand}", which does not match product brand "${product.brand}".`
-        }
-      }
-    }
-
-    if (registryEntry.status === 'ACTIVE') {
-      matchesAuthoritativeRegistry = true
+  if (!verifiedOp) {
+    return {
+      authenticated: false,
+      invalidationReason: `Authoritative registry verification unavailable: Certificate ID "${record.certificationId || 'N/A'}" lacks a completed, auditable verification operation record in the server evidence store. An approved URL hostname alone does not prove certificate existence or validity. An internal attestation signature cannot by itself establish independent certification authenticity without an auditable verification record.`
     }
   }
 
-  if (!hasValidAttestation && !matchesAuthoritativeRegistry) {
+  // 1. Revocation check on verification operation record
+  if (verifiedOp.revocationStatus === 'REVOKED' || isCertificateRevoked(verifiedOp.certificateId)) {
     return {
       authenticated: false,
-      invalidationReason: `Authoritative registry verification unavailable: Certificate ID "${record.certificationId || 'N/A'}" lacks authoritative registry confirmation or valid server attestation. An approved URL hostname alone does not prove certificate existence or validity.`
+      invalidationReason: `Revoked certification in authoritative registry: Certificate ID "${record.certificationId}" has been revoked by issuing authority.`
+    }
+  }
+
+  // 2. Expiration check on verification operation record
+  if (verifiedOp.revocationStatus === 'EXPIRED') {
+    return {
+      authenticated: false,
+      invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" is marked expired.`
+    }
+  }
+  if (verifiedOp.validUntil) {
+    const untilMs = Date.parse(verifiedOp.validUntil)
+    if (!Number.isNaN(untilMs) && untilMs < Date.now()) {
+      return {
+        authenticated: false,
+        invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" expired on ${verifiedOp.validUntil}.`
+      }
+    }
+  }
+
+  // 3. Product identity binding
+  if (verifiedOp.associatedProductId !== product.id || verifiedOp.associatedProductId !== record.associatedProductId) {
+    return {
+      authenticated: false,
+      invalidationReason: `Product identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued for product identity "${verifiedOp.associatedProductId}", which does not match candidate product "${product.id}".`
+    }
+  }
+
+  // 4. Standard binding
+  if (record.standard && verifiedOp.standard) {
+    const regStd = verifiedOp.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
+    const recStd = record.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
+    if (regStd !== recStd && !regStd.includes(recStd) && !recStd.includes(regStd)) {
+      return {
+        authenticated: false,
+        invalidationReason: `Standard mismatch in authoritative registry: Certificate ID "${record.certificationId}" is registered for standard "${verifiedOp.standard}", which does not match claimed standard "${record.standard}".`
+      }
+    }
+  }
+
+  // 5. Evidence URL binding
+  if (record.evidenceUrl && verifiedOp.evidenceUrl) {
+    if (record.evidenceUrl.trim().toLowerCase() !== verifiedOp.evidenceUrl.trim().toLowerCase()) {
+      return {
+        authenticated: false,
+        invalidationReason: `Evidence URL mismatch in authoritative registry: Claimed evidence URL "${record.evidenceUrl}" does not match authoritative registry proof URL "${verifiedOp.evidenceUrl}" for certificate ID "${record.certificationId}".`
+      }
+    }
+  }
+
+  // 6. Issuing authority binding
+  if (record.certificationBody && verifiedOp.issuingAuthority) {
+    const regBody = verifiedOp.issuingAuthority.trim().toLowerCase()
+    const recBody = record.certificationBody.trim().toLowerCase()
+    if (regBody !== recBody && !regBody.includes(recBody) && !recBody.includes(regBody)) {
+      return {
+        authenticated: false,
+        invalidationReason: `Issuing authority mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued by "${verifiedOp.issuingAuthority}", which does not match claimed authority "${record.certificationBody}".`
+      }
+    }
+  }
+
+  // 7. Brand binding (if both specify)
+  if (verifiedOp.brand && product.brand) {
+    const regBrand = verifiedOp.brand.trim().toLowerCase()
+    const prodBrand = product.brand.trim().toLowerCase()
+    if (!regBrand.includes(prodBrand) && !prodBrand.includes(regBrand)) {
+      return {
+        authenticated: false,
+        invalidationReason: `Brand identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was registered for brand "${verifiedOp.brand}", which does not match product brand "${product.brand}".`
+      }
+    }
+  }
+
+  // 8. Cryptographic attestation token check if token is present
+  if (record.serverAttestationToken) {
+    const hasValidAttestation = verifyServerAttestation(record, product.id)
+    if (!hasValidAttestation) {
+      return {
+        authenticated: false,
+        invalidationReason: `Invalid cryptographic attestation token: Certificate ID "${record.certificationId}" carries an invalid or expired server attestation signature.`
+      }
     }
   }
 

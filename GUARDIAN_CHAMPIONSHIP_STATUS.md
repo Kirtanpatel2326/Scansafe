@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.7)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.8)
 
-**Document Version:** 8.7.0  
-**Last Updated:** 2026-10-15T06:10:00Z  
+**Document Version:** 8.8.0  
+**Last Updated:** 2026-10-15T06:40:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `3f11221` (V8.7 Anti-Forgery Trust Boundary & Independent Registry Release)  
+**Git Commit SHA:** `c14d872` (V8.8 Protected Evidence Store & Final Release Hardening)  
 **Vercel Preview URL:** `https://scansafe-o31d-izcksh52v-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 171/171 BENCHMARKS PASSED  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 175/175 BENCHMARKS PASSED  
 
 ---
 
@@ -208,6 +208,10 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #169 | P0 Forgery 9: Public API requests supplying privileged verification metadata | Public API sanitized to USER_UPLOADED -> fails closed | ✅ PASSED |
 | #170 | P0 Forgery 10: Unavailable registry services | Authoritative registry unavailable -> `NEEDS_REVIEW` | ✅ PASSED |
 | #171 | P0 Forgery 11: Internally generated evidence without completed verification | UNVERIFIED_COMMUNITY_OCR rejected -> fails closed | ✅ PASSED |
+| #172 | P0 Forgery 12: Legacy unversioned 64-char hex attestation tokens | Legacy unversioned tokens strictly rejected | ✅ PASSED |
+| #173 | P0 Forgery 13: Valid internal signature alone without verification record | Signature alone cannot establish authenticity -> `NEEDS_REVIEW` | ✅ PASSED |
+| #174 | P0 Forgery 14: Low-entropy or trivial attestation secrets | Minimum 32 chars and >=8 unique chars required | ✅ PASSED |
+| #175 | P0 Forgery 15: Production runtime prohibits test fixture injection | Runtime `NODE_ENV === 'production'` throws `SecurityError` | ✅ PASSED |
 
 ---
 

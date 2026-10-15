@@ -318,9 +318,6 @@ export {
   isCertificateRevoked,
   generateServerAttestation,
   verifyServerAttestation,
-  AUTHORITATIVE_REGISTRY_DATABASE,
-  registerTestAuthoritativeCertificates,
-  clearAuthoritativeCertificates,
   isValidAttestationSecret,
   DEPRECATED_FALLBACK_SECRET,
   verifyClaimedCertification
