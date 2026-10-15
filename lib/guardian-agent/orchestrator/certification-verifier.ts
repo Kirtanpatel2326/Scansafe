@@ -502,14 +502,18 @@ export function verifyClaimedCertification(
   // Requirement 2: Independently authenticated records must originate from a completed, auditable verification operation.
   // Requirement 5: Bind authenticated certification status to product identity, issuing authority, applicable standard,
   // evidence URL, validity dates, revocation status and a real verification record.
+  const isProduction = process.env.NODE_ENV === 'production'
   const verifiedOp = explicitVerifiedOp !== undefined
     ? explicitVerifiedOp
-    : (record.certificationId ? serverEvidenceStore.getRecord(record.certificationId.trim().toUpperCase()) : null)
+    : (isProduction ? null : (record.certificationId ? serverEvidenceStore.getRecord(record.certificationId.trim().toUpperCase()) : null))
 
   if (!verifiedOp) {
+    const reason = isProduction && explicitVerifiedOp === undefined
+      ? `Authoritative registry verification unavailable: Synchronous certification verification without database-backed evidence is strictly prohibited in production. Production authentication requires authoritative database evidence via verifyClaimedCertificationAsync() or evaluateProductGoalRelevanceAsync().`
+      : `Authoritative registry verification unavailable: Certificate ID "${record.certificationId || 'N/A'}" lacks a completed, auditable verification operation record in the server evidence store. An approved URL hostname alone does not prove certificate existence or validity. An internal attestation signature cannot by itself establish independent certification authenticity without an auditable verification record.`
     return {
       authenticated: false,
-      invalidationReason: `Authoritative registry verification unavailable: Certificate ID "${record.certificationId || 'N/A'}" lacks a completed, auditable verification operation record in the server evidence store. An approved URL hostname alone does not prove certificate existence or validity. An internal attestation signature cannot by itself establish independent certification authenticity without an auditable verification record.`
+      invalidationReason: reason
     }
   }
 

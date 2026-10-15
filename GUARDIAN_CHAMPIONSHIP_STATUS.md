@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.12)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.13)
 
-**Document Version:** 8.12.0  
-**Last Updated:** 2026-10-15T08:35:00Z  
+**Document Version:** 8.13.0  
+**Last Updated:** 2026-10-15T11:58:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `383fe79` (V8.12 Final Certification Consistency & Fail-Closed Invariants)  
-**Vercel Preview URL:** `https://scansafe-o31d-plwf8n6ke-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 190/190 BENCHMARKS PASSED / 13/13 RLS PASSED  
+**Git Commit SHA:** `27a0deb` (V8.13 Final Release Validation & Synchronous Verifier Audit)  
+**Vercel Preview URL:** `https://scansafe-o31d-1gq71lqxp-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 195/195 BENCHMARKS PASSED / 13/13 RLS PASSED  
 
 ---
 
@@ -227,6 +227,12 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #188 | P0 Consistency 03: Missing database credentials in production environment | Fail closed: `authenticated: false` without test fixtures | ✅ PASSED |
 | #189 | P0 Consistency 04: Direct verification passing `explicitVerifiedOp = null` | Fail closed: `authenticated: false` despite valid signature | ✅ PASSED |
 | #190 | P0 Consistency 05: Multi-instance consistency in `evaluateProductGoalRelevanceAsync` | Multi-instance revocation detected; claim degraded | ✅ PASSED |
+| #191 | P0 Consistency 06: Synchronous `verifyClaimedCertification()` in production | Fail closed: `authenticated: false` (sync calls prohibited) | ✅ PASSED |
+| #192 | P0 Consistency 07: Synchronous `evaluateProductGoalRelevance()` in production | Fail closed: `NEEDS_REVIEW` (sync calls prohibited) | ✅ PASSED |
+| #193 | P0 Consistency 08: Stale cached cert cannot override DB revocation in goal check | Fail closed: `NEEDS_REVIEW` (fresh DB lookup enforced) | ✅ PASSED |
+| #194 | P0 Consistency 09: Stale cached cert cannot override DB record removal | Fail closed: `NEEDS_REVIEW` (stale cache purged) | ✅ PASSED |
+| #195 | P0 Consistency 10: Database outage during async goal check fails closed | Fail closed: `NEEDS_REVIEW` without cache fallback | ✅ PASSED |
+
 
 
 ---

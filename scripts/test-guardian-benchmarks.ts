@@ -55,7 +55,7 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171 || id === 175 || id === 180 || id === 185 || id === 190) {
+    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171 || id === 175 || id === 180 || id === 185 || id === 190 || id === 195) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
@@ -130,7 +130,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 190 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 195 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -3379,9 +3379,9 @@ async function main() {
   })
 
   // ===========================================================================
-  // CATEGORY 14: Certification Consistency & Fail-Closed Multi-Instance (Scenarios 186 - 190)
+  // CATEGORY 14: Certification Consistency & Fail-Closed Multi-Instance (Scenarios 186 - 195)
   // ===========================================================================
-  console.log('▶ Category 14: Certification Consistency & Fail-Closed Invariants (186 - 190)')
+  console.log('▶ Category 14: Certification Consistency & Fail-Closed Invariants (186 - 195)')
 
   await runScenario(186, 'P0 Consistency 01: Failed database lookup with previously cached valid record fails closed as unauthenticated', async () => {
     const op = createTestVerificationOperation({
@@ -3520,9 +3520,182 @@ async function main() {
     assert.equal(recheckRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW', 'Revoked cert must degrade to NEEDS_REVIEW')
   })
 
+  await runScenario(191, 'P0 Consistency 06: Synchronous verifyClaimedCertification() call in production environment fails closed', () => {
+    const cert = createValidCert('prod_sync_call', { certificationId: 'CERT-SYNC-CALL' })
+    const item = createItem({ id: 'prod_sync_call', certifiedRecords: [cert] })
+
+    const prevEnv = process.env.NODE_ENV
+    try {
+      (process.env as any).NODE_ENV = 'production'
+      const syncRes = verifyClaimedCertification(cert, item)
+      assert.equal(syncRes.authenticated, false, 'Synchronous verification in production must fail closed')
+      assert.ok(
+        syncRes.invalidationReason?.includes('Synchronous certification verification without database-backed evidence is strictly prohibited in production'),
+        'Must specify synchronous verification prohibition in production'
+      )
+    } finally {
+      (process.env as any).NODE_ENV = prevEnv
+    }
+  })
+
+  await runScenario(192, 'P0 Consistency 07: Synchronous evaluateProductGoalRelevance() in production fails closed without explicitOpsMap', async () => {
+    const { evaluateProductGoalRelevance, decomposeUserGoal } = await import('../lib/guardian-agent/orchestrator/goal-verifier')
+
+    const cert = createValidCert('prod_sync_goal', {
+      certificationId: 'CERT-SYNC-GOAL',
+      standard: 'NOP_ORGANIC'
+    })
+    const item = createItem({
+      id: 'prod_sync_goal',
+      name: 'Organic Rolled Oats',
+      ingredients: 'organic rolled oats',
+      certifiedRecords: [cert]
+    })
+    const goal = decomposeUserGoal('Find certified organic oats', [])
+
+    const prevEnv = process.env.NODE_ENV
+    try {
+      (process.env as any).NODE_ENV = 'production'
+      // Calling evaluateProductGoalRelevance synchronously without explicitOpsMap in production
+      const syncGoalRes = evaluateProductGoalRelevance(item, goal)
+      assert.notEqual(syncGoalRes.attributeEvidence['organic']?.status, 'MATCH', 'Synchronous goal relevance in production must NOT authenticate cert')
+      assert.equal(syncGoalRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW', 'Synchronous goal relevance must degrade to NEEDS_REVIEW')
+    } finally {
+      (process.env as any).NODE_ENV = prevEnv
+    }
+  })
+
+  await runScenario(193, 'P0 Consistency 08: Stale cached certification cannot override revoked authoritative database record in evaluateProductGoalRelevanceAsync', async () => {
+    const { evaluateProductGoalRelevanceAsync, decomposeUserGoal } = await import('../lib/guardian-agent/orchestrator/goal-verifier')
+
+    // Initial valid cert
+    const activeOp = createTestVerificationOperation({
+      operationId: 'op_stale_revoked',
+      certificateId: 'CERT-STALE-REVOKED',
+      associatedProductId: 'prod_stale_revoked',
+      standard: 'NOP_ORGANIC',
+      revocationStatus: 'ACTIVE'
+    })
+    registerTestVerificationOperations([activeOp])
+
+    const cert = createValidCert('prod_stale_revoked', {
+      certificationId: 'CERT-STALE-REVOKED',
+      standard: 'NOP_ORGANIC'
+    })
+    const item = createItem({
+      id: 'prod_stale_revoked',
+      name: 'Organic Rolled Oats',
+      ingredients: 'organic rolled oats',
+      certifiedRecords: [cert]
+    })
+    const goal = decomposeUserGoal('Find certified organic oats', [])
+
+    // Prime the cache
+    const firstCheck = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.equal(firstCheck.attributeEvidence['organic']?.status, 'MATCH')
+
+    // Authoritative DB updates to revoked
+    const revokedOp = createTestVerificationOperation({
+      operationId: 'op_stale_revoked_updated',
+      certificateId: 'CERT-STALE-REVOKED',
+      associatedProductId: 'prod_stale_revoked',
+      standard: 'NOP_ORGANIC',
+      revocationStatus: 'REVOKED'
+    })
+    registerTestVerificationOperations([revokedOp])
+
+    // Second check must use fresh DB lookup and fail closed
+    const secondCheck = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.notEqual(secondCheck.attributeEvidence['organic']?.status, 'MATCH', 'Stale cache must NOT override revoked record in DB')
+    assert.equal(secondCheck.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
+  })
+
+  await runScenario(194, 'P0 Consistency 09: Stale cached certification cannot override database record removal in evaluateProductGoalRelevanceAsync', async () => {
+    const { evaluateProductGoalRelevanceAsync, decomposeUserGoal } = await import('../lib/guardian-agent/orchestrator/goal-verifier')
+
+    const op = createTestVerificationOperation({
+      operationId: 'op_stale_removed',
+      certificateId: 'CERT-STALE-REMOVED',
+      associatedProductId: 'prod_stale_removed',
+      standard: 'NOP_ORGANIC'
+    })
+    registerTestVerificationOperations([op])
+
+    const cert = createValidCert('prod_stale_removed', {
+      certificationId: 'CERT-STALE-REMOVED',
+      standard: 'NOP_ORGANIC'
+    })
+    const item = createItem({
+      id: 'prod_stale_removed',
+      name: 'Organic Rolled Oats',
+      ingredients: 'organic rolled oats',
+      certifiedRecords: [cert]
+    })
+    const goal = decomposeUserGoal('Find certified organic oats', [])
+
+    // Verify initially active
+    const initRes = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.equal(initRes.attributeEvidence['organic']?.status, 'MATCH')
+
+    // Simulate DB record deletion (fetchRecordFromDatabase returns null)
+    const originalFetch = serverEvidenceStore.fetchRecordFromDatabase.bind(serverEvidenceStore)
+    serverEvidenceStore.fetchRecordFromDatabase = async () => null
+
+    try {
+      const removedRes = await evaluateProductGoalRelevanceAsync(item, goal)
+      assert.notEqual(removedRes.attributeEvidence['organic']?.status, 'MATCH', 'Deleted record from DB must cause goal check to fail closed')
+      assert.equal(removedRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
+    } finally {
+      serverEvidenceStore.fetchRecordFromDatabase = originalFetch
+    }
+  })
+
+  await runScenario(195, 'P0 Consistency 10: Database outage during async goal evaluation fails closed without falling back to stale in-memory cache', async () => {
+    const { evaluateProductGoalRelevanceAsync, decomposeUserGoal } = await import('../lib/guardian-agent/orchestrator/goal-verifier')
+
+    const op = createTestVerificationOperation({
+      operationId: 'op_stale_outage',
+      certificateId: 'CERT-STALE-OUTAGE',
+      associatedProductId: 'prod_stale_outage',
+      standard: 'NOP_ORGANIC'
+    })
+    registerTestVerificationOperations([op])
+
+    const cert = createValidCert('prod_stale_outage', {
+      certificationId: 'CERT-STALE-OUTAGE',
+      standard: 'NOP_ORGANIC'
+    })
+    const item = createItem({
+      id: 'prod_stale_outage',
+      name: 'Organic Rolled Oats',
+      ingredients: 'organic rolled oats',
+      certifiedRecords: [cert]
+    })
+    const goal = decomposeUserGoal('Find certified organic oats', [])
+
+    // Prime cache
+    const initialCheck = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.equal(initialCheck.attributeEvidence['organic']?.status, 'MATCH')
+
+    // Simulate database outage
+    const originalFetch = serverEvidenceStore.fetchRecordFromDatabase.bind(serverEvidenceStore)
+    serverEvidenceStore.fetchRecordFromDatabase = async () => {
+      // Simulate network outage
+      return null
+    }
+
+    try {
+      const outageRes = await evaluateProductGoalRelevanceAsync(item, goal)
+      assert.notEqual(outageRes.attributeEvidence['organic']?.status, 'MATCH', 'Database outage must fail closed without trusting stale cache')
+      assert.equal(outageRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
+    } finally {
+      serverEvidenceStore.fetchRecordFromDatabase = originalFetch
+    }
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 190`)
+  console.log(`   Passed: ${passedCount} / 195`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

@@ -395,7 +395,9 @@ export function findAuthenticatedCertification(
 
   for (const record of matchingRecords) {
     const normId = (record.certificationId || '').trim().toUpperCase()
-    const explicitOp = explicitOpsMap ? (explicitOpsMap.get(normId) ?? null) : undefined
+    const explicitOp = explicitOpsMap
+      ? (explicitOpsMap.get(normId) ?? null)
+      : (process.env.NODE_ENV === 'production' ? null : undefined)
     const verifyRes = verifyClaimedCertification(record, product, explicitOp)
     if (verifyRes.authenticated) {
       return {
