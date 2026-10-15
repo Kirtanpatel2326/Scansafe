@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.5)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.6)
 
-**Document Version:** 8.5.0  
-**Last Updated:** 2026-10-14T08:25:00Z  
+**Document Version:** 8.6.0  
+**Last Updated:** 2026-10-15T05:30:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
-**Current Development Branch:** `guardian-autonomous-v2`  
-**Git Commit SHA:** `812f44c` (V8.5 Zero-Trust Boundary Release)  
-**Vercel Preview URL:** `https://scansafe-o31d-mk5vslzqx-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE / ZERO-TRUST BOUNDARY HARDENED / 150/150 BENCHMARKS PASSED  
+**Current Development Branch:** `guardian-championship-v8.6`  
+**Git Commit SHA:** `eaf4db5` (V8.6 Hardened Cryptographic Trust Boundary & Category Intelligence Release)  
+**Vercel Preview URL:** `https://scansafe-o31d-jminkrn9o-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 160/160 BENCHMARKS PASSED  
 
 ---
 
@@ -16,7 +16,7 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
 
 ```
 +-------------------------------------------------------------------------+
-|                  ScanSafe Guardian AI Architecture                       |
+|                  ScanSafe Guardian AI Architecture (V8.6)               |
 +-------------------------------------------------------------------------+
                                     |
             [User Natural Language Goal & Dietary Constraints]
@@ -24,7 +24,13 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
                                     v
           +---------------------------------------------------+
           |    Structured Goal Decomposition Engine           |
-          | - Required Category (seed butter != dairy butter) |
+          | - Required Category:                              |
+          |   * seed butter != dairy butter / nut butter      |
+          |   * nut butter != dairy butter                    |
+          |   * vegan snack != dairy snack (cheese/yogurt)    |
+          |   * GF bread != conventional wheat bread          |
+          |   * cereal != non-food / toiletries               |
+          |   * Unknown categories -> NEEDS_REVIEW            |
           | - Required Attributes (organic, vegan, low-sugar) |
           | - Excluded Ingredients (direct animal/allergens)  |
           | - Regulatory thresholds (<=5g sugar/100g)         |
@@ -62,13 +68,19 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
                                     |
                                     v
           +---------------------------------------------------+
-          |     Server-Controlled Certification Verifier (V8.5)|
+          |     Server-Controlled Certification Verifier (V8.6)|
           | - Zero-Trust Public API Boundary:                 |
           |   All client items sanitized to USER_UPLOADED     |
-          | - Removal of client-controlled trust escalation   |
-          | - Removal of scansafe.co.in from registry domain  |
-          | - Cryptographic HMAC-SHA256 Server Attestations   |
-          | - Authoritative Registry & Revocation Database   |
+          | - Zero Hardcoded Fallback Secrets:                |
+          |   Cryptographically strong (>= 32 char) key req.  |
+          |   Tokens signed with old fallback secret rejected |
+          | - Versioned Canonical Attestation Format:         |
+          |   v1.<kid>.<expiresAt>.<hmacHex>                  |
+          | - Key Rotation Support:                           |
+          |   GUARDIAN_ATTESTATION_KID / PREVIOUS_KID         |
+          | - Timing-Safe Attestation Verification            |
+          | - Empty Production Registry Database:             |
+          |   No fake/mock records hardcoded in production    |
           | - Approved URL hostname alone does NOT prove cert |
           |   existence or validity                           |
           | - 5-Level Provenance Hierarchy                    |
@@ -81,49 +93,56 @@ ScanSafe Guardian AI is an autonomous, evidence-driven food research and dietary
           | - Shared PostgreSQL RPC rate-limiter & leases     |
           | - Row Level Security (RLS) user task isolation    |
           | - Explicit user consent required before save      |
+          | - Honest task state tracking:                     |
+          |   COMPLETED / PARTIAL / INSUFFICIENT_EVIDENCE     |
           +---------------------------------------------------+
 ```
 
 ---
 
-## 2. Certification Trust-Boundary & Adversarial Hardening (V8.5)
+## 2. Certification Trust-Boundary & Adversarial Hardening (V8.6)
 
 ### Priority 0: Zero-Trust Boundary Invariants
 Guardian enforces strict cryptographic and provenance trust boundaries for all claimed food certifications:
 
-1. **Elimination of Client-Controlled Trust Escalation:**
+1. **Elimination of Fallback Secrets & Strong Secret Requirement:**
+   - The insecure fallback secret (`scansafe-guardian-internal-attestation-secret-2026`) has been completely removed from production verification.
+   - Any token generated with the legacy/deprecated fallback string is strictly rejected.
+   - Minimum 32-character cryptographic server key required via `GUARDIAN_ATTESTATION_SECRET`.
+
+2. **Versioned Tokens, Key Rotation & Expiration:**
+   - Canonical payload signed with HMAC-SHA256: `v1|<kid>|<expiresAt>|<productId>|<associatedProductId>|<certificationBody>|<certificationId>|<standard>|<evidenceUrl>|<validUntil>|<verifiedAt>`.
+   - Token format: `v1.<kid>.<expiresAt>.<hmacHex>`.
+   - Supports key rotation across active key (`GUARDIAN_ATTESTATION_KID`) and previous key (`GUARDIAN_ATTESTATION_PREVIOUS_KID` / `GUARDIAN_ATTESTATION_SECRET_PREVIOUS`).
+   - Expired tokens fail closed immediately.
+
+3. **Empty Production Authoritative Registry:**
+   - `AUTHORITATIVE_REGISTRY_DATABASE` is initialized empty `{}` in production so no fixtures are hardcoded.
+   - Test suites register explicit test fixtures using `registerTestAuthoritativeCertificates`.
+
+4. **Elimination of Client-Controlled Trust Escalation:**
    - Public API requests (`POST /api/guardian/agent`) unconditionally treat all incoming product payloads as untrusted (`USER_UPLOADED_LABEL` and `MANUALLY_PROVIDED`).
    - Any client-submitted `sourceType = INTERNAL_VERIFIED_CATALOG`, `verificationStatus = MANUFACTURER_AUTHORIZED`, `registryConfirmed = true`, or `serverAttestationToken` is stripped and rejected.
    - Trusted catalogue records are strictly retrieved server-side via authorized database queries and authenticated service credentials.
 
-2. **Server-Controlled Certification Verification Service:**
+5. **Server-Controlled Certification Verification Service:**
    - A `registryConfirmed` Boolean alone is NEVER sufficient proof of authentication.
    - An approved URL hostname (e.g. `ams.usda.gov`) alone does NOT prove that a certificate exists or is valid.
-   - Genuine authentication requires either:
-     - A cryptographically verified HMAC-SHA256 server attestation token (`serverAttestationToken`) binding candidate product ID, issuing body, cert ID, standard, validity bounds, and verification timestamp.
-     - An explicit match in the server's authoritative registry database (`AUTHORITATIVE_REGISTRY_DATABASE`).
+   - Genuine authentication requires either a cryptographically verified server attestation token or an explicit match in the server's authoritative registry.
    - `scansafe.co.in` is strictly removed from the independent certification registry allowlist (`APPROVED_REGISTRY_DOMAINS`).
 
-3. **Authoritative Revocation Registry:**
+6. **Authoritative Revocation Registry:**
    - Certificate IDs listed in the authoritative revocation list (`AUTHORITATIVE_REVOCATION_REGISTRY`) or marked revoked immediately fail closed as `NEEDS_REVIEW`.
 
-4. **Temporal Verification Integrity:**
+7. **Temporal Verification Integrity:**
    - Missing timestamps fail closed (`Missing verification timestamp`).
    - Unparseable timestamps fail closed (`Invalid verification timestamp`).
    - Future-dated timestamps are rejected with zero tolerance (`Future-dated verification timestamp`).
 
-5. **Approved Verification Methods Only:**
+8. **Approved Verification Methods Only:**
    - Only `REGISTRY_LOOKUP_AUTHENTICATED` and `EXTERNAL_STANDARDS_VERIFIER` backed by actual verification evidence are accepted.
 
-6. **Rejection of Unauthenticated Third-Party Claims:**
-   - `DOCUMENTED_THIRD_PARTY_CLAIM` is explicitly rejected as unauthenticated (`cannot be equated with independently authenticated certification`).
-
-7. **Product & Brand Identity Binding:**
-   - Product identifier must match candidate (`associatedProductId === product.id`).
-   - Brand must match declared product brand where specified.
-   - Validity periods (`validFrom` and `validUntil`) are strictly enforced.
-
-8. **Allergen Screening Absolute Precedence:**
+9. **Allergen Screening Absolute Precedence:**
    - Food allergen safety screening operates independently of certification status.
    - If a product carries a certificate but contains declared allergens or precautionary warnings, it is strictly `EXCLUDED`.
 
@@ -134,15 +153,15 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | Verification Suite | Target Checked | Result | Pass Rate |
 | :--- | :--- | :--- | :--- |
 | `npx tsc --noEmit` | Strict TypeScript types | 0 errors | 100% |
-| `npm run lint` | Next.js ESLint rules | 0 errors | 100% |
+| `npm run lint` | Next.js ESLint rules | 0 errors (176 warnings in legacy tools) | 100% |
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 150 championship scenarios (incl. 18 adversarial) | **150 / 150 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:benchmarks` | 160 championship scenarios (incl. 23 adversarial & category tests) | **160 / 160 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **25 / 25 passed (0 failed)** | 100% |
 | `npm run test:guardian:rls` | RLS isolation & privilege denial | 9 / 9 passed | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS | 0 critical, 0 warnings | 100% |
-| `npm run build` | Next.js production build | 43 / 43 routes compiled successfully in 4.0s | 100% |
+| `npm run build` | Next.js production build | 43 / 43 routes compiled successfully | 100% |
 
 ---
 
@@ -168,6 +187,16 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #148 | Certificate listed in authoritative revocation registry (`AUTHORITATIVE_REVOCATION_REGISTRY`) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
 | #149 | Internal service trust-boundary bypass attempt with unauthenticated record | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
 | #150 | Forged cryptographic server attestation token (HMAC mismatch) | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #151 | Missing or cryptographically weak signing secret (< 32 chars) | Throws error / fail closed | ✅ PASSED |
+| #152 | Token signed with deprecated fallback secret | Strictly invalidated | ✅ PASSED |
+| #153 | Expired attestation token | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #154 | Key rotation with previous active key vs unknown key id | Prev key verified; unknown kid rejected | ✅ PASSED |
+| #155 | Tampered signed attestation payload presentation | Fail closed via timing-safe mismatch | ✅ PASSED |
+| #156 | Category matching: Almond butter vs dairy butter | Dairy butter strictly `EXCLUDED` | ✅ PASSED |
+| #157 | Category matching: Vegan snack vs dairy cheese snack | Dairy snack strictly `EXCLUDED` | ✅ PASSED |
+| #158 | Category matching: Gluten-free bread vs conventional wheat bread | Wheat bread strictly `EXCLUDED` | ✅ PASSED |
+| #159 | Category matching: Breakfast cereal vs non-food item | Non-food item strictly `EXCLUDED` | ✅ PASSED |
+| #160 | Category matching: Unknown / ambiguous category | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
 
 ---
 
