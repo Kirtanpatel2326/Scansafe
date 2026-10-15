@@ -132,7 +132,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 205 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 210 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -3696,9 +3696,9 @@ async function main() {
   })
 
   // ===========================================================================
-  // CATEGORY 15: Public Certification Route Security & Strict Validation (Scenarios 196 - 205)
+  // CATEGORY 15: Public Certification Route Security & Strict Validation (Scenarios 196 - 210)
   // ===========================================================================
-  console.log('▶ Category 15: Public Certification Route Security & Strict Validation (196 - 205)')
+  console.log('▶ Category 15: Public Certification Route Security & Strict Validation (196 - 210)')
 
   await runScenario(196, 'P0 Certification Route 01: Missing or malformed dates return MALFORMED_TIMESTAMPS and isCurrentlyValid = false', async () => {
     const op = createTestVerificationOperation({
@@ -3944,9 +3944,133 @@ async function main() {
     assert.equal(data.id, undefined, 'id must NEVER be exposed')
   })
 
+  await runScenario(206, 'P0 Certification Route 11: Contradictory validity dates (validFrom later than validUntil) return CONTRADICTORY_VALIDITY_DATES', async () => {
+    const contraOp = createTestVerificationOperation({
+      operationId: 'op_cert_contra_dates',
+      certificateId: 'CERT-CONTRA-DATES-01',
+      associatedProductId: 'prod_contra',
+      validFrom: '2028-01-01T00:00:00Z', // later than validUntil!
+      validUntil: '2026-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([contraOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-CONTRA-DATES-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'CONTRADICTORY_VALIDITY_DATES')
+    assert.equal(body.data.isCurrentlyValid, false)
+    assert.equal(body.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+  })
+
+  await runScenario(207, 'P0 Certification Route 12: Future verification or revocation timestamp beyond 5-minute skew tolerance returns FUTURE_DATED_VERIFICATION', async () => {
+    const futureTime = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() // 2 hours in the future
+    const futureVerOp = createTestVerificationOperation({
+      operationId: 'op_cert_future_ver',
+      certificateId: 'CERT-FUTURE-VER-01',
+      associatedProductId: 'prod_future_ver',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      timestamp: futureTime,
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([futureVerOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-FUTURE-VER-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'FUTURE_DATED_VERIFICATION')
+    assert.equal(body.data.isCurrentlyValid, false)
+    assert.equal(body.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+  })
+
+  await runScenario(208, 'P0 Certification Route 13: Strict matching when stored field is missing fails closed with mismatch status', async () => {
+    const missingFieldsOp = createTestVerificationOperation({
+      operationId: 'op_cert_missing_fields',
+      certificateId: 'CERT-MISSING-FIELDS-01',
+      associatedProductId: 'prod_missing_fields',
+      brand: undefined, // missing brand!
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([missingFieldsOp])
+
+    // When client requires manufacturer "Acme Foods", missing stored brand must trigger mismatch
+    const reqMfr = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-MISSING-FIELDS-01&manufacturer=Acme%20Foods')
+    const resMfr = await getPublicCertApi(reqMfr)
+    const bodyMfr = await resMfr.json()
+    assert.equal(bodyMfr.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(bodyMfr.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(209, 'P0 Certification Route 14: Tampered or unauthorized operation lacking registry provenance returns UNAUTHORIZED_VERIFICATION_OPERATION', async () => {
+    const unauthOp = createTestVerificationOperation({
+      operationId: 'op_cert_unauth',
+      certificateId: 'CERT-UNAUTH-01',
+      associatedProductId: 'prod_unauth',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    // Simulate tampered auditRecordHash
+    unauthOp.auditRecordHash = '0000000000000000000000000000000000000000000000000000000000000000'
+    registerTestVerificationOperations([unauthOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-UNAUTH-01')
+    const res = await getPublicCertApi(req)
+    assert.equal(res.status, 404)
+    const body = await res.json()
+    assert.equal(body.success, false)
+  })
+
+  await runScenario(210, 'P0 Certification Route 15: Revoked certificate previously held in memory is immediately invalidated via bypassCache lookup', async () => {
+    // 1. Initially active in memory
+    const activeOp = createTestVerificationOperation({
+      operationId: 'op_cert_mem_revoked',
+      certificateId: 'CERT-MEM-REVOKED-01',
+      associatedProductId: 'prod_mem_revoked',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString(),
+      revocationStatus: 'ACTIVE'
+    })
+    registerTestVerificationOperations([activeOp])
+
+    const req1 = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-MEM-REVOKED-01')
+    const res1 = await getPublicCertApi(req1)
+    const body1 = await res1.json()
+    assert.equal(body1.data.verificationStatus, 'AUTHENTICATED_VALID')
+    assert.equal(body1.data.isCurrentlyValid, true)
+
+    // 2. Authoritative registry updates status to REVOKED
+    const revokedOp = createTestVerificationOperation({
+      operationId: 'op_cert_mem_revoked',
+      certificateId: 'CERT-MEM-REVOKED-01',
+      associatedProductId: 'prod_mem_revoked',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString(),
+      revocationStatus: 'REVOKED'
+    })
+    registerTestVerificationOperations([revokedOp])
+
+    // Query 2: bypasses stale cache and immediately observes REVOKED
+    const req2 = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-MEM-REVOKED-01')
+    const res2 = await getPublicCertApi(req2)
+    const body2 = await res2.json()
+    assert.equal(body2.data.verificationStatus, 'REVOKED', 'BypassCache query must immediately see REVOKED status')
+    assert.equal(body2.data.isCurrentlyValid, false)
+    assert.equal(body2.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 205`)
+  console.log(`   Passed: ${passedCount} / 210`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }
