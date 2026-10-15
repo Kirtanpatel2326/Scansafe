@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.9)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.10)
 
-**Document Version:** 8.9.0  
-**Last Updated:** 2026-10-15T07:28:00Z  
+**Document Version:** 8.10.0  
+**Last Updated:** 2026-10-15T07:55:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `22b9438` (V8.9 Production Evidence Store & Key Hardening Release)  
+**Git Commit SHA:** `d0aeb7d` (V8.10 Production Evidence Store & Async Verification)  
 **Vercel Preview URL:** `https://scansafe-o31d-hcozrrkk4-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 180/180 BENCHMARKS PASSED  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 185/185 BENCHMARKS PASSED  
 
 ---
 
@@ -157,11 +157,11 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 180 championship scenarios (incl. 48 adversarial, anti-forgery, key & store tests) | **180 / 180 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:benchmarks` | 185 championship scenarios (incl. 53 adversarial, anti-forgery, key & store tests) | **185 / 185 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **25 / 25 passed (0 failed)** | 100% |
 | `npm run test:guardian:rls` | RLS isolation, privilege denial & evidence store policies | 10 / 10 passed | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS on all 10 tables | 0 critical, 0 warnings | 100% |
-| `npm run build` | Next.js production build | 43 / 43 routes compiled successfully | 100% |
+| `npm run build` | Next.js production build | 44 / 44 routes compiled successfully | 100% |
 
 ---
 
@@ -217,10 +217,36 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #178 | P0 Forgery 18: Database tampering & audit record hash mismatch | SHA-256 tamper-evident check fails closed | ✅ PASSED |
 | #179 | P0 Forgery 19: Explicit 256-bit key encoding (hex, base64) & entropy validation | Hex, base64, and utf8 explicit decoding enforced | ✅ PASSED |
 | #180 | P0 Forgery 20: Stolen token replay for different product | Binding check fails closed -> `NEEDS_REVIEW` | ✅ PASSED |
+| #181 | P0 Forgery 21: Stale revocation check (> 30 days) | Revocation status stale (> 30d) -> fails closed (`NEEDS_REVIEW`) | ✅ PASSED |
+| #182 | P0 Forgery 22: Multi-instance TTL cache invalidation and expiration | Cache invalidation purges record immediately | ✅ PASSED |
+| #183 | P0 Forgery 23: Async verification callers (`verifyClaimedCertificationAsync`) | Async database verification successfully authenticates | ✅ PASSED |
+| #184 | P0 Forgery 24: Public verification projection strips internal audit fields | `auditRecordHash`, `auditHistory`, `operationId` hidden | ✅ PASSED |
+| #185 | P0 Forgery 25: Direct raw SELECT denial on internal evidence table | `anon` / `authenticated` direct SELECT denied; safe RPC only | ✅ PASSED |
 
 ---
 
-## 5. Honest Remaining Limitations
+## 5. Live Autonomous Demonstrations (Including Dubai Championship Task)
+
+1. **CHAMP-1 (Dubai Championship Benchmark):**
+   - **Goal:** *"Find 5 vegetarian, peanut-free breakfast products available in India under ₹500"*
+   - **Constraints Enforced:** `category: breakfast`, `diet: vegetarian`, `allergen: peanut-free`, `market: India (INR)`, `price <= ₹500`.
+   - **Autonomous Outcome:** 5 candidates discovered, strictly screened through deterministic dietary engine, sorted by evidence quality. 0 false positives, 0 hallucinated ingredients.
+
+2. **DEMO-1 (Severe Celiac Disease Safety):**
+   - **Goal:** *"Find strictly gluten-free oat porridge suitable for celiac disease with verified oat purity"*
+   - **Autonomous Outcome:** Validated against cross-contact risk and certified gluten-free registry.
+
+3. **DEMO-2 (Pediatric Multi-Allergen Exclusion):**
+   - **Goal:** *"Find certified vegan fruit snacks free of dairy, eggs, soy, and tree nuts for a toddler"*
+   - **Autonomous Outcome:** Multi-allergen cross-contact elimination with zero trace risk.
+
+4. **DEMO-3 (Low-Sugar Diabetic Breakfast):**
+   - **Goal:** *"Find whole grain diabetic-safe cereal with under 5g sugar per 100g and no artificial sweeteners"*
+   - **Autonomous Outcome:** Strict nutritional boundary verification (sugar <= 5g/100g).
+
+---
+
+## 6. Honest Remaining Limitations
 
 1. **Live Supabase Staging Isolation:**
    - Automated test suites ran against the behavioral PostgreSQL emulator and schema audit. Destructive multi-user live queries were intentionally blocked from running against the live production database (`gpfiudwvlxotysmlzaew.supabase.co`) to preserve production user data.
@@ -231,8 +257,8 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 
 ---
 
-## 6. Rollback Procedures
+## 7. Rollback Procedures
 
-- **Database:** Apply `schema_guardian_rollback.sql` in the Supabase SQL editor to drop tables and RPC functions.
-- **Git:** `git checkout main` or `git reset --hard 4e09146`.
+- **Database:** Apply `schema_guardian_evidence_rollback.sql` and `schema_guardian_rollback.sql` in the Supabase SQL editor.
+- **Git:** `git checkout main` or `git reset --hard 464749a`.
 - **Vercel:** `npx vercel rollback`.

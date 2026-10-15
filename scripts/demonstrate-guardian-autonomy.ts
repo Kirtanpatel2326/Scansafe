@@ -77,19 +77,30 @@ async function runAutonomousDemonstrations() {
 
   const testScenarios = [
     {
+      goalId: 'CHAMP-1',
+      goal: 'Find five vegetarian, peanut-free breakfast products available in India within ₹500, investigate their ingredients and nutrition, and prepare an evidence-backed shopping shortlist.',
+      constraints: ['peanut'] as ('peanut')[],
+      budget: 500,
+      currency: 'INR' as const,
+      maxResults: 5
+    },
+    {
       goalId: 'DEMO-1',
       goal: 'Find low-sugar gluten-free and milk-free vegan energy bars',
-      constraints: ['gluten', 'milk'] as ('gluten' | 'milk')[]
+      constraints: ['gluten', 'milk'] as ('gluten' | 'milk')[],
+      maxResults: 5
     },
     {
       goalId: 'DEMO-2',
       goal: 'Find nut-free and peanut-free organic seed butter spread',
-      constraints: ['peanut', 'tree_nut'] as ('peanut' | 'tree_nut')[]
+      constraints: ['peanut', 'tree_nut'] as ('peanut' | 'tree_nut')[],
+      maxResults: 5
     },
     {
       goalId: 'DEMO-3',
       goal: 'Find soy-free and egg-free savory dipping sauce',
-      constraints: ['soy', 'egg'] as ('soy' | 'egg')[]
+      constraints: ['soy', 'egg'] as ('soy' | 'egg')[],
+      maxResults: 5
     }
   ]
 
@@ -97,17 +108,23 @@ async function runAutonomousDemonstrations() {
     console.log(`\n----------------------------------------------------------------------`)
     console.log(`▶ Executing ${scenario.goalId}: "${scenario.goal}"`)
     console.log(`  Strict Constraints: [${scenario.constraints.join(', ')}]`)
+    if (scenario.budget) {
+      console.log(`  Budget Ceiling: ${scenario.currency || 'INR'} ${scenario.budget}`)
+    }
     console.log(`----------------------------------------------------------------------`)
 
     const startedAt = Date.now()
     const result = await runGuardianAutonomousAgent({
       goal: scenario.goal,
       constraints: scenario.constraints,
+      budget: scenario.budget,
+      currency: scenario.currency,
       allowInternalCatalog: true,
       allowPublicOffCatalog: true,
       allowPartnerCatalog: false,
-      maxResults: 5
+      maxResults: scenario.maxResults || 5
     })
+
 
     const replanStages = result.plan.filter(p => p.includes('Dynamic Replan'))
     const toolsCalled = result.steps.map(s => ({

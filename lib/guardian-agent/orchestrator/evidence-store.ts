@@ -72,15 +72,32 @@ export interface IServerControlledEvidenceStore {
     certificateId: string,
     productId: string
   ): AuditableVerificationOperation | null
-  fetchRecordFromDatabase(certificateId: string): Promise<AuditableVerificationOperation | null>
+  fetchRecordFromDatabase(
+    certificateId: string,
+    options?: { bypassCache?: boolean; ttlMs?: number }
+  ): Promise<AuditableVerificationOperation | null>
   recordVerifiedOperation(op: AuditableVerificationOperation): Promise<void>
+  invalidateCache(certificateId?: string): void
 }
 
 /**
- * Internal storage map for server-verified operations.
- * Immutable in production runtime.
+ * Bounded TTL for multi-instance server cache (60 seconds).
+ * Ensures multiple server instances synchronize revocation and expiration changes
+ * without serving stale in-memory data indefinitely.
  */
-const VERIFIED_OPERATIONS_STORE = new Map<string, AuditableVerificationOperation>()
+export const DEFAULT_CACHE_TTL_MS = 60 * 1000
+
+interface CachedEvidenceEntry {
+  record: AuditableVerificationOperation
+  cachedAt: number
+  expiresAt: number
+}
+
+/**
+ * Internal storage map for server-verified operations with TTL.
+ * In production runtime, records originate strictly from database verification operations.
+ */
+const VERIFIED_OPERATIONS_CACHE = new Map<string, CachedEvidenceEntry>()
 
 /**
  * Core Protected Server-Controlled Evidence Store.
@@ -89,19 +106,28 @@ const VERIFIED_OPERATIONS_STORE = new Map<string, AuditableVerificationOperation
 export class ServerControlledEvidenceStore implements IServerControlledEvidenceStore {
   /**
    * Retrieves an auditable verification operation record by certificate ID.
-   * Performs cryptographic hash integrity verification on retrieval.
+   * Performs cryptographic hash integrity verification on retrieval and enforces TTL.
    * Never treats a stored hash as proof of certification; only as an anti-tamper check.
    */
   public getRecord(certificateId: string): AuditableVerificationOperation | null {
     if (!certificateId) return null
     const key = certificateId.trim().toUpperCase()
-    const record = VERIFIED_OPERATIONS_STORE.get(key)
-    if (!record) return null
+    const entry = VERIFIED_OPERATIONS_CACHE.get(key)
+    if (!entry) return null
+
+    // Check TTL expiration for multi-instance cache consistency
+    if (Date.now() > entry.expiresAt) {
+      VERIFIED_OPERATIONS_CACHE.delete(key)
+      return null
+    }
+
+    const record = entry.record
 
     // 1. Audit record cryptographic hash integrity check (anti-tamper)
     const expectedHash = computeVerificationRecordHash(record)
     if (record.auditRecordHash !== expectedHash) {
       console.error(`[EvidenceStore] Integrity violation: Audit record hash mismatch for cert ${certificateId}`)
+      VERIFIED_OPERATIONS_CACHE.delete(key)
       return null
     }
 
@@ -133,15 +159,41 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
   }
 
   /**
-   * Asynchronously loads a verified certification evidence record from the persistent Supabase database.
-   * Validates cryptographic hash integrity upon loading.
+   * Invalidates cached evidence records across this server instance.
+   * If certificateId is provided, invalidates only that certificate; otherwise clears entire cache.
    */
-  public async fetchRecordFromDatabase(certificateId: string): Promise<AuditableVerificationOperation | null> {
+  public invalidateCache(certificateId?: string): void {
+    if (certificateId) {
+      VERIFIED_OPERATIONS_CACHE.delete(certificateId.trim().toUpperCase())
+    } else {
+      VERIFIED_OPERATIONS_CACHE.clear()
+    }
+  }
+
+  /**
+   * Asynchronously loads a verified certification evidence record from the persistent Supabase database.
+   * Validates cryptographic hash integrity upon loading and caches with bounded TTL.
+   * In production, failures fail closed immediately.
+   */
+  public async fetchRecordFromDatabase(
+    certificateId: string,
+    options: { bypassCache?: boolean; ttlMs?: number } = {}
+  ): Promise<AuditableVerificationOperation | null> {
     if (!certificateId) return null
     const normId = certificateId.trim().toUpperCase()
 
+    // 1. Check multi-instance cache unless bypass requested
+    if (!options.bypassCache) {
+      const cached = this.getRecord(normId)
+      if (cached) return cached
+    }
+
     const hasDb = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
     if (!hasDb) {
+      // In production, missing database credentials MUST fail closed!
+      if (process.env.NODE_ENV === 'production') {
+        return null
+      }
       return this.getRecord(normId)
     }
 
@@ -155,6 +207,10 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
 
       if (error || !data) {
         if (error) console.warn(`[EvidenceStore] DB lookup error for ${normId}:`, error.message)
+        // In production, failure or missing record in database MUST fail closed!
+        if (process.env.NODE_ENV === 'production') {
+          return null
+        }
         return this.getRecord(normId)
       }
 
@@ -184,11 +240,20 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
         return null
       }
 
-      // Cache verified record for fast synchronous verification
-      VERIFIED_OPERATIONS_STORE.set(normId, Object.freeze(op))
+      // Cache verified record with bounded TTL for multi-instance cache consistency
+      const ttl = options.ttlMs || DEFAULT_CACHE_TTL_MS
+      const now = Date.now()
+      VERIFIED_OPERATIONS_CACHE.set(normId, {
+        record: Object.freeze(op),
+        cachedAt: now,
+        expiresAt: now + ttl
+      })
       return op
     } catch (err: any) {
       console.warn(`[EvidenceStore] Database connection error: ${err.message}`)
+      if (process.env.NODE_ENV === 'production') {
+        return null
+      }
       return this.getRecord(normId)
     }
   }
@@ -238,7 +303,13 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
       }
     }
 
-    VERIFIED_OPERATIONS_STORE.set(normId, Object.freeze({ ...op }))
+    // Update local multi-instance cache with bounded TTL
+    const now = Date.now()
+    VERIFIED_OPERATIONS_CACHE.set(normId, {
+      record: Object.freeze({ ...op }),
+      cachedAt: now,
+      expiresAt: now + DEFAULT_CACHE_TTL_MS
+    })
   }
 }
 
@@ -252,13 +323,19 @@ export const serverEvidenceStore = new ServerControlledEvidenceStore()
  * Strictly throws if invoked in a production environment.
  */
 export function _internalInjectTestVerificationOperation(
-  op: AuditableVerificationOperation
+  op: AuditableVerificationOperation,
+  ttlMs: number = 3600 * 1000 // 1 hour for test fixtures
 ): void {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('SecurityError: Test fixture registration is strictly prohibited in production environment.')
   }
   const key = op.certificateId.trim().toUpperCase()
-  VERIFIED_OPERATIONS_STORE.set(key, Object.freeze({ ...op }))
+  const now = Date.now()
+  VERIFIED_OPERATIONS_CACHE.set(key, {
+    record: Object.freeze({ ...op }),
+    cachedAt: now,
+    expiresAt: now + ttlMs
+  })
 }
 
 /**
@@ -269,5 +346,6 @@ export function _internalClearTestVerificationOperations(): void {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('SecurityError: Clearing verification operations is strictly prohibited in production environment.')
   }
-  VERIFIED_OPERATIONS_STORE.clear()
+  VERIFIED_OPERATIONS_CACHE.clear()
 }
+

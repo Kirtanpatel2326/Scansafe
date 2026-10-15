@@ -530,6 +530,17 @@ export function verifyClaimedCertification(
     }
   }
 
+  // 1b. Staleness check on verification operation record (max 30 days allowed)
+  if (verifiedOp.revocationCheckedAt) {
+    const revCheckedMs = Date.parse(verifiedOp.revocationCheckedAt)
+    if (Number.isNaN(revCheckedMs) || Date.now() - revCheckedMs > 30 * 24 * 60 * 60 * 1000) {
+      return {
+        authenticated: false,
+        invalidationReason: `Stale revocation evidence: Revocation check for certificate ID "${record.certificationId}" is older than 30 days (${verifiedOp.revocationCheckedAt}); fresh verification required.`
+      }
+    }
+  }
+
   // 2. Expiration check on verification operation record
   if (verifiedOp.revocationStatus === 'EXPIRED') {
     return {
@@ -617,3 +628,22 @@ export function verifyClaimedCertification(
     authenticated: true
   }
 }
+
+/**
+ * Asynchronously verifies a claimed certification record against the persistent Supabase evidence store.
+ * Connects the production certification verifier to the persistent database before running verification checks.
+ * Fails closed if the database is unreachable, record is missing, expired, revoked, or tampered.
+ */
+export async function verifyClaimedCertificationAsync(
+  record: ClaimedCertification,
+  product: ProductEvidence
+): Promise<{
+  authenticated: boolean
+  invalidationReason?: string
+}> {
+  if (record.certificationId) {
+    await serverEvidenceStore.fetchRecordFromDatabase(record.certificationId.trim().toUpperCase())
+  }
+  return verifyClaimedCertification(record, product)
+}
+

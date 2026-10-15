@@ -25,15 +25,22 @@ export interface CreateTestOpParams {
   verificationMethod?: 'REGISTRY_LOOKUP_AUTHENTICATED' | 'EXTERNAL_STANDARDS_VERIFIER'
   authoritativeSource?: string
   certificateId: string
-  issuingAuthority: string
-  standard: string
-  evidenceUrl: string
+  issuingAuthority?: string
+  standard?: string
+  evidenceUrl?: string
   associatedProductId: string
   brand?: string
   validFrom?: string
   validUntil?: string
   revocationCheckedAt?: string
   revocationStatus?: 'ACTIVE' | 'REVOKED' | 'EXPIRED'
+  auditHistory?: Array<{
+    timestamp: string
+    action: string
+    previousHash?: string
+    actor?: string
+    details?: string
+  }>
 }
 
 /**
@@ -50,15 +57,16 @@ export function createTestVerificationOperation(
     verificationMethod: params.verificationMethod || 'REGISTRY_LOOKUP_AUTHENTICATED',
     authoritativeSource: params.authoritativeSource || 'Authoritative Standards Registry Database',
     certificateId: params.certificateId,
-    issuingAuthority: params.issuingAuthority,
-    standard: params.standard,
-    evidenceUrl: params.evidenceUrl,
+    issuingAuthority: params.issuingAuthority || 'USDA National Organic Program',
+    standard: params.standard || 'NOP_ORGANIC',
+    evidenceUrl: params.evidenceUrl || 'https://ams.usda.gov/organic/verify/cert',
     associatedProductId: params.associatedProductId,
     brand: params.brand,
     validFrom: params.validFrom || '2026-01-01T00:00:00Z',
     validUntil: params.validUntil || '2027-01-01T00:00:00Z',
     revocationCheckedAt: params.revocationCheckedAt || nowIso,
-    revocationStatus: params.revocationStatus || 'ACTIVE'
+    revocationStatus: params.revocationStatus || 'ACTIVE',
+    auditHistory: params.auditHistory || []
   }
   const auditRecordHash = computeVerificationRecordHash(base)
   return { ...base, auditRecordHash }

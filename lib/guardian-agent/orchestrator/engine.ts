@@ -6,7 +6,7 @@ import {
   EvaluatedProduct
 } from './types'
 import { evaluateDeterministicSafety, detectEvidenceConflicts } from './verifier'
-import { decomposeUserGoal, evaluateProductGoalRelevance } from './goal-verifier'
+import { decomposeUserGoal, evaluateProductGoalRelevanceAsync } from './goal-verifier'
 import { searchInternalReviewedCatalog, searchPublicOpenFoodFacts } from './tools'
 import { searchApprovedCatalog } from '../catalog'
 import { createAutonomousExecutionPlan, dynamicReplanAfterToolExecution } from './planner'
@@ -523,7 +523,7 @@ export async function runGuardianAutonomousAgent(
 
     for (const item of normalizedEvidence) {
       const safetyEval = evaluateDeterministicSafety(item, request.constraints, request.budget)
-      const goalEval = evaluateProductGoalRelevance(item, decomposedGoal)
+      const goalEval = await evaluateProductGoalRelevanceAsync(item, decomposedGoal)
 
       if (sourceConflicts.has(item.id)) {
         safetyEval.conflictingClaims = true

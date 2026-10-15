@@ -311,6 +311,19 @@ export function decomposeUserGoal(
   return DecomposedGoalSchema.parse(result)
 }
 
+import {
+  APPROVED_REGISTRY_DOMAINS,
+  APPROVED_VERIFICATION_METHODS,
+  AUTHORITATIVE_REVOCATION_REGISTRY,
+  isCertificateRevoked,
+  generateServerAttestation,
+  verifyServerAttestation,
+  isValidAttestationSecret,
+  DEPRECATED_FALLBACK_SECRET,
+  verifyClaimedCertification,
+  verifyClaimedCertificationAsync
+} from './certification-verifier'
+
 export {
   APPROVED_REGISTRY_DOMAINS,
   APPROVED_VERIFICATION_METHODS,
@@ -320,9 +333,11 @@ export {
   verifyServerAttestation,
   isValidAttestationSecret,
   DEPRECATED_FALLBACK_SECRET,
-  verifyClaimedCertification
-} from './certification-verifier'
-import { verifyClaimedCertification } from './certification-verifier'
+  verifyClaimedCertification,
+  verifyClaimedCertificationAsync
+}
+import { serverEvidenceStore } from './evidence-store'
+
 
 /**
  * P0: Verify whether a product has independently authenticated certification
@@ -395,6 +410,65 @@ export function findAuthenticatedCertification(
 
   return { authenticated: false }
 }
+
+/**
+ * Asynchronously verifies whether a product has independently authenticated certification
+ * against the persistent Supabase evidence store.
+ */
+export async function findAuthenticatedCertificationAsync(
+  product: ProductEvidence,
+  standardKeywords: RegExp
+): Promise<{
+  authenticated: boolean
+  record?: ClaimedCertification
+  invalidationReason?: string
+}> {
+  const records = product.certifiedRecords || []
+
+  const matchingRecords = records.filter(r => {
+    const s = (r.standard || '').replace(/_/g, ' ')
+    const b = (r.certificationBody || '').replace(/_/g, ' ')
+    const n = (r.notes || '').replace(/_/g, ' ')
+    return (
+      standardKeywords.test(r.standard || '') ||
+      standardKeywords.test(s) ||
+      standardKeywords.test(r.certificationBody || '') ||
+      standardKeywords.test(b) ||
+      standardKeywords.test(r.notes || '') ||
+      standardKeywords.test(n)
+    )
+  })
+
+  if (matchingRecords.length === 0) {
+    const rawMatches = (product.certificationsDeclared || []).filter(c => standardKeywords.test(c))
+    if (rawMatches.length > 0) {
+      return {
+        authenticated: false,
+        invalidationReason: `Unverified claim: Product declares "${rawMatches.join(', ')}" in packaging metadata, but lacks documented third-party certification record or registry authentication. Raw declaration strings cannot establish verified certification.`
+      }
+    }
+    return { authenticated: false }
+  }
+
+  for (const record of matchingRecords) {
+    const verifyRes = await verifyClaimedCertificationAsync(record, product)
+    if (verifyRes.authenticated) {
+      return {
+        authenticated: true,
+        record
+      }
+    } else {
+      return {
+        authenticated: false,
+        record,
+        invalidationReason: verifyRes.invalidationReason
+      }
+    }
+  }
+
+  return { authenticated: false }
+}
+
 
 
 /**
@@ -994,3 +1068,23 @@ export function evaluateProductGoalRelevance(
     attributeEvidence
   }
 }
+
+/**
+ * Asynchronously evaluates product goal relevance against the persistent database evidence store.
+ * Pre-fetches all claimed certification records from persistent storage into cache
+ * before executing goal relevance rules.
+ */
+export async function evaluateProductGoalRelevanceAsync(
+  product: ProductEvidence,
+  goal: DecomposedGoal
+): Promise<GoalRelevanceResult> {
+  if (product.certifiedRecords && product.certifiedRecords.length > 0) {
+    await Promise.all(
+      product.certifiedRecords
+        .filter((r): r is typeof r & { certificationId: string } => typeof r.certificationId === 'string' && r.certificationId.trim().length > 0)
+        .map(r => serverEvidenceStore.fetchRecordFromDatabase(r.certificationId.trim().toUpperCase()))
+    )
+  }
+  return evaluateProductGoalRelevance(product, goal)
+}
+

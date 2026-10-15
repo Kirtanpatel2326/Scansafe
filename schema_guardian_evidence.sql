@@ -41,25 +41,75 @@ alter table public.guardian_certification_evidence enable row level security;
 -- Revoke all permissions from public, anon, and authenticated users
 revoke all on public.guardian_certification_evidence from public, anon, authenticated;
 
--- Grant SELECT to authenticated users (read-only verification proofs)
-grant select on public.guardian_certification_evidence to authenticated;
-
--- Grant ALL strictly and exclusively to service_role (server verification engine)
-grant all on public.guardian_certification_evidence to service_role;
-
--- Defense-in-depth RLS Policies: Ordinary users have zero write permissions
+-- Strictly deny direct SELECT permissions on internal evidence table to standard users and anonymous clients.
+-- Internal cryptographic audit hashes and operational history must never be exposed via raw table select.
 drop policy if exists guardian_cert_evidence_read_auth on public.guardian_certification_evidence;
-create policy guardian_cert_evidence_read_auth on public.guardian_certification_evidence 
-  for select to authenticated using (true);
+drop policy if exists guardian_cert_evidence_no_user_select on public.guardian_certification_evidence;
+create policy guardian_cert_evidence_no_user_select on public.guardian_certification_evidence 
+  for select to authenticated, anon using (false);
 
 drop policy if exists guardian_cert_evidence_no_user_insert on public.guardian_certification_evidence;
 create policy guardian_cert_evidence_no_user_insert on public.guardian_certification_evidence 
-  for insert to authenticated with check (false);
+  for insert to authenticated, anon with check (false);
 
 drop policy if exists guardian_cert_evidence_no_user_update on public.guardian_certification_evidence;
 create policy guardian_cert_evidence_no_user_update on public.guardian_certification_evidence 
-  for update to authenticated using (false);
+  for update to authenticated, anon using (false);
 
 drop policy if exists guardian_cert_evidence_no_user_delete on public.guardian_certification_evidence;
 create policy guardian_cert_evidence_no_user_delete on public.guardian_certification_evidence 
-  for delete to authenticated using (false);
+  for delete to authenticated, anon using (false);
+
+-- ======================================================================
+-- CONTROLLED PUBLIC VERIFICATION FUNCTION (SAFE FIELDS ONLY)
+-- ======================================================================
+-- Exposes only safe, deliberately public verification fields without leaking
+-- audit_record_hash, audit_history, operation_id, or database UUIDs.
+create or replace function public.guardian_get_public_certification(
+  p_certificate_id text,
+  p_product_id text default null
+)
+returns table (
+  certificate_id text,
+  associated_product_id text,
+  issuing_authority text,
+  standard text,
+  evidence_url text,
+  brand text,
+  valid_from timestamptz,
+  valid_until timestamptz,
+  revocation_status text,
+  revocation_checked_at timestamptz,
+  verification_method text,
+  verified_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  return query
+  select 
+    e.certificate_id,
+    e.associated_product_id,
+    e.issuing_authority,
+    e.standard,
+    e.evidence_url,
+    e.brand,
+    e.valid_from,
+    e.valid_until,
+    e.revocation_status,
+    e.revocation_checked_at,
+    e.verification_method,
+    e.verified_at
+  from public.guardian_certification_evidence e
+  where upper(trim(e.certificate_id)) = upper(trim(p_certificate_id))
+    and (p_product_id is null or trim(e.associated_product_id) = trim(p_product_id))
+    and e.revocation_status = 'ACTIVE'
+    and e.valid_until > clock_timestamp()
+  limit 1;
+end;
+$$;
+
+revoke all on function public.guardian_get_public_certification(text, text) from public, anon;
+grant execute on function public.guardian_get_public_certification(text, text) to authenticated;

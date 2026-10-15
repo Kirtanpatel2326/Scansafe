@@ -104,6 +104,8 @@ async function main() {
     assert(sql.includes('create table if not exists public.guardian_certification_evidence'), 'Missing guardian_certification_evidence table definition')
     assert(sql.includes('alter table public.guardian_certification_evidence enable row level security'), 'RLS not enabled on guardian_certification_evidence')
     assert(sql.includes('guardian_cert_evidence_no_user_insert'), 'Missing no_user_insert policy on evidence table')
+    assert(sql.includes('guardian_cert_evidence_no_user_select'), 'Missing no_user_select policy on evidence table')
+    assert(sql.includes('guardian_get_public_certification'), 'Missing safe public certification lookup function')
     assert(sql.includes('grant all on public.guardian_certification_evidence to service_role'), 'Missing exclusive service_role write grant on evidence table')
     assert(sql.includes('guardian_consume_rate_limit'), 'Missing atomic rate limit consumption RPC')
     assert(sql.includes('guardian_acquire_concurrency_lease'), 'Missing atomic concurrency lease acquisition RPC')
@@ -129,6 +131,7 @@ async function main() {
     assert(sql.includes('DROP FUNCTION IF EXISTS public.guardian_consume_rate_limit'), 'Missing rate limit function drop')
     assert(sql.includes('DROP FUNCTION IF EXISTS public.guardian_acquire_concurrency_lease'), 'Missing lease acquire function drop')
     assert(sql.includes('DROP FUNCTION IF EXISTS public.guardian_release_concurrency_lease'), 'Missing lease release function drop')
+    assert(sql.includes('DROP FUNCTION IF EXISTS public.guardian_get_public_certification'), 'Missing public cert function drop')
   })
 
   // 2. Multi-User RLS Simulation & Isolation Testing
@@ -214,7 +217,7 @@ async function main() {
     assert(!serviceRoleRes.error && serviceRoleRes.success === true, 'service_role was denied execute')
   })
 
-  await runTest('Ordinary users and external clients have zero write access to guardian_certification_evidence while service_role retains exclusive write authority', () => {
+  await runTest('Ordinary users and external clients have zero write access and zero direct SELECT to guardian_certification_evidence; public queries must use safe RPC', () => {
     // Model PostgreSQL privilege & policy check on guardian_certification_evidence
     const checkTableWritePermission = (role: 'anon' | 'authenticated' | 'service_role', action: 'insert' | 'update' | 'delete') => {
       if (role !== 'service_role') {
@@ -223,11 +226,26 @@ async function main() {
       return { success: true }
     }
 
-    const checkTableReadPermission = (role: 'anon' | 'authenticated' | 'service_role') => {
-      if (role === 'anon') {
-        return { data: [] }
+    const checkTableDirectSelectPermission = (role: 'anon' | 'authenticated' | 'service_role') => {
+      if (role !== 'service_role') {
+        return { error: new Error(`permission denied for table guardian_certification_evidence: direct SELECT strictly prohibited for role "${role}"`) }
       }
-      return { data: [{ certificate_id: 'CERT-01' }] }
+      return { data: [{ certificate_id: 'CERT-01', audit_record_hash: 'secret-hash' }] }
+    }
+
+    const checkSafePublicRpc = (role: 'anon' | 'authenticated' | 'service_role', certId: string) => {
+      if (role === 'anon') {
+        return { error: new Error('Anon execute denied') }
+      }
+      // Returns ONLY safe fields, never audit_record_hash or audit_history
+      return {
+        data: [{
+          certificate_id: certId,
+          issuing_authority: 'USDA',
+          standard: 'NOP_ORGANIC',
+          revocation_status: 'ACTIVE'
+        }]
+      }
     }
 
     // 1. Authenticated user write attempts are strictly rejected
@@ -244,9 +262,14 @@ async function main() {
     assert(checkTableWritePermission('service_role', 'update').success === true, 'service_role was denied update')
     assert(checkTableWritePermission('service_role', 'delete').success === true, 'service_role was denied delete')
 
-    // 4. Authenticated clients can read verified certification proofs
-    const authRead = checkTableReadPermission('authenticated')
-    assert(authRead.data.length > 0, 'Authenticated user could not read verified records')
+    // 4. Authenticated clients cannot directly SELECT raw evidence table
+    assert(!!checkTableDirectSelectPermission('authenticated').error, 'Authenticated user was not denied direct SELECT on raw evidence table')
+    assert(!!checkTableDirectSelectPermission('anon').error, 'Anon client was not denied direct SELECT on raw evidence table')
+
+    // 5. Safe public RPC exposes only safe public fields
+    const rpcRes = checkSafePublicRpc('authenticated', 'CERT-01')
+    assert(!rpcRes.error && rpcRes.data && rpcRes.data.length > 0, 'Safe public RPC failed for authenticated user')
+    assert((rpcRes.data![0] as any).audit_record_hash === undefined, 'Public RPC leaked internal audit_record_hash')
   })
 
   // 3. Application Engine Persistence Gate & Failed-Save Integrity
