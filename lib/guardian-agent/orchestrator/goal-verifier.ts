@@ -336,7 +336,7 @@ export {
   verifyClaimedCertification,
   verifyClaimedCertificationAsync
 }
-import { serverEvidenceStore } from './evidence-store'
+import { serverEvidenceStore, AuditableVerificationOperation } from './evidence-store'
 
 
 /**
@@ -358,7 +358,8 @@ import { serverEvidenceStore } from './evidence-store'
  */
 export function findAuthenticatedCertification(
   product: ProductEvidence,
-  standardKeywords: RegExp
+  standardKeywords: RegExp,
+  explicitOpsMap?: Map<string, AuditableVerificationOperation | null>
 ): {
   authenticated: boolean
   record?: ClaimedCertification
@@ -393,7 +394,9 @@ export function findAuthenticatedCertification(
   }
 
   for (const record of matchingRecords) {
-    const verifyRes = verifyClaimedCertification(record, product)
+    const normId = (record.certificationId || '').trim().toUpperCase()
+    const explicitOp = explicitOpsMap ? (explicitOpsMap.get(normId) ?? null) : undefined
+    const verifyRes = verifyClaimedCertification(record, product, explicitOp)
     if (verifyRes.authenticated) {
       return {
         authenticated: true,
@@ -478,7 +481,8 @@ export async function findAuthenticatedCertificationAsync(
  */
 export function evaluateProductGoalRelevance(
   product: ProductEvidence,
-  goal: DecomposedGoal
+  goal: DecomposedGoal,
+  explicitOpsMap?: Map<string, AuditableVerificationOperation | null>
 ): GoalRelevanceResult {
   const nameLower = (product.name || '').toLowerCase()
   const brandLower = (product.brand || '').toLowerCase()
@@ -714,7 +718,7 @@ export function evaluateProductGoalRelevance(
         return re.test(ingredientsLower)
       })
 
-      const certResult = findAuthenticatedCertification(product, /vegan|plant[- ]based/i)
+      const certResult = findAuthenticatedCertification(product, /vegan|plant[- ]based/i, explicitOpsMap)
 
       if (certResult.authenticated && certResult.record) {
         if (detectedAmbiguous.length > 0) {
@@ -811,7 +815,8 @@ export function evaluateProductGoalRelevance(
   if (goal.requiredAttributes.includes('organic')) {
     const certResult = findAuthenticatedCertification(
       product,
-      /organic|usda organic|eu organic|ecocert|bio-siegel|soil association|demeter|ccof|qai|jaivik bharat/i
+      /organic|usda organic|eu organic|ecocert|bio-siegel|soil association|demeter|ccof|qai|jaivik bharat/i,
+      explicitOpsMap
     )
 
     if (certResult.authenticated && certResult.record) {
@@ -877,7 +882,7 @@ export function evaluateProductGoalRelevance(
       }
       relevanceReasons.push(`EXCLUDED (Gluten Cross-Contact): Packaging declares precautionary cross-contact warning for gluten/wheat.${certNote}`)
     } else {
-      const certResult = findAuthenticatedCertification(product, /gluten[- ]free|gfco|celiac/i)
+      const certResult = findAuthenticatedCertification(product, /gluten[- ]free|gfco|celiac/i, explicitOpsMap)
 
       if (certResult.authenticated && certResult.record) {
         attributeEvidence['gluten_free'] = {
@@ -939,7 +944,7 @@ export function evaluateProductGoalRelevance(
       }
       relevanceReasons.push(`EXCLUDED (Peanut Cross-Contact): Packaging declares precautionary cross-contact warning for peanuts.${certNote}`)
     } else {
-      const certResult = findAuthenticatedCertification(product, /peanut[- ]free/i)
+      const certResult = findAuthenticatedCertification(product, /peanut[- ]free/i, explicitOpsMap)
 
       if (certResult.authenticated && certResult.record) {
         attributeEvidence['peanut_free'] = {
@@ -1005,7 +1010,7 @@ export function evaluateProductGoalRelevance(
       }
       relevanceReasons.push(`EXCLUDED (Nut Cross-Contact): Packaging declares precautionary cross-contact warning for tree nuts.${certNote}`)
     } else {
-      const certResult = findAuthenticatedCertification(product, /nut[- ]free|tree[- ]nut[- ]free/i)
+      const certResult = findAuthenticatedCertification(product, /nut[- ]free|tree[- ]nut[- ]free/i, explicitOpsMap)
 
       if (certResult.authenticated && certResult.record) {
         attributeEvidence['nut_free'] = {
@@ -1070,21 +1075,30 @@ export function evaluateProductGoalRelevance(
 }
 
 /**
- * Asynchronously evaluates product goal relevance against the persistent database evidence store.
- * Pre-fetches all claimed certification records from persistent storage into cache
- * before executing goal relevance rules.
+ * Asynchronously evaluates product goal relevance against the authoritative persistent database.
+ * Executes fresh authoritative Supabase lookups with cache bypass for all claimed certifications,
+ * and passes the freshly retrieved trusted records directly to the verification logic.
+ * If the authoritative lookup fails, returns no record, or cannot authenticate,
+ * the certification strictly fails closed and NEVER relies on stale cached records.
  */
 export async function evaluateProductGoalRelevanceAsync(
   product: ProductEvidence,
   goal: DecomposedGoal
 ): Promise<GoalRelevanceResult> {
+  const explicitOpsMap = new Map<string, AuditableVerificationOperation | null>()
+
   if (product.certifiedRecords && product.certifiedRecords.length > 0) {
     await Promise.all(
       product.certifiedRecords
         .filter((r): r is typeof r & { certificationId: string } => typeof r.certificationId === 'string' && r.certificationId.trim().length > 0)
-        .map(r => serverEvidenceStore.fetchRecordFromDatabase(r.certificationId.trim().toUpperCase()))
+        .map(async r => {
+          const normId = r.certificationId.trim().toUpperCase()
+          const op = await serverEvidenceStore.fetchRecordFromDatabase(normId, { bypassCache: true })
+          explicitOpsMap.set(normId, op)
+        })
     )
   }
-  return evaluateProductGoalRelevance(product, goal)
+
+  return evaluateProductGoalRelevance(product, goal, explicitOpsMap)
 }
 

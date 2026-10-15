@@ -207,13 +207,10 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
 
       if (error || !data) {
         if (error) console.warn(`[EvidenceStore] DB lookup error for ${normId}:`, error.message)
-        // If DB query returned no data, the record does not exist or was removed from authoritative database.
-        // Stale in-memory cache must NEVER override the authoritative database!
+        // If DB query returned no data or an error, authoritative DB is unreachable or lacks the record.
+        // Stale in-memory cache must NEVER override the authoritative database! Fail closed.
         VERIFIED_OPERATIONS_CACHE.delete(normId)
-        if (process.env.NODE_ENV === 'production') {
-          return null
-        }
-        return error ? this.getRecord(normId) : null
+        return null
       }
 
       const op: AuditableVerificationOperation = {
@@ -254,11 +251,8 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
       return op
     } catch (err: any) {
       console.warn(`[EvidenceStore] Database connection error: ${err.message}`)
-      if (process.env.NODE_ENV === 'production') {
-        VERIFIED_OPERATIONS_CACHE.delete(normId)
-        return null
-      }
-      return this.getRecord(normId)
+      VERIFIED_OPERATIONS_CACHE.delete(normId)
+      return null
     }
   }
 

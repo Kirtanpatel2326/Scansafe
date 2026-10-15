@@ -55,7 +55,7 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171 || id === 175 || id === 180) {
+    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171 || id === 175 || id === 180 || id === 185 || id === 190) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
@@ -130,7 +130,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 175 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 190 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -3378,9 +3378,151 @@ async function main() {
     assert(checkDirectSelect('service_role').success === true, 'service_role must have access')
   })
 
+  // ===========================================================================
+  // CATEGORY 14: Certification Consistency & Fail-Closed Multi-Instance (Scenarios 186 - 190)
+  // ===========================================================================
+  console.log('▶ Category 14: Certification Consistency & Fail-Closed Invariants (186 - 190)')
+
+  await runScenario(186, 'P0 Consistency 01: Failed database lookup with previously cached valid record fails closed as unauthenticated', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_cached_then_missing',
+      certificateId: 'CERT-CACHED-THEN-MISSING',
+      associatedProductId: 'product_cache_miss'
+    })
+    registerTestVerificationOperations([op])
+    const cert = createValidCert('product_cache_miss', { certificationId: 'CERT-CACHED-THEN-MISSING' })
+    const item = createItem({ id: 'product_cache_miss', certifiedRecords: [cert] })
+
+    // Verify it was present in test store
+    assert.ok(serverEvidenceStore.getRecord('CERT-CACHED-THEN-MISSING'))
+
+    // Authoritative lookup fails (returns null e.g. record deleted from DB)
+    const originalFetch = serverEvidenceStore.fetchRecordFromDatabase.bind(serverEvidenceStore)
+    serverEvidenceStore.fetchRecordFromDatabase = async () => null
+
+    try {
+      const res = await verifyClaimedCertificationAsync(cert, item)
+      assert.equal(res.authenticated, false, 'Failed database lookup must fail closed despite previous cache')
+      assert.ok(
+        res.invalidationReason?.includes('could not be confirmed in the authoritative database'),
+        'Must specify database confirmation failure'
+      )
+    } finally {
+      serverEvidenceStore.fetchRecordFromDatabase = originalFetch
+    }
+  })
+
+  await runScenario(187, 'P0 Consistency 02: Database connection outage / exception in fetchRecordFromDatabase purges cache and fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_db_outage',
+      certificateId: 'CERT-DB-OUTAGE',
+      associatedProductId: 'product_db_outage'
+    })
+    registerTestVerificationOperations([op])
+    const cert = createValidCert('product_db_outage', { certificationId: 'CERT-DB-OUTAGE' })
+    const item = createItem({ id: 'product_db_outage', certifiedRecords: [cert] })
+
+    const originalFetch = serverEvidenceStore.fetchRecordFromDatabase.bind(serverEvidenceStore)
+    serverEvidenceStore.fetchRecordFromDatabase = async () => {
+      // Outage or connection failure
+      return null
+    }
+
+    try {
+      const res = await verifyClaimedCertificationAsync(cert, item)
+      assert.equal(res.authenticated, false, 'DB outage must cause verification to fail closed')
+    } finally {
+      serverEvidenceStore.fetchRecordFromDatabase = originalFetch
+    }
+  })
+
+  await runScenario(188, 'P0 Consistency 03: Missing database credentials in production environment fails closed immediately', async () => {
+    const prevEnv = process.env.NODE_ENV
+    const prevUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const prevKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+    // Construct cert in test mode before simulating production environment
+    const cert = createValidCert('prod_item', { certificationId: 'CERT-PROD-UNCONFIG' })
+    const item = createItem({ id: 'prod_item', certifiedRecords: [cert] })
+
+    try {
+      (process.env as any).NODE_ENV = 'production'
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY
+
+      const lookupRes = await serverEvidenceStore.fetchRecordFromDatabase('CERT-ANY')
+      assert.equal(lookupRes, null, 'Production without database credentials must fail closed and return null')
+
+      const verifyRes = await verifyClaimedCertificationAsync(cert, item)
+      assert.equal(verifyRes.authenticated, false, 'Must fail closed when credentials missing in production')
+    } finally {
+      (process.env as any).NODE_ENV = prevEnv
+      if (prevUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = prevUrl
+      if (prevKey) process.env.SUPABASE_SERVICE_ROLE_KEY = prevKey
+    }
+  })
+
+  await runScenario(189, 'P0 Consistency 04: Direct verification passing explicitVerifiedOp = null strictly rejects certification despite valid attestation token', () => {
+    const cert = createValidCert('prod_token_valid', { certificationId: 'CERT-TOKEN-VALID' })
+    const item = createItem({ id: 'prod_token_valid', certifiedRecords: [cert] })
+    assert.ok(cert.serverAttestationToken, 'Cert has valid attestation token')
+
+    const directRes = verifyClaimedCertification(cert, item, null)
+    assert.equal(directRes.authenticated, false, 'Direct verification with null explicit op must fail closed')
+    assert.ok(
+      directRes.invalidationReason?.includes('Authoritative registry verification unavailable') &&
+      directRes.invalidationReason?.includes('An internal attestation signature cannot by itself establish independent certification authenticity'),
+      'Must cite authoritative database absence and reject internal signature as sole proof'
+    )
+  })
+
+  await runScenario(190, 'P0 Consistency 05: Multi-instance consistency: evaluateProductGoalRelevanceAsync detects Instance B revocation and excludes claim', async () => {
+    const { evaluateProductGoalRelevanceAsync, decomposeUserGoal } = await import('../lib/guardian-agent/orchestrator/goal-verifier')
+
+    // Initial active organic certificate in store
+    const activeOp = createTestVerificationOperation({
+      operationId: 'op_multi_inst_active',
+      certificateId: 'CERT-MULTI-ORG',
+      associatedProductId: 'prod_multi_inst',
+      standard: 'NOP_ORGANIC',
+      revocationStatus: 'ACTIVE'
+    })
+    registerTestVerificationOperations([activeOp])
+
+    const cert = createValidCert('prod_multi_inst', {
+      certificationId: 'CERT-MULTI-ORG',
+      standard: 'NOP_ORGANIC'
+    })
+    const item = createItem({
+      id: 'prod_multi_inst',
+      name: 'Organic Rolled Oats',
+      ingredients: 'organic rolled oats',
+      certifiedRecords: [cert]
+    })
+
+    const goal = decomposeUserGoal('Find certified organic oats', [])
+    const initialRes = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.equal(initialRes.attributeEvidence['organic']?.status, 'MATCH', 'Active cert should match organic attribute')
+
+    // Instance B revokes the certificate in the authoritative database
+    const revokedOp = createTestVerificationOperation({
+      operationId: 'op_multi_inst_revoked',
+      certificateId: 'CERT-MULTI-ORG',
+      associatedProductId: 'prod_multi_inst',
+      standard: 'NOP_ORGANIC',
+      revocationStatus: 'REVOKED'
+    })
+    registerTestVerificationOperations([revokedOp])
+
+    // Instance A re-evaluates asynchronously via evaluateProductGoalRelevanceAsync
+    const recheckRes = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.notEqual(recheckRes.attributeEvidence['organic']?.status, 'MATCH', 'Revoked certificate must NOT match organic attribute')
+    assert.equal(recheckRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW', 'Revoked cert must degrade to NEEDS_REVIEW')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 185`)
+  console.log(`   Passed: ${passedCount} / 190`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }
@@ -3389,3 +3531,4 @@ main().catch(err => {
   console.error('\n❌ Fatal benchmark runner error:', err)
   process.exit(1)
 })
+

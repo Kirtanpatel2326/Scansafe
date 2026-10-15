@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.11)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.12)
 
-**Document Version:** 8.11.0  
-**Last Updated:** 2026-10-15T08:15:00Z  
+**Document Version:** 8.12.0  
+**Last Updated:** 2026-10-15T08:35:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `dd73d3f` (V8.11 Release Completion & Multi-Instance Consistency)  
-**Vercel Preview URL:** `https://scansafe-o31d-bljqten2g-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 185/185 BENCHMARKS PASSED / 13/13 RLS PASSED  
+**Git Commit SHA:** `383fe79` (V8.12 Final Certification Consistency & Fail-Closed Invariants)  
+**Vercel Preview URL:** `https://scansafe-o31d-plwf8n6ke-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 190/190 BENCHMARKS PASSED / 13/13 RLS PASSED  
 
 ---
 
@@ -222,6 +222,12 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #183 | P0 Forgery 23: Async verification callers (`verifyClaimedCertificationAsync`) | Async database verification successfully authenticates | ✅ PASSED |
 | #184 | P0 Forgery 24: Public verification projection strips internal audit fields | `auditRecordHash`, `auditHistory`, `operationId` hidden | ✅ PASSED |
 | #185 | P0 Forgery 25: Direct raw SELECT denial on internal evidence table | `anon` / `authenticated` direct SELECT denied; safe RPC only | ✅ PASSED |
+| #186 | P0 Consistency 01: Failed database lookup with previously cached valid record | Fail closed: `authenticated: false` (stale cache purged) | ✅ PASSED |
+| #187 | P0 Consistency 02: Database connection outage / exception in `fetchRecordFromDatabase` | Fail closed: `authenticated: false` (cache purged) | ✅ PASSED |
+| #188 | P0 Consistency 03: Missing database credentials in production environment | Fail closed: `authenticated: false` without test fixtures | ✅ PASSED |
+| #189 | P0 Consistency 04: Direct verification passing `explicitVerifiedOp = null` | Fail closed: `authenticated: false` despite valid signature | ✅ PASSED |
+| #190 | P0 Consistency 05: Multi-instance consistency in `evaluateProductGoalRelevanceAsync` | Multi-instance revocation detected; claim degraded | ✅ PASSED |
+
 
 ---
 

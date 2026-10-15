@@ -3,7 +3,7 @@ import {
   ClaimedCertification,
   ProductEvidence
 } from './types'
-import { serverEvidenceStore } from './evidence-store'
+import { serverEvidenceStore, AuditableVerificationOperation } from './evidence-store'
 
 /**
  * Server-Controlled Certification Verification Service
@@ -341,7 +341,8 @@ export function verifyServerAttestation(
  */
 export function verifyClaimedCertification(
   record: ClaimedCertification,
-  product: ProductEvidence
+  product: ProductEvidence,
+  explicitVerifiedOp?: AuditableVerificationOperation | null
 ): {
   authenticated: boolean
   invalidationReason?: string
@@ -501,9 +502,9 @@ export function verifyClaimedCertification(
   // Requirement 2: Independently authenticated records must originate from a completed, auditable verification operation.
   // Requirement 5: Bind authenticated certification status to product identity, issuing authority, applicable standard,
   // evidence URL, validity dates, revocation status and a real verification record.
-  const verifiedOp = record.certificationId
-    ? serverEvidenceStore.getRecord(record.certificationId.trim().toUpperCase())
-    : null
+  const verifiedOp = explicitVerifiedOp !== undefined
+    ? explicitVerifiedOp
+    : (record.certificationId ? serverEvidenceStore.getRecord(record.certificationId.trim().toUpperCase()) : null)
 
   if (!verifiedOp) {
     return {
@@ -631,11 +632,24 @@ export async function verifyClaimedCertificationAsync(
   authenticated: boolean
   invalidationReason?: string
 }> {
-  if (record.certificationId) {
-    // Authoritative verification must query the persistent database with bypassCache: true
-    // to prevent stale cached evidence from overriding revoked or updated records across instances.
-    await serverEvidenceStore.fetchRecordFromDatabase(record.certificationId.trim().toUpperCase(), { bypassCache: true })
+  if (!record.certificationId) {
+    return verifyClaimedCertification(record, product, null)
   }
-  return verifyClaimedCertification(record, product)
+
+  const normId = record.certificationId.trim().toUpperCase()
+  // Fresh authoritative database lookup with cache bypass
+  const freshOp = await serverEvidenceStore.fetchRecordFromDatabase(normId, { bypassCache: true })
+
+  // If authoritative lookup fails, returns no record, or cannot authenticate:
+  // Fail closed immediately! Never rely on a previously cached record!
+  if (!freshOp) {
+    return {
+      authenticated: false,
+      invalidationReason: `Authoritative registry verification unavailable: Certificate ID "${record.certificationId}" could not be confirmed in the authoritative database.`
+    }
+  }
+
+  // Pass freshly retrieved trusted verification record directly into verification logic
+  return verifyClaimedCertification(record, product, freshOp)
 }
 
