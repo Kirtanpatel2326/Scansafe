@@ -273,6 +273,13 @@ try {
       rlsErrors++;
       issuesCount++;
     }
+    if (guardianContent.includes('guardian_certification_evidence enable row level security')) {
+      console.log(`  ${colors.green}✓${colors.reset} RLS is active on database table: ${colors.cyan}guardian_certification_evidence${colors.reset}`);
+    } else {
+      console.log(`  ${colors.red}✗${colors.reset} CRITICAL: Table "guardian_certification_evidence" does NOT enable ROW LEVEL SECURITY!`);
+      rlsErrors++;
+      issuesCount++;
+    }
   }
 } catch (e) {
   console.log(`  ${colors.yellow}!${colors.reset} WARNING: schema.sql database definitions file not found.`);

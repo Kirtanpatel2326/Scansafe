@@ -22,6 +22,9 @@ import {
   verifyServerAttestation,
   verifyClaimedCertification,
   isValidAttestationSecret,
+  validateAttestationKey,
+  generate256BitAttestationKey,
+  MAX_ATTESTATION_LIFETIME_MS,
   DEPRECATED_FALLBACK_SECRET
 } from '../lib/guardian-agent/orchestrator/certification-verifier'
 import {
@@ -30,6 +33,10 @@ import {
   initializeBenchmarkTestFixtures,
   clearTestVerificationOperations
 } from '../lib/guardian-agent/orchestrator/test-evidence-store'
+import {
+  serverEvidenceStore,
+  computeVerificationRecordHash
+} from '../lib/guardian-agent/orchestrator/evidence-store'
 
 // Setup verified test signing secret (64 characters)
 if (!process.env.GUARDIAN_ATTESTATION_SECRET) {
@@ -46,7 +53,7 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171 || id === 175) {
+    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171 || id === 175 || id === 180) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
@@ -3094,9 +3101,135 @@ async function main() {
     }
   })
 
+  await runScenario(176, 'P0 Forgery 16: Excessive token lifetimes (> 30 days) are strictly rejected', () => {
+    const cert = createValidCert('excessive_lifetime_item', { serverAttestationToken: 'placeholder' })
+    const now = Date.now()
+
+    // 1. Generation with excessive lifetime throws error
+    const excessiveExpiresAt = new Date(now + 45 * 24 * 60 * 60 * 1000).toISOString() // 45 days
+    assert.throws(() => {
+      generateServerAttestation({
+        ...cert,
+        attestationExpiresAt: excessiveExpiresAt
+      }, 'excessive_lifetime_item')
+    }, /Attestation lifetime exceeds maximum allowable limit of 30 days/i)
+
+    // 2. Verification of a token with > 30 days lifetime fails closed
+    const validLifetimeExpiresAt = new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString()
+    const validToken = generateServerAttestation({
+      ...cert,
+      attestationExpiresAt: validLifetimeExpiresAt
+    }, 'excessive_lifetime_item')
+    assert.equal(verifyServerAttestation({ ...cert, serverAttestationToken: validToken }, 'excessive_lifetime_item'), true)
+
+    // Tampered token claiming 60 days lifetime fails closed in verifyServerAttestation
+    const tamperedExcessiveExpiresAt = new Date(now + 60 * 24 * 60 * 60 * 1000).toISOString()
+    const tamperedExcessiveToken = `v1.k1.${tamperedExcessiveExpiresAt}.abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890`
+    assert.equal(verifyServerAttestation({ ...cert, serverAttestationToken: tamperedExcessiveToken }, 'excessive_lifetime_item'), false)
+  })
+
+  await runScenario(177, 'P0 Forgery 17: Malformed or unauthorized key identifiers (kid) fail closed', () => {
+    const cert = createValidCert('kid_test_item', { serverAttestationToken: 'placeholder' })
+
+    // 1. Generation with malformed kid throws
+    assert.throws(() => {
+      generateServerAttestation({
+        ...cert,
+        attestationKid: 'invalid kid with spaces!'
+      }, 'kid_test_item')
+    }, /Invalid key identifier/i)
+
+    // 2. Token with unknown kid fails closed in verifyServerAttestation
+    const expiresAt = new Date(Date.now() + 86400000).toISOString()
+    const unknownKidToken = `v1.unknown_key_999.${expiresAt}.abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890`
+    assert.equal(verifyServerAttestation({ ...cert, serverAttestationToken: unknownKidToken }, 'kid_test_item'), false)
+  })
+
+  await runScenario(178, 'P0 Forgery 18: Unauthorized database changes and audit hash tampering fail closed', () => {
+    // Construct a genuine auditable record
+    const genuineOp = createTestVerificationOperation({
+      certificateId: 'TAMPER-TEST-01',
+      issuingAuthority: 'Independent Standards Registry',
+      standard: 'ORGANIC',
+      associatedProductId: 'tamper_test_prod',
+      evidenceUrl: 'https://registry.standards.org/verify/tamper-01'
+    })
+    registerTestVerificationOperations([genuineOp])
+
+    const item = createItem({ id: 'tamper_test_prod' })
+    const cert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'TAMPER-TEST-01',
+      associatedProductId: 'tamper_test_prod',
+      evidenceUrl: 'https://registry.standards.org/verify/tamper-01',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+
+    // Unmodified record verifies
+    const initialVerification = verifyClaimedCertification(cert, item)
+    assert.equal(initialVerification.authenticated, true)
+
+    // Attacker modifies associatedProductId or standard in database without valid auditRecordHash
+    const tamperedOp = {
+      ...genuineOp,
+      standard: 'GLUTEN_FREE' // Changed without re-signing auditRecordHash
+    }
+    // Hash check fails
+    assert.notEqual(computeVerificationRecordHash(tamperedOp), tamperedOp.auditRecordHash)
+
+    // Store rejects tampered record on lookup
+    registerTestVerificationOperations([tamperedOp])
+    const tamperedLookup = serverEvidenceStore.getRecord('TAMPER-TEST-01')
+    assert.equal(tamperedLookup, null, 'Tampered record must return null on store retrieval')
+  })
+
+  await runScenario(179, 'P0 Forgery 19: 256-bit key explicit encoding and validation', () => {
+    // 1. Hexadecimal 64-char key (256 bits)
+    const hexKey = generate256BitAttestationKey('hex')
+    const hexVal = validateAttestationKey(hexKey)
+    assert.equal(hexVal.valid, true)
+    assert.equal(hexVal.encoding, 'hex')
+    assert.equal(hexVal.bitLength, 256)
+
+    // 2. Base64 44-char key (256 bits)
+    const b64Key = generate256BitAttestationKey('base64')
+    const b64Val = validateAttestationKey(b64Key)
+    assert.equal(b64Val.valid, true)
+    assert.equal(b64Val.encoding, 'base64')
+    assert.ok(b64Val.bitLength! >= 256)
+
+    // 3. Short key (< 256 bits)
+    const shortVal = validateAttestationKey('short_key_under_32_bytes')
+    assert.equal(shortVal.valid, false)
+    assert.ok(shortVal.reason?.includes('below the required 256-bit minimum'))
+
+    // 4. Deprecated fallback key
+    const depVal = validateAttestationKey(DEPRECATED_FALLBACK_SECRET)
+    assert.equal(depVal.valid, false)
+    assert.ok(depVal.reason?.includes('Deprecated fallback secret is strictly prohibited'))
+  })
+
+  await runScenario(180, 'P0 Forgery 20: Stolen token presented for different product fails closed in attestation verification', () => {
+    const certA = createValidCert('product_legit_A', { serverAttestationToken: 'placeholder' })
+    const tokenA = generateServerAttestation(certA, 'product_legit_A')
+
+    // Attacker attempts to attach tokenA to product_stolen_B
+    const certB = { ...certA, associatedProductId: 'product_stolen_B', serverAttestationToken: tokenA }
+    const res = verifyServerAttestation(certB, 'product_stolen_B')
+    assert.equal(res, false, 'Token bound to product A must fail closed when verified for product B')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 175`)
+  console.log(`   Passed: ${passedCount} / 180`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

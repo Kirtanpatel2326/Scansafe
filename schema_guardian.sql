@@ -198,4 +198,58 @@ grant execute on function public.guardian_consume_rate_limit(text, integer, inte
 grant execute on function public.guardian_acquire_concurrency_lease(text, integer, integer) to service_role;
 grant execute on function public.guardian_release_concurrency_lease(uuid) to service_role;
 
+-- ======================================================================
+-- 4. PROTECTED CERTIFICATION EVIDENCE STORE
+-- ======================================================================
+create table if not exists public.guardian_certification_evidence (
+  id uuid primary key default gen_random_uuid(),
+  certificate_id text not null,
+  associated_product_id text not null,
+  issuing_authority text not null,
+  standard text not null,
+  evidence_url text not null,
+  brand text,
+  valid_from timestamptz not null,
+  valid_until timestamptz not null,
+  revocation_status text not null check (revocation_status in ('ACTIVE', 'REVOKED', 'EXPIRED')) default 'ACTIVE',
+  revocation_checked_at timestamptz not null default now(),
+  verification_method text not null check (verification_method in ('REGISTRY_LOOKUP_AUTHENTICATED', 'EXTERNAL_STANDARDS_VERIFIER')),
+  authoritative_source text not null,
+  operation_id text not null unique,
+  verified_at timestamptz not null default now(),
+  audit_record_hash text not null,
+  audit_history jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists guardian_cert_evidence_lookup_idx 
+  on public.guardian_certification_evidence(upper(trim(certificate_id)), trim(associated_product_id));
+create index if not exists guardian_cert_evidence_cert_idx 
+  on public.guardian_certification_evidence(upper(trim(certificate_id)));
+create index if not exists guardian_cert_evidence_product_idx 
+  on public.guardian_certification_evidence(trim(associated_product_id));
+
+alter table public.guardian_certification_evidence enable row level security;
+
+revoke all on public.guardian_certification_evidence from public, anon, authenticated;
+grant select on public.guardian_certification_evidence to authenticated;
+grant all on public.guardian_certification_evidence to service_role;
+
+drop policy if exists guardian_cert_evidence_read_auth on public.guardian_certification_evidence;
+create policy guardian_cert_evidence_read_auth on public.guardian_certification_evidence 
+  for select to authenticated using (true);
+
+drop policy if exists guardian_cert_evidence_no_user_insert on public.guardian_certification_evidence;
+create policy guardian_cert_evidence_no_user_insert on public.guardian_certification_evidence 
+  for insert to authenticated with check (false);
+
+drop policy if exists guardian_cert_evidence_no_user_update on public.guardian_certification_evidence;
+create policy guardian_cert_evidence_no_user_update on public.guardian_certification_evidence 
+  for update to authenticated using (false);
+
+drop policy if exists guardian_cert_evidence_no_user_delete on public.guardian_certification_evidence;
+create policy guardian_cert_evidence_no_user_delete on public.guardian_certification_evidence 
+  for delete to authenticated using (false);
+
 

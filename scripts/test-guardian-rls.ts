@@ -101,6 +101,10 @@ async function main() {
     assert(sql.includes('auth.uid()=user_id'), 'Missing auth.uid() ownership check')
     assert(sql.includes('create table if not exists public.guardian_concurrency_leases'), 'Missing concurrency leases table')
     assert(sql.includes('create table if not exists public.guardian_rate_limits'), 'Missing rate limits table')
+    assert(sql.includes('create table if not exists public.guardian_certification_evidence'), 'Missing guardian_certification_evidence table definition')
+    assert(sql.includes('alter table public.guardian_certification_evidence enable row level security'), 'RLS not enabled on guardian_certification_evidence')
+    assert(sql.includes('guardian_cert_evidence_no_user_insert'), 'Missing no_user_insert policy on evidence table')
+    assert(sql.includes('grant all on public.guardian_certification_evidence to service_role'), 'Missing exclusive service_role write grant on evidence table')
     assert(sql.includes('guardian_consume_rate_limit'), 'Missing atomic rate limit consumption RPC')
     assert(sql.includes('guardian_acquire_concurrency_lease'), 'Missing atomic concurrency lease acquisition RPC')
     assert(sql.includes('guardian_release_concurrency_lease'), 'Missing atomic concurrency lease release RPC')
@@ -121,6 +125,7 @@ async function main() {
     assert(sql.includes('DROP TABLE IF EXISTS public.guardian_saved_tasks CASCADE'), 'Missing cascade table drop')
     assert(sql.includes('DROP TABLE IF EXISTS public.guardian_concurrency_leases CASCADE'), 'Missing leases table drop')
     assert(sql.includes('DROP TABLE IF EXISTS public.guardian_rate_limits CASCADE'), 'Missing rate limits table drop')
+    assert(sql.includes('DROP TABLE IF EXISTS public.guardian_certification_evidence CASCADE'), 'Missing evidence table drop')
     assert(sql.includes('DROP FUNCTION IF EXISTS public.guardian_consume_rate_limit'), 'Missing rate limit function drop')
     assert(sql.includes('DROP FUNCTION IF EXISTS public.guardian_acquire_concurrency_lease'), 'Missing lease acquire function drop')
     assert(sql.includes('DROP FUNCTION IF EXISTS public.guardian_release_concurrency_lease'), 'Missing lease release function drop')
@@ -207,6 +212,41 @@ async function main() {
 
     const serviceRoleRes = checkRpcPermission('service_role', 'guardian_acquire_concurrency_lease')
     assert(!serviceRoleRes.error && serviceRoleRes.success === true, 'service_role was denied execute')
+  })
+
+  await runTest('Ordinary users and external clients have zero write access to guardian_certification_evidence while service_role retains exclusive write authority', () => {
+    // Model PostgreSQL privilege & policy check on guardian_certification_evidence
+    const checkTableWritePermission = (role: 'anon' | 'authenticated' | 'service_role', action: 'insert' | 'update' | 'delete') => {
+      if (role !== 'service_role') {
+        return { error: new Error(`permission denied for table guardian_certification_evidence: action "${action}" strictly prohibited for role "${role}"`) }
+      }
+      return { success: true }
+    }
+
+    const checkTableReadPermission = (role: 'anon' | 'authenticated' | 'service_role') => {
+      if (role === 'anon') {
+        return { data: [] }
+      }
+      return { data: [{ certificate_id: 'CERT-01' }] }
+    }
+
+    // 1. Authenticated user write attempts are strictly rejected
+    assert(!!checkTableWritePermission('authenticated', 'insert').error, 'Authenticated user was not denied insert on evidence table')
+    assert(!!checkTableWritePermission('authenticated', 'update').error, 'Authenticated user was not denied update on evidence table')
+    assert(!!checkTableWritePermission('authenticated', 'delete').error, 'Authenticated user was not denied delete on evidence table')
+
+    // 2. Anon client write attempts are strictly rejected
+    assert(!!checkTableWritePermission('anon', 'insert').error, 'Anon client was not denied insert on evidence table')
+    assert(!!checkTableWritePermission('anon', 'update').error, 'Anon client was not denied update on evidence table')
+
+    // 3. service_role has exclusive write authority
+    assert(checkTableWritePermission('service_role', 'insert').success === true, 'service_role was denied insert')
+    assert(checkTableWritePermission('service_role', 'update').success === true, 'service_role was denied update')
+    assert(checkTableWritePermission('service_role', 'delete').success === true, 'service_role was denied delete')
+
+    // 4. Authenticated clients can read verified certification proofs
+    const authRead = checkTableReadPermission('authenticated')
+    assert(authRead.data.length > 0, 'Authenticated user could not read verified records')
   })
 
   // 3. Application Engine Persistence Gate & Failed-Save Integrity

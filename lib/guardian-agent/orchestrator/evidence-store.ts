@@ -1,10 +1,13 @@
 import crypto from 'node:crypto'
+import { createAdminClient } from '@/lib/supabase-server'
 
 /**
  * Auditable Verification Operation Record
  *
  * Represents a completed, cryptographically sealed verification operation
  * performed by the server against an authoritative registry or verified audit source.
+ * Preserves verification provenance, timestamps, certificate identity, issuing authority,
+ * applicable standard, product binding, validity, revocation status, and audit history.
  */
 export interface AuditableVerificationOperation {
   operationId: string
@@ -22,6 +25,13 @@ export interface AuditableVerificationOperation {
   revocationCheckedAt: string
   revocationStatus: 'ACTIVE' | 'REVOKED' | 'EXPIRED'
   auditRecordHash: string // SHA-256 integrity hash of this record
+  auditHistory?: Array<{
+    timestamp: string
+    action: string
+    previousHash?: string
+    actor?: string
+    details?: string
+  }>
 }
 
 /**
@@ -52,8 +62,9 @@ export function computeVerificationRecordHash(
 
 /**
  * Interface for the Protected Server-Controlled Evidence Store.
- * In production, this store is read-only and backed by verified database records.
- * Arbitrary runtime injection of authoritative certification records is strictly prohibited.
+ * In production, this store is backed by persistent database records.
+ * Only authorized server-side workflows (service_role) may insert or update records.
+ * Ordinary users and external providers have zero write access.
  */
 export interface IServerControlledEvidenceStore {
   getRecord(certificateId: string): AuditableVerificationOperation | null
@@ -61,6 +72,8 @@ export interface IServerControlledEvidenceStore {
     certificateId: string,
     productId: string
   ): AuditableVerificationOperation | null
+  fetchRecordFromDatabase(certificateId: string): Promise<AuditableVerificationOperation | null>
+  recordVerifiedOperation(op: AuditableVerificationOperation): Promise<void>
 }
 
 /**
@@ -77,6 +90,7 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
   /**
    * Retrieves an auditable verification operation record by certificate ID.
    * Performs cryptographic hash integrity verification on retrieval.
+   * Never treats a stored hash as proof of certification; only as an anti-tamper check.
    */
   public getRecord(certificateId: string): AuditableVerificationOperation | null {
     if (!certificateId) return null
@@ -84,7 +98,7 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
     const record = VERIFIED_OPERATIONS_STORE.get(key)
     if (!record) return null
 
-    // 1. Audit record cryptographic hash integrity check
+    // 1. Audit record cryptographic hash integrity check (anti-tamper)
     const expectedHash = computeVerificationRecordHash(record)
     if (record.auditRecordHash !== expectedHash) {
       console.error(`[EvidenceStore] Integrity violation: Audit record hash mismatch for cert ${certificateId}`)
@@ -116,6 +130,115 @@ export class ServerControlledEvidenceStore implements IServerControlledEvidenceS
     }
 
     return record
+  }
+
+  /**
+   * Asynchronously loads a verified certification evidence record from the persistent Supabase database.
+   * Validates cryptographic hash integrity upon loading.
+   */
+  public async fetchRecordFromDatabase(certificateId: string): Promise<AuditableVerificationOperation | null> {
+    if (!certificateId) return null
+    const normId = certificateId.trim().toUpperCase()
+
+    const hasDb = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+    if (!hasDb) {
+      return this.getRecord(normId)
+    }
+
+    try {
+      const admin = createAdminClient()
+      const { data, error } = await admin
+        .from('guardian_certification_evidence')
+        .select('*')
+        .eq('certificate_id', normId)
+        .maybeSingle()
+
+      if (error || !data) {
+        if (error) console.warn(`[EvidenceStore] DB lookup error for ${normId}:`, error.message)
+        return this.getRecord(normId)
+      }
+
+      const op: AuditableVerificationOperation = {
+        operationId: data.operation_id,
+        timestamp: data.verified_at || data.created_at,
+        verificationMethod: data.verification_method,
+        authoritativeSource: data.authoritative_source,
+        certificateId: data.certificate_id,
+        issuingAuthority: data.issuing_authority,
+        standard: data.standard,
+        evidenceUrl: data.evidence_url,
+        associatedProductId: data.associated_product_id,
+        brand: data.brand || undefined,
+        validFrom: data.valid_from,
+        validUntil: data.valid_until,
+        revocationCheckedAt: data.revocation_checked_at,
+        revocationStatus: data.revocation_status,
+        auditRecordHash: data.audit_record_hash,
+        auditHistory: data.audit_history || []
+      }
+
+      // Verify cryptographic anti-tamper hash
+      const expectedHash = computeVerificationRecordHash(op)
+      if (expectedHash !== op.auditRecordHash) {
+        console.error(`[EvidenceStore] Database tamper violation: Hash mismatch for cert ${normId}`)
+        return null
+      }
+
+      // Cache verified record for fast synchronous verification
+      VERIFIED_OPERATIONS_STORE.set(normId, Object.freeze(op))
+      return op
+    } catch (err: any) {
+      console.warn(`[EvidenceStore] Database connection error: ${err.message}`)
+      return this.getRecord(normId)
+    }
+  }
+
+  /**
+   * Persists an authenticated verification operation to the database.
+   * Only authorized server-side workflows equipped with service_role credentials may invoke this.
+   */
+  public async recordVerifiedOperation(op: AuditableVerificationOperation): Promise<void> {
+    const expectedHash = computeVerificationRecordHash(op)
+    if (op.auditRecordHash !== expectedHash) {
+      throw new Error(`IntegrityError: Audit record hash mismatch. Expected ${expectedHash}, got ${op.auditRecordHash}`)
+    }
+
+    const normId = op.certificateId.trim().toUpperCase()
+    const hasDb = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+
+    if (hasDb) {
+      const admin = createAdminClient()
+      const { error } = await admin
+        .from('guardian_certification_evidence')
+        .upsert(
+          {
+            operation_id: op.operationId,
+            certificate_id: normId,
+            associated_product_id: op.associatedProductId.trim(),
+            issuing_authority: op.issuingAuthority.trim(),
+            standard: op.standard.trim().toUpperCase(),
+            evidence_url: op.evidenceUrl.trim(),
+            brand: op.brand ? op.brand.trim() : null,
+            valid_from: op.validFrom,
+            valid_until: op.validUntil,
+            revocation_status: op.revocationStatus,
+            revocation_checked_at: op.revocationCheckedAt,
+            verification_method: op.verificationMethod,
+            authoritative_source: op.authoritativeSource,
+            verified_at: op.timestamp,
+            audit_record_hash: op.auditRecordHash,
+            audit_history: op.auditHistory || [],
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'operation_id' }
+        )
+
+      if (error) {
+        throw new Error(`Database error saving verification evidence: ${error.message}`)
+      }
+    }
+
+    VERIFIED_OPERATIONS_STORE.set(normId, Object.freeze({ ...op }))
   }
 }
 

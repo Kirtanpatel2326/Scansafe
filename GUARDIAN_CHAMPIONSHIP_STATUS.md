@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.8)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.9)
 
-**Document Version:** 8.8.0  
-**Last Updated:** 2026-10-15T06:40:00Z  
+**Document Version:** 8.9.0  
+**Last Updated:** 2026-10-15T07:28:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `c14d872` (V8.8 Protected Evidence Store & Final Release Hardening)  
+**Git Commit SHA:** `Pending Commit (V8.9 Production Evidence Store & Key Hardening)`  
 **Vercel Preview URL:** `https://scansafe-o31d-izcksh52v-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 175/175 BENCHMARKS PASSED  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 180/180 BENCHMARKS PASSED  
 
 ---
 
@@ -157,10 +157,10 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 171 championship scenarios (incl. 34 adversarial, anti-forgery & category tests) | **171 / 171 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:benchmarks` | 180 championship scenarios (incl. 48 adversarial, anti-forgery, key & store tests) | **180 / 180 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **25 / 25 passed (0 failed)** | 100% |
-| `npm run test:guardian:rls` | RLS isolation & privilege denial | 9 / 9 passed | 100% |
-| `npm run security-audit` | API keys, error handlers & RLS | 0 critical, 0 warnings | 100% |
+| `npm run test:guardian:rls` | RLS isolation, privilege denial & evidence store policies | 10 / 10 passed | 100% |
+| `npm run security-audit` | API keys, error handlers & RLS on all 10 tables | 0 critical, 0 warnings | 100% |
 | `npm run build` | Next.js production build | 43 / 43 routes compiled successfully | 100% |
 
 ---
@@ -212,6 +212,11 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #173 | P0 Forgery 13: Valid internal signature alone without verification record | Signature alone cannot establish authenticity -> `NEEDS_REVIEW` | ✅ PASSED |
 | #174 | P0 Forgery 14: Low-entropy or trivial attestation secrets | Minimum 32 chars and >=8 unique chars required | ✅ PASSED |
 | #175 | P0 Forgery 15: Production runtime prohibits test fixture injection | Runtime `NODE_ENV === 'production'` throws `SecurityError` | ✅ PASSED |
+| #176 | P0 Forgery 16: Excessive attestation token lifetime (> 30 days) | Rejected on generation and verification | ✅ PASSED |
+| #177 | P0 Forgery 17: Malformed or unapproved key identifier (`kid`) | Regex rejection `/^[a-zA-Z0-9_\-]{1,64}$/` -> fails closed | ✅ PASSED |
+| #178 | P0 Forgery 18: Database tampering & audit record hash mismatch | SHA-256 tamper-evident check fails closed | ✅ PASSED |
+| #179 | P0 Forgery 19: Explicit 256-bit key encoding (hex, base64) & entropy validation | Hex, base64, and utf8 explicit decoding enforced | ✅ PASSED |
+| #180 | P0 Forgery 20: Stolen token replay for different product | Binding check fails closed -> `NEEDS_REVIEW` | ✅ PASSED |
 
 ---
 

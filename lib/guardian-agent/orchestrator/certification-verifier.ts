@@ -65,9 +65,28 @@ export const DEPRECATED_FALLBACK_STRING = Buffer.from(
 ).toString('utf8')
 export const DEPRECATED_FALLBACK_SECRET = DEPRECATED_FALLBACK_STRING
 
+export const MAX_ATTESTATION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000 // 30 days maximum
+export const DEFAULT_ATTESTATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+export const MIN_ATTESTATION_LIFETIME_MS = 60 * 1000 // 1 minute
+export const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000 // 5 minutes
+
+export interface KeyValidationResult {
+  valid: boolean
+  encoding?: 'hex' | 'base64' | 'utf8'
+  bitLength?: number
+  reason?: string
+}
+
 /**
- * Validates whether a secret key meets strict cryptographic requirements:
- * 1. Must be a valid string of minimum 32 characters (256 bits).
+ * Generates a cryptographically secure 256-bit (32-byte) attestation secret.
+ */
+export function generate256BitAttestationKey(encoding: 'hex' | 'base64' = 'hex'): string {
+  return crypto.randomBytes(32).toString(encoding)
+}
+
+/**
+ * Validates whether a secret key meets strict 256-bit cryptographic requirements:
+ * 1. Must be a valid string of minimum 32 bytes (256 bits).
  * 2. Strictly rejects known deprecated or fallback secrets.
  * 3. High-entropy check: requires at least 8 unique characters, preventing repeating or trivial keys.
  *
@@ -75,31 +94,84 @@ export const DEPRECATED_FALLBACK_SECRET = DEPRECATED_FALLBACK_STRING
  * Key Rotation: Supported across active key (GUARDIAN_ATTESTATION_KID) and previous key (GUARDIAN_ATTESTATION_SECRET_PREVIOUS).
  * Key Expiry: Enforced per-token through ISO expiresAt timestamp (max 30 days).
  */
-export function isValidAttestationSecret(secret?: string | null): boolean {
-  if (!secret || typeof secret !== 'string') return false
+export function validateAttestationKey(secret?: string | null): KeyValidationResult {
+  if (!secret || typeof secret !== 'string') {
+    return { valid: false, reason: 'Key is missing or not a string' }
+  }
   const trimmed = secret.trim()
-  if (trimmed.length < 32) return false
-  if (trimmed === DEPRECATED_FALLBACK_SECRET) return false
+  if (trimmed === DEPRECATED_FALLBACK_SECRET) {
+    return { valid: false, reason: 'Deprecated fallback secret is strictly prohibited' }
+  }
+
+  // Detect encoding and bit-length
+  let encoding: 'hex' | 'base64' | 'utf8' = 'utf8'
+  let byteLength = Buffer.byteLength(trimmed, 'utf8')
+
+  const isHex = /^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0
+  if (isHex && trimmed.length >= 64) {
+    encoding = 'hex'
+    byteLength = trimmed.length / 2
+  } else if (/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) && trimmed.length >= 43) {
+    try {
+      const decoded = Buffer.from(trimmed, 'base64')
+      if (decoded.length >= 32) {
+        encoding = 'base64'
+        byteLength = decoded.length
+      }
+    } catch {
+      // fallback to utf8
+    }
+  }
+
+  const bitLength = byteLength * 8
+  if (bitLength < 256) {
+    return {
+      valid: false,
+      reason: `Key strength (${bitLength} bits) is below the required 256-bit minimum (32 bytes).`
+    }
+  }
 
   // High-entropy validation: require at least 8 distinct characters
   const uniqueChars = new Set(trimmed)
-  if (uniqueChars.size < 8) return false
+  if (uniqueChars.size < 8) {
+    return {
+      valid: false,
+      reason: `Key entropy is insufficient: contains only ${uniqueChars.size} unique characters (minimum 8 required).`
+    }
+  }
 
-  return true
+  // Pattern repetition check (e.g. repeating patterns "12121212..." or "abcdefghabcdefgh...")
+  const half = Math.floor(trimmed.length / 2)
+  if (trimmed.length >= 16 && trimmed.slice(0, half) === trimmed.slice(half, half * 2)) {
+    return {
+      valid: false,
+      reason: 'Key contains repeating pattern and fails entropy verification.'
+    }
+  }
+
+  return { valid: true, encoding, bitLength }
+}
+
+export function isValidAttestationSecret(secret?: string | null): boolean {
+  return validateAttestationKey(secret).valid
 }
 
 /**
  * Retrieves the active server attestation signing key.
- * Throws if the key is missing, below 32 chars, or uses the blacklisted fallback secret.
+ * Throws if the key is missing, below 256 bits, or uses the blacklisted fallback secret.
  */
 export function getActiveAttestationSecret(): { secret: string; kid: string } {
   const secret = process.env.GUARDIAN_ATTESTATION_SECRET
-  if (!isValidAttestationSecret(secret)) {
+  const validation = validateAttestationKey(secret)
+  if (!validation.valid) {
     throw new Error(
-      'Server attestation signing key is not configured or fails cryptographic strength requirements (minimum 32 characters, non-deprecated).'
+      `Server attestation signing key is not configured or fails cryptographic strength requirements (minimum 256 bits, non-deprecated): ${validation.reason || ''}`
     )
   }
   const kid = (process.env.GUARDIAN_ATTESTATION_KID || 'k1').trim()
+  if (!/^[a-zA-Z0-9_\-]{1,64}$/.test(kid)) {
+    throw new Error(`Invalid key identifier (kid): "${kid}". Must match ^[a-zA-Z0-9_-]{1,64}$`)
+  }
   return { secret: secret!.trim(), kid }
 }
 
@@ -124,9 +196,30 @@ export function generateServerAttestation(
 ): string {
   const { secret, kid: defaultKid } = getActiveAttestationSecret()
   const kid = cert.attestationKid ? cert.attestationKid.trim() : defaultKid
-  const expiresAt = cert.attestationExpiresAt
-    ? cert.attestationExpiresAt.trim()
-    : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  if (!/^[a-zA-Z0-9_\-]{1,64}$/.test(kid)) {
+    throw new Error(`Invalid key identifier (kid): "${kid}"`)
+  }
+
+  const now = Date.now()
+  let expiresAt: string
+  if (cert.attestationExpiresAt) {
+    const customExpires = cert.attestationExpiresAt.trim()
+    const expNum = Number(customExpires)
+    const expiresMs = (!Number.isNaN(expNum) && Number.isFinite(expNum))
+      ? (expNum > 1e11 ? expNum : expNum * 1000)
+      : Date.parse(customExpires)
+
+    if (Number.isNaN(expiresMs)) {
+      throw new Error(`Invalid attestation expiration date: "${customExpires}"`)
+    }
+    const lifetimeMs = expiresMs - now
+    if (lifetimeMs > MAX_ATTESTATION_LIFETIME_MS) {
+      throw new Error(`Attestation lifetime exceeds maximum allowable limit of 30 days (${Math.round(lifetimeMs / 86400000)} days requested)`)
+    }
+    expiresAt = new Date(expiresMs).toISOString()
+  } else {
+    expiresAt = new Date(now + DEFAULT_ATTESTATION_LIFETIME_MS).toISOString()
+  }
 
   const payload = [
     'v1',
@@ -176,7 +269,12 @@ export function verifyServerAttestation(
     const expiresAt = token.slice(secondDot + 1, lastDot).trim()
     const tokenHmac = token.slice(lastDot + 1).trim()
 
-    // Verify token expiration
+    // Key identifier format check
+    if (!/^[a-zA-Z0-9_\-]{1,64}$/.test(kid)) {
+      return false
+    }
+
+    // Verify token expiration & maximum lifetime range
     const expNum = Number(expiresAt)
     let expiresMs: number
     if (!Number.isNaN(expNum) && Number.isFinite(expNum)) {
@@ -185,7 +283,18 @@ export function verifyServerAttestation(
       expiresMs = Date.parse(expiresAt)
     }
 
-    if (Number.isNaN(expiresMs) || expiresMs < Date.now()) {
+    if (Number.isNaN(expiresMs)) {
+      return false
+    }
+
+    const now = Date.now()
+    // Rejection of expired tokens (with 5 min clock skew tolerance)
+    if (expiresMs < now - MAX_CLOCK_SKEW_MS) {
+      return false
+    }
+
+    // Rejection of excessive lifetimes (> 30 days + clock skew)
+    if (expiresMs > now + MAX_ATTESTATION_LIFETIME_MS + MAX_CLOCK_SKEW_MS) {
       return false
     }
 
