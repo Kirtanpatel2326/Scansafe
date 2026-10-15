@@ -5,7 +5,7 @@
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
 **Git Commit SHA:** `9a6112e` (V8.9 Production Evidence Store & Key Hardening)  
-**Vercel Preview URL:** `https://scansafe-o31d-izcksh52v-kirtanpatel2326s-projects.vercel.app`  
+**Vercel Preview URL:** `https://scansafe-o31d-hcozrrkk4-kirtanpatel2326s-projects.vercel.app`  
 **Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 180/180 BENCHMARKS PASSED  
 
 ---
