@@ -78,8 +78,11 @@ export type DecomposedGoal = z.infer<typeof DecomposedGoalSchema>
 
 export const CertificationProvenanceLevelEnum = z.enum([
   'UNVERIFIED_PRODUCT_METADATA',
+  'UNVERIFIED_METADATA',
   'USER_UPLOADED_LABEL_EVIDENCE',
+  'PRODUCT_LABEL_DECLARATION',
   'MANUFACTURER_SELF_DECLARED',
+  'MANUFACTURER_DECLARATION',
   'DOCUMENTED_THIRD_PARTY_CLAIM',
   'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION'
 ])
@@ -109,6 +112,7 @@ export const ClaimedCertificationSchema = z.object({
   certificationId: z.string().trim().max(100).optional(),
   associatedProductId: z.string().trim().min(1).max(100),
   brand: z.string().trim().max(100).optional(),
+  barcode: z.string().trim().max(100).optional(),
   evidenceUrl: z.string().max(1000).optional(),
   observedAt: z.string(),
   verifiedAt: z.string().optional(),
@@ -116,11 +120,14 @@ export const ClaimedCertificationSchema = z.object({
   validUntil: z.string().optional(),
   verificationMethod: VerificationMethodEnum.default('UNVERIFIED_TEXT_MATCH'),
   provenanceLevel: CertificationProvenanceLevelEnum.default('UNVERIFIED_PRODUCT_METADATA'),
+  verificationOperator: z.string().trim().max(100).optional(),
   standard: z.string().optional(),
   status: CertificationStatusEnum.default('UNVERIFIED'),
   registryConfirmed: z.boolean().default(false),
   isRevoked: z.boolean().default(false).optional(),
   serverAttestationToken: z.string().optional(),
+  attestationKid: z.string().trim().max(50).optional(),
+  attestationExpiresAt: z.string().optional(),
   registryId: z.string().optional(),
   notes: z.string().optional()
 })
@@ -227,12 +234,27 @@ export const AgentExecutionModeEnum = z.enum([
 ])
 export type AgentExecutionMode = z.infer<typeof AgentExecutionModeEnum>
 
+export const TaskStateEnum = z.enum([
+  'PLANNING',
+  'RESEARCHING',
+  'VERIFYING',
+  'REPLANNING',
+  'AWAITING_APPROVAL',
+  'COMPLETED',
+  'PARTIAL',
+  'INSUFFICIENT_EVIDENCE',
+  'FAILED',
+  'CANCELLED'
+])
+export type TaskState = z.infer<typeof TaskStateEnum>
+
 export const AutonomousAgentResponseSchema = z.object({
   runId: z.string().uuid(),
   createdAt: z.string(),
   elapsedMs: z.number().nonnegative(),
   mode: AgentExecutionModeEnum,
   goal: z.string(),
+  taskState: TaskStateEnum.default('COMPLETED'),
   decomposedGoal: DecomposedGoalSchema.optional(),
   sourceMode: z.enum([
     'USER_SUPPLIED_EVIDENCE_ONLY',

@@ -13,10 +13,55 @@
  */
 
 import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
 import { evaluateDeterministicSafety, COMPREHENSIVE_ALLERGEN_ALIASES } from '../lib/guardian-agent/orchestrator/verifier'
 import { runGuardianAutonomousAgent } from '../lib/guardian-agent/orchestrator/engine'
 import { ProductEvidence, Constraint, ClaimedCertification } from '../lib/guardian-agent/orchestrator/types'
-import { generateServerAttestation } from '../lib/guardian-agent/orchestrator/certification-verifier'
+import {
+  generateServerAttestation,
+  verifyServerAttestation,
+  registerTestAuthoritativeCertificates,
+  DEPRECATED_FALLBACK_SECRET
+} from '../lib/guardian-agent/orchestrator/certification-verifier'
+
+// Setup verified test signing secret (64 characters)
+if (!process.env.GUARDIAN_ATTESTATION_SECRET) {
+  process.env.GUARDIAN_ATTESTATION_SECRET = '6c8d1798e4f16b7f3a9e2d5c1b0a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a'
+}
+
+// Register test fixture certificates for benchmark scenarios
+registerTestAuthoritativeCertificates({
+  'CERT-REG-101': {
+    certificationId: 'CERT-REG-101',
+    certificationBody: 'Independent Standards Registry',
+    standard: 'ORGANIC',
+    associatedProductId: 'strictly_qualifying_1',
+    evidenceUrl: 'https://registry.standards.org/verify/101',
+    status: 'ACTIVE',
+    validFrom: '2026-01-01T00:00:00Z',
+    validUntil: '2027-01-01T00:00:00Z'
+  },
+  'USDA-NOP-101': {
+    certificationId: 'USDA-NOP-101',
+    certificationBody: 'USDA National Organic Program',
+    standard: 'ORGANIC',
+    associatedProductId: 'organic_sunbutter_1',
+    evidenceUrl: 'https://organic.ams.usda.gov/integrity/101',
+    status: 'ACTIVE',
+    validFrom: '2026-01-01T00:00:00Z',
+    validUntil: '2027-01-01T00:00:00Z'
+  },
+  'ACG-7881': {
+    certificationId: 'ACG-7881',
+    certificationBody: 'Allergen Control Group',
+    standard: 'PEANUT_FREE',
+    associatedProductId: 'oat_bar_1',
+    evidenceUrl: 'https://allergencircles.org/verify/7881',
+    status: 'ACTIVE',
+    validFrom: '2026-01-01T00:00:00Z',
+    validUntil: '2027-01-01T00:00:00Z'
+  }
+})
 
 let passedCount = 0
 let failedCount = 0
@@ -25,7 +70,7 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150) {
+    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
@@ -2404,9 +2449,290 @@ async function main() {
     assert.equal(res.shortlist.length, 0)
   })
 
+  await runScenario(151, 'Adversarial 19: Missing or weak secret throws on attestation generation and fails closed on verification', () => {
+    const originalSecret = process.env.GUARDIAN_ATTESTATION_SECRET
+    try {
+      // Test weak secret (< 32 chars)
+      process.env.GUARDIAN_ATTESTATION_SECRET = 'short_weak_secret'
+      const cert = createValidCert('weak_secret_item', { serverAttestationToken: 'placeholder' })
+      assert.throws(() => {
+        generateServerAttestation(cert, 'weak_secret_item')
+      }, /fails cryptographic strength requirements/i)
+
+      // Test verification fails closed
+      assert.equal(verifyServerAttestation({
+        ...cert,
+        serverAttestationToken: 'v1.k1.2027-01-01T00:00:00.000Z.abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
+      }, 'weak_secret_item'), false)
+    } finally {
+      process.env.GUARDIAN_ATTESTATION_SECRET = originalSecret
+    }
+  })
+
+  await runScenario(152, 'Adversarial 20: Attestation tokens signed with deprecated fallback secret are strictly invalidated', () => {
+    // Attempt to verify token signed with blacklisted fallback secret
+    const cert = createValidCert('deprecated_item', { serverAttestationToken: 'placeholder' })
+    const deprecatedHmac = crypto.createHmac('sha256', DEPRECATED_FALLBACK_SECRET)
+      .update(['v1', 'k1', '2027-01-01T00:00:00.000Z', 'deprecated_item', cert.associatedProductId, cert.certificationBody.toLowerCase(), (cert.certificationId || '').toLowerCase(), (cert.standard || '').toLowerCase(), cert.evidenceUrl, (cert.validUntil || ''), (cert.verifiedAt || '')].join('|'))
+      .digest('hex')
+
+    const deprecatedToken = `v1.k1.2027-01-01T00:00:00.000Z.${deprecatedHmac}`
+    assert.equal(verifyServerAttestation({
+      ...cert,
+      serverAttestationToken: deprecatedToken
+    }, 'deprecated_item'), false)
+  })
+
+  await runScenario(153, 'Adversarial 21: Expired attestation token fails closed as NEEDS_REVIEW', async () => {
+    const pastExpires = new Date(Date.now() - 3600000).toISOString() // 1 hour in the past
+    const expiredCert = createValidCert('expired_token_item', {
+      attestationExpiresAt: pastExpires
+    })
+    expiredCert.serverAttestationToken = generateServerAttestation({
+      ...expiredCert,
+      attestationExpiresAt: pastExpires
+    }, 'expired_token_item')
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find organic seed butter spread',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [createItem({
+        id: 'expired_token_item',
+        name: 'Organic Expired Attestation Butter',
+        ingredients: 'sunflower seeds, salt',
+        allergenStatement: 'Contains: none declared',
+        labelComplete: true,
+        certifiedRecords: [expiredCert]
+      })]
+    })
+    const p = res.products.find(x => x.id === 'expired_token_item')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.equal(res.shortlist.length, 0)
+  })
+
+  await runScenario(154, 'Adversarial 22: Key rotation handles previous active key while unknown key fails closed', () => {
+    const originalSecret = process.env.GUARDIAN_ATTESTATION_SECRET
+    const originalKid = process.env.GUARDIAN_ATTESTATION_KID
+    const originalPrevSecret = process.env.GUARDIAN_ATTESTATION_SECRET_PREVIOUS
+    const originalPrevKid = process.env.GUARDIAN_ATTESTATION_PREVIOUS_KID
+    try {
+      const activeSecret = 'new_active_secret_32_characters_long_12345'
+      const prevSecret = 'old_previous_secret_32_characters_long_6789'
+      process.env.GUARDIAN_ATTESTATION_SECRET = activeSecret
+      process.env.GUARDIAN_ATTESTATION_KID = 'k2'
+      process.env.GUARDIAN_ATTESTATION_SECRET_PREVIOUS = prevSecret
+      process.env.GUARDIAN_ATTESTATION_PREVIOUS_KID = 'k1'
+
+      const cert = createValidCert('rotation_item', { serverAttestationToken: 'placeholder' })
+      const expires = new Date(Date.now() + 86400000).toISOString()
+      const payload = ['v1', 'k1', expires, 'rotation_item', cert.associatedProductId, cert.certificationBody.toLowerCase(), (cert.certificationId || '').toLowerCase(), (cert.standard || '').toLowerCase(), cert.evidenceUrl, (cert.validUntil || ''), (cert.verifiedAt || '')].join('|')
+      const prevHmac = crypto.createHmac('sha256', prevSecret).update(payload).digest('hex')
+      const tokenFromPrevKey = `v1.k1.${expires}.${prevHmac}`
+
+      // Token signed with previous key MUST verify cleanly
+      assert.equal(verifyServerAttestation({
+        ...cert,
+        serverAttestationToken: tokenFromPrevKey
+      }, 'rotation_item'), true)
+
+      // Token signed with unknown kid MUST fail closed
+      const unknownKidToken = `v1.k99.${expires}.${prevHmac}`
+      assert.equal(verifyServerAttestation({
+        ...cert,
+        serverAttestationToken: unknownKidToken
+      }, 'rotation_item'), false)
+    } finally {
+      process.env.GUARDIAN_ATTESTATION_SECRET = originalSecret
+      process.env.GUARDIAN_ATTESTATION_KID = originalKid
+      process.env.GUARDIAN_ATTESTATION_SECRET_PREVIOUS = originalPrevSecret
+      process.env.GUARDIAN_ATTESTATION_PREVIOUS_KID = originalPrevKid
+    }
+  })
+
+  await runScenario(155, 'Adversarial 23: Tampered signed attestation payload fails timing-safe verification', () => {
+    const cert = createValidCert('tampered_item')
+    // Legitimate token generated for product 'tampered_item'
+    const token = cert.serverAttestationToken!
+    assert.ok(token)
+    // Attempting to present that token for a different product ID 'attacker_product'
+    assert.equal(verifyServerAttestation({
+      ...cert,
+      associatedProductId: 'attacker_product',
+      serverAttestationToken: token
+    }, 'attacker_product'), false)
+  })
+
+  await runScenario(156, 'Category Matching: Almond butter vs dairy butter (dairy butter is strictly EXCLUDED for nut butter goal)', async () => {
+    const dairyButter = createItem({
+      id: 'dairy_butter_cand',
+      name: 'Amul Pasteurised Dairy Butter',
+      ingredients: 'butterfat, pasteurized cream, common salt, water',
+      allergenStatement: 'Contains: milk.'
+    })
+    const almondButter = createItem({
+      id: 'almond_butter_cand',
+      name: 'Pure Roasted Almond Butter',
+      ingredients: 'roasted almonds, sea salt',
+      allergenStatement: 'Contains: tree nuts (almonds).'
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find almond butter spread',
+      constraints: ['gluten'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [dairyButter, almondButter]
+    })
+
+    const dairyEvaluated = res.products.find(p => p.id === 'dairy_butter_cand')
+    assert.ok(dairyEvaluated)
+    assert.equal(dairyEvaluated.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(dairyEvaluated.status, 'excluded')
+    assert.ok(dairyEvaluated.reasons.some(r => r.includes('ordinary animal dairy butter')))
+
+    const almondEvaluated = res.products.find(p => p.id === 'almond_butter_cand')
+    assert.ok(almondEvaluated)
+    assert.equal(almondEvaluated.categoryMatch, true)
+  })
+
+  await runScenario(157, 'Category Matching: Vegan snack vs dairy snack (dairy snack is strictly EXCLUDED)', async () => {
+    const dairySnack = createItem({
+      id: 'dairy_cheese_snack',
+      name: 'Cheddar Cheese Puffs Snack',
+      ingredients: 'corn meal, cheddar cheese powder (milk, salt, cultures), whey, milk fat, salt',
+      allergenStatement: 'Contains: milk.'
+    })
+    const veganSnack = createItem({
+      id: 'kale_chips_snack',
+      name: 'Organic Baked Kale Chips Snack',
+      ingredients: 'organic kale, organic sunflower oil, sea salt',
+      allergenStatement: 'Contains: none declared',
+      certifiedRecords: [createValidCert('kale_chips_snack', {
+        standard: 'VEGAN',
+        certificationBody: 'The Vegan Society',
+        evidenceUrl: 'https://vegansociety.com/verify/kale1'
+      })]
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find vegan snack',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [dairySnack, veganSnack]
+    })
+
+    const cheeseEvaluated = res.products.find(p => p.id === 'dairy_cheese_snack')
+    assert.ok(cheeseEvaluated)
+    assert.equal(cheeseEvaluated.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(cheeseEvaluated.status, 'excluded')
+
+    const kaleEvaluated = res.products.find(p => p.id === 'kale_chips_snack')
+    assert.ok(kaleEvaluated)
+    assert.equal(kaleEvaluated.categoryMatch, true)
+  })
+
+  await runScenario(158, 'Category Matching: Gluten-free bread vs conventional wheat bread (wheat bread is strictly EXCLUDED)', async () => {
+    const wheatBread = createItem({
+      id: 'wheat_sourdough_bread',
+      name: 'Artisan Wheat Sourdough Bread',
+      ingredients: 'wheat flour, water, sourdough culture, salt',
+      allergenStatement: 'Contains: wheat.'
+    })
+    const gfBread = createItem({
+      id: 'gf_rice_bread',
+      name: 'Gluten-Free Rice Loaf Bread',
+      ingredients: 'brown rice flour, tapioca starch, water, yeast, salt',
+      allergenStatement: 'Contains: none declared',
+      certifiedRecords: [createValidCert('gf_rice_bread', {
+        standard: 'GLUTEN_FREE',
+        certificationBody: 'Gluten-Free Certification Organization',
+        evidenceUrl: 'https://gfco.org/verify/gf1'
+      })]
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find gluten-free bread',
+      constraints: ['gluten'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [wheatBread, gfBread]
+    })
+
+    const wheatEvaluated = res.products.find(p => p.id === 'wheat_sourdough_bread')
+    assert.ok(wheatEvaluated)
+    assert.equal(wheatEvaluated.status, 'excluded')
+
+    const gfEvaluated = res.products.find(p => p.id === 'gf_rice_bread')
+    assert.ok(gfEvaluated)
+    assert.equal(gfEvaluated.categoryMatch, true)
+    assert.equal(gfEvaluated.status, 'candidate')
+    assert.ok(res.shortlist.includes('gf_rice_bread'))
+  })
+
+  await runScenario(159, 'Category Matching: Breakfast cereal vs non-food item (shampoo is strictly EXCLUDED)', async () => {
+    const shampoo = createItem({
+      id: 'soap_shampoo_item',
+      name: 'Herbal Essence Hair Shampoo',
+      ingredients: 'sodium laureth sulfate, cocamidopropyl betaine, fragrance, water',
+      allergenStatement: 'Contains: none declared'
+    })
+    const cereal = createItem({
+      id: 'oat_flakes_cereal',
+      name: 'Rolled Oats Breakfast Cereal',
+      ingredients: 'whole grain rolled oats',
+      allergenStatement: 'Contains: oats'
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find breakfast cereal',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [shampoo, cereal]
+    })
+
+    const nonFoodEvaluated = res.products.find(p => p.id === 'soap_shampoo_item')
+    assert.ok(nonFoodEvaluated)
+    assert.equal(nonFoodEvaluated.goalRelevanceStatus, 'EXCLUDED')
+    assert.equal(nonFoodEvaluated.status, 'excluded')
+
+    const cerealEvaluated = res.products.find(p => p.id === 'oat_flakes_cereal')
+    assert.ok(cerealEvaluated)
+    assert.equal(cerealEvaluated.categoryMatch, true)
+  })
+
+  await runScenario(160, 'Category Matching: Unknown category returns NEEDS_REVIEW and never enters shortlist', async () => {
+    const strangeItem = createItem({
+      id: 'strange_item_160',
+      name: 'Generic Mystery Formulation Package',
+      ingredients: 'organic sugar, sea salt, citric acid',
+      allergenStatement: 'Contains: none declared'
+    })
+
+    const res = await runGuardianAutonomousAgent({
+      goal: 'Find artisanal kombucha vinegar mother',
+      constraints: ['peanut'],
+      currency: 'INR',
+      maxResults: 5,
+      products: [strangeItem]
+    })
+
+    const evalProduct = res.products.find(p => p.id === 'strange_item_160')
+    assert.ok(evalProduct)
+    assert.equal(evalProduct.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(evalProduct.status, 'needs_review')
+    assert.equal(res.shortlist.length, 0)
+    assert.ok(evalProduct.reasons.some(r => r.includes('lacks evidence confirming mandatory category')))
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 150`)
+  console.log(`   Passed: ${passedCount} / 160`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

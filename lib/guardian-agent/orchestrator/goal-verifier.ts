@@ -119,6 +119,82 @@ export function decomposeUserGoal(
       'dairy butter',
       'candy'
     ]
+  } else if (/(?:almond\s*butter|cashew\s*butter|hazelnut\s*butter|nut\s*butter|walnut\s*butter|pistachio\s*butter)/i.test(goalLower)) {
+    requiredCategory = 'nut_butter_spread'
+    categoryKeywords = [
+      'nut butter',
+      'almond butter',
+      'cashew butter',
+      'hazelnut butter',
+      'walnut butter',
+      'pistachio butter'
+    ]
+    excludedCategoryKeywords = [
+      'dairy butter',
+      'pasteurized butter',
+      'milk butter',
+      'table butter',
+      'cow butter',
+      'beurre',
+      'makhan',
+      'ghee',
+      'clarified butter'
+    ]
+  } else if (/(?:vegan\s*snack|plant[- ]based\s*snack)/i.test(goalLower)) {
+    requiredCategory = 'vegan_snack'
+    categoryKeywords = [
+      'vegan snack',
+      'plant-based snack',
+      'snack',
+      'crisps',
+      'chips',
+      'crackers',
+      'bar'
+    ]
+    excludedCategoryKeywords = [
+      'dairy snack',
+      'milk chocolate',
+      'cheese puffs',
+      'cheese snack',
+      'dairy yogurt',
+      'pasteurized butter'
+    ]
+  } else if (/(?:gluten[- ]free\s*bread|bread|sourdough|bagel|toast|loaf)/i.test(goalLower)) {
+    requiredCategory = 'bread'
+    categoryKeywords = [
+      'bread',
+      'loaf',
+      'sourdough',
+      'bagel',
+      'toast',
+      'sliced bread'
+    ]
+    excludedCategoryKeywords = [
+      'candy',
+      'chocolate',
+      'dairy butter',
+      'energy bar',
+      'sauce'
+    ]
+  } else if (/(?:breakfast\s*cereal|cereal|granola|muesli|cornflakes|oatmeal|rolled oats)/i.test(goalLower)) {
+    requiredCategory = 'breakfast_cereal'
+    categoryKeywords = [
+      'cereal',
+      'granola',
+      'muesli',
+      'cornflakes',
+      'oatmeal',
+      'rolled oats',
+      'breakfast flakes'
+    ]
+    excludedCategoryKeywords = [
+      'shampoo',
+      'soap',
+      'detergent',
+      'cleaner',
+      'dairy butter',
+      'meat'
+    ]
   } else {
     // Fallback: extract primary noun phrase
     const cleaned = rawGoal
@@ -243,6 +319,10 @@ export {
   generateServerAttestation,
   verifyServerAttestation,
   AUTHORITATIVE_REGISTRY_DATABASE,
+  registerTestAuthoritativeCertificates,
+  clearAuthoritativeCertificates,
+  isValidAttestationSecret,
+  DEPRECATED_FALLBACK_SECRET,
   verifyClaimedCertification
 } from './certification-verifier'
 import { verifyClaimedCertification } from './certification-verifier'
@@ -424,6 +504,86 @@ export function evaluateProductGoalRelevance(
     } else {
       categoryMatch = false
       relevanceReasons.push('NEEDS_REVIEW (Category): Unclear whether product is pasta.')
+    }
+  } else if (goal.requiredCategory === 'nut_butter_spread') {
+    const isDairyButter =
+      /\b(?:pasteurized butter|cream|table butter|dairy butter|cow butter|makhan|ghee|beurre)\b/i.test(nameLower) ||
+      /\b(?:butterfat|milk fat|pasteurized cream|cow's milk)\b/i.test(ingredientsLower) ||
+      categoriesList.some(c => /butters|beurres|dairy/i.test(c) && !/nut|almond|cashew|hazelnut|noisette|amande/i.test(c))
+
+    const isNutButter =
+      /\b(?:nut butter|almond butter|cashew butter|hazelnut butter|walnut butter|pistachio butter)\b/i.test(nameLower) ||
+      /\b(?:roasted almonds|roasted cashews|roasted hazelnuts|roasted walnuts)\b/i.test(ingredientsLower) ||
+      categoriesList.some(c => /nut butter|almond butter|cashew butter/i.test(c))
+
+    if (isDairyButter && !isNutButter) {
+      categoryMatch = false
+      hardExclusion = true
+      relevanceReasons.push('EXCLUDED (Category Violation): Product is ordinary animal dairy butter (milk fat), not a nut butter spread.')
+    } else if (isNutButter) {
+      categoryMatch = true
+      relevanceReasons.push('MATCH (Category): Product verified as nut butter spread.')
+    } else {
+      categoryMatch = false
+      relevanceReasons.push('NEEDS_REVIEW (Category): Product lacks verified nut-butter credentials in title or ingredients.')
+    }
+  } else if (goal.requiredCategory === 'vegan_snack') {
+    const isDairySnack =
+      /\b(?:cheese snack|cheese puffs|milk chocolate|dairy yogurt|dairy bar|whey snack)\b/i.test(nameLower) ||
+      /\b(?:cheese powder|milk chocolate|whey protein isolate|casein|milk fat)\b/i.test(ingredientsLower)
+
+    const isSnack =
+      /\b(?:snack|bar|crisps|chips|crackers|bites|nuts|popcorn|trail mix)\b/i.test(nameLower) ||
+      categoriesList.some(c => /snack|biscuit|chips|crackers/i.test(c))
+
+    if (isDairySnack) {
+      categoryMatch = false
+      hardExclusion = true
+      relevanceReasons.push('EXCLUDED (Category Violation): Product is a dairy-based snack, not a vegan snack.')
+    } else if (isSnack) {
+      categoryMatch = true
+      relevanceReasons.push('MATCH (Category): Product matches snack category.')
+    } else {
+      categoryMatch = false
+      relevanceReasons.push('NEEDS_REVIEW (Category): Unclear whether product is a snack.')
+    }
+  } else if (goal.requiredCategory === 'bread') {
+    const isBread =
+      /\b(?:bread|loaf|sourdough|bagel|toast|buns|rolls)\b/i.test(nameLower) ||
+      categoriesList.some(c => /bread|pain|boulangerie/i.test(c))
+
+    const isNonBread =
+      /\b(?:candy|chocolate|butter|sauce|dressing|bar)\b/i.test(nameLower) && !isBread
+
+    if (isNonBread) {
+      categoryMatch = false
+      hardExclusion = true
+      relevanceReasons.push('EXCLUDED (Category Violation): Product is not bread.')
+    } else if (isBread) {
+      categoryMatch = true
+      relevanceReasons.push('MATCH (Category): Product matches bread category.')
+    } else {
+      categoryMatch = false
+      relevanceReasons.push('NEEDS_REVIEW (Category): Unclear whether product is bread.')
+    }
+  } else if (goal.requiredCategory === 'breakfast_cereal') {
+    const isCereal =
+      /\b(?:cereal|granola|muesli|cornflakes|oatmeal|rolled oats|flakes|crisp rice)\b/i.test(nameLower) ||
+      categoriesList.some(c => /cereal|granola|muesli|cereales/i.test(c))
+
+    const isNonCereal =
+      /\b(?:shampoo|soap|detergent|cleaner|butter|sauce|meat)\b/i.test(nameLower) && !isCereal
+
+    if (isNonCereal) {
+      categoryMatch = false
+      hardExclusion = true
+      relevanceReasons.push('EXCLUDED (Category Violation): Product is not breakfast cereal.')
+    } else if (isCereal) {
+      categoryMatch = true
+      relevanceReasons.push('MATCH (Category): Product matches breakfast cereal category.')
+    } else {
+      categoryMatch = false
+      relevanceReasons.push('NEEDS_REVIEW (Category): Unclear whether product is breakfast cereal.')
     }
   } else {
     // General category verification

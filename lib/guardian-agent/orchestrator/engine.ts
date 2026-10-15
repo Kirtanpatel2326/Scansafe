@@ -649,20 +649,35 @@ export async function runGuardianAutonomousAgent(
   else if (hasUserSource) sourceMode = 'USER_SUPPLIED_EVIDENCE_ONLY'
   else if (hasCatalogSource) sourceMode = 'CATALOG_EVIDENCE_ONLY'
 
-    return {
-      runId,
-      createdAt: new Date().toISOString(),
-      elapsedMs: Date.now() - started,
-      mode: currentPlan.mode,
-      goal: request.goal,
-      decomposedGoal,
-      sourceMode,
-      plan: currentPlan.stages,
-      currentStage: 'persist_shortlist_approval',
-      steps,
-      products: evaluatedProducts,
-      shortlist,
-      saved,
+  // Determine Task State honestly based on evidence and shortlist criteria
+  let taskState: AutonomousAgentResponse['taskState'] = 'COMPLETED'
+  if (evaluatedProducts.length === 0) {
+    taskState = 'INSUFFICIENT_EVIDENCE'
+  } else if (shortlist.length >= request.maxResults) {
+    taskState = 'COMPLETED'
+  } else if (shortlist.length > 0) {
+    taskState = 'PARTIAL'
+  } else if (evaluatedProducts.some(p => p.status === 'needs_review')) {
+    taskState = 'INSUFFICIENT_EVIDENCE'
+  } else {
+    taskState = 'COMPLETED'
+  }
+
+  return {
+    runId,
+    createdAt: new Date().toISOString(),
+    elapsedMs: Date.now() - started,
+    mode: currentPlan.mode,
+    goal: request.goal,
+    taskState,
+    decomposedGoal,
+    sourceMode,
+    plan: currentPlan.stages,
+    currentStage: 'persist_shortlist_approval',
+    steps,
+    products: evaluatedProducts,
+    shortlist,
+    saved,
       retrievalErrors,
       uncertainties,
       safetyNotice: 'Evidence-backed candidates represent uncertified comparative evaluations based strictly on retrieved packaging text. This does NOT constitute medical, food-safety, or allergy-free certification. Always verify physical manufacturer labels directly before consuming.',
