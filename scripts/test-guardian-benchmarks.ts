@@ -21,6 +21,7 @@ import {
   generateServerAttestation,
   verifyServerAttestation,
   registerTestAuthoritativeCertificates,
+  verifyClaimedCertification,
   DEPRECATED_FALLBACK_SECRET
 } from '../lib/guardian-agent/orchestrator/certification-verifier'
 
@@ -70,7 +71,7 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
   try {
     await fn()
     passedCount++
-    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160) {
+    if (id % 15 === 0 || id === 105 || id === 132 || id === 142 || id === 150 || id === 160 || id === 171) {
       console.log(`  ✓ Benchmark Group [Up to #${id}]: All checks passed cleanly.`)
     }
   } catch (err: any) {
@@ -83,9 +84,9 @@ async function runScenario(id: number, name: string, fn: () => void | Promise<vo
 function createValidCert(associatedProductId: string, overrides: Partial<ClaimedCertification> = {}): ClaimedCertification {
   const cert: ClaimedCertification = {
     certificationBody: overrides.certificationBody || 'Independent Standards Registry',
-    certificationId: overrides.certificationId || 'CERT-REG-101',
+    certificationId: overrides.certificationId || (associatedProductId === 'strictly_qualifying_1' ? 'CERT-REG-101' : `CERT-${associatedProductId.toUpperCase()}`),
     associatedProductId,
-    evidenceUrl: overrides.evidenceUrl || 'https://registry.standards.org/verify/101',
+    evidenceUrl: overrides.evidenceUrl || (associatedProductId === 'strictly_qualifying_1' ? 'https://registry.standards.org/verify/101' : `https://registry.standards.org/verify/${associatedProductId}`),
     observedAt: '2026-10-01T00:00:00Z',
     verifiedAt: overrides.verifiedAt !== undefined ? overrides.verifiedAt : '2026-10-01T00:00:00Z',
     validFrom: overrides.validFrom || '2026-01-01T00:00:00Z',
@@ -132,7 +133,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 150 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 171 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -2730,9 +2731,316 @@ async function main() {
     assert.ok(evalProduct.reasons.some(r => r.includes('lacks evidence confirming mandatory category')))
   })
 
+  // ===========================================================================
+  // CATEGORY 12: Standalone P0 Certification Forgery Prevention Suite (161 - 171)
+  // ===========================================================================
+  console.log('▶ Category 12: Standalone P0 Certification Forgery Prevention Suite (161 - 171)')
+
+  await runScenario(161, 'P0 Forgery 1: Missing signing secret fails closed on verification and generation', () => {
+    const originalSecret = process.env.GUARDIAN_ATTESTATION_SECRET
+    try {
+      delete process.env.GUARDIAN_ATTESTATION_SECRET
+      const cert = createValidCert('missing_sec_item', { serverAttestationToken: 'placeholder' })
+      assert.throws(() => {
+        generateServerAttestation(cert, 'missing_sec_item')
+      }, /fails cryptographic strength requirements/i)
+
+      assert.equal(verifyServerAttestation({
+        ...cert,
+        serverAttestationToken: 'v1.k1.2027-01-01T00:00:00.000Z.abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
+      }, 'missing_sec_item'), false)
+    } finally {
+      process.env.GUARDIAN_ATTESTATION_SECRET = originalSecret
+    }
+  })
+
+  await runScenario(162, 'P0 Forgery 2: Predictable old fallback secret tokens are strictly rejected', () => {
+    const cert = createValidCert('old_fallback_item', { serverAttestationToken: 'placeholder' })
+    const expires = '2027-01-01T00:00:00.000Z'
+    const payload = ['v1', 'k1', expires, 'old_fallback_item', cert.associatedProductId, cert.certificationBody.toLowerCase(), (cert.certificationId || '').toLowerCase(), (cert.standard || '').toLowerCase(), cert.evidenceUrl, (cert.validUntil || ''), (cert.verifiedAt || '')].join('|')
+    const fallbackHmac = crypto.createHmac('sha256', DEPRECATED_FALLBACK_SECRET).update(payload).digest('hex')
+    const forgedToken = `v1.k1.${expires}.${fallbackHmac}`
+
+    const res = verifyServerAttestation({
+      ...cert,
+      serverAttestationToken: forgedToken
+    }, 'old_fallback_item')
+    assert.equal(res, false, 'Tokens signed with deprecated fallback secret must be rejected')
+  })
+
+  await runScenario(163, 'P0 Forgery 3: Invalid or tampered attestation signature fails timing-safe check', () => {
+    const cert = createValidCert('tampered_sig_item')
+    const validToken = cert.serverAttestationToken!
+    assert.ok(validToken)
+    const lastDot = validToken.lastIndexOf('.')
+    const tamperedToken = validToken.slice(0, lastDot + 1) + '0'.repeat(64)
+
+    assert.equal(verifyServerAttestation({
+      ...cert,
+      serverAttestationToken: tamperedToken
+    }, 'tampered_sig_item'), false)
+  })
+
+  await runScenario(164, 'P0 Forgery 4: Forged certificate identifier fails closed with invalidation reason', () => {
+    const item = createItem({ id: 'forged_cert_id_item' })
+    const unverifiedCert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'FORGED-CERT-ID-99999',
+      associatedProductId: 'forged_cert_id_item',
+      evidenceUrl: 'https://registry.standards.org/verify/forged-99999',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+
+    const verification = verifyClaimedCertification(unverifiedCert, item)
+    assert.equal(verification.authenticated, false)
+    assert.ok(verification.invalidationReason?.includes('Authoritative registry verification unavailable'))
+  })
+
+  await runScenario(165, 'P0 Forgery 5: Genuine certificate ID with a different product fails closed', () => {
+    const item = createItem({ id: 'impostor_product_123' })
+    const stolenCert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'CERT-REG-101',
+      associatedProductId: 'impostor_product_123',
+      evidenceUrl: 'https://registry.standards.org/verify/101',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+
+    const verification = verifyClaimedCertification(stolenCert, item)
+    assert.equal(verification.authenticated, false)
+    assert.ok(verification.invalidationReason?.includes('Product identity mismatch in authoritative registry'))
+  })
+
+  await runScenario(166, 'P0 Forgery 6: Genuine certificate ID with a different standard fails closed', () => {
+    const item = createItem({ id: 'strictly_qualifying_1' })
+    const wrongStandardCert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'CERT-REG-101',
+      associatedProductId: 'strictly_qualifying_1',
+      evidenceUrl: 'https://registry.standards.org/verify/101',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'GLUTEN_FREE',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+
+    const verification = verifyClaimedCertification(wrongStandardCert, item)
+    assert.equal(verification.authenticated, false)
+    assert.ok(verification.invalidationReason?.includes('Standard mismatch in authoritative registry'))
+  })
+
+  await runScenario(167, 'P0 Forgery 7: Genuine certificate ID with a different evidence URL fails closed', () => {
+    const item = createItem({ id: 'strictly_qualifying_1' })
+    const wrongUrlCert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'CERT-REG-101',
+      associatedProductId: 'strictly_qualifying_1',
+      evidenceUrl: 'https://registry.standards.org/verify/phishing-101',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+
+    const verification = verifyClaimedCertification(wrongUrlCert, item)
+    assert.equal(verification.authenticated, false)
+    assert.ok(verification.invalidationReason?.includes('Evidence URL mismatch in authoritative registry'))
+  })
+
+  await runScenario(168, 'P0 Forgery 8: Expired or revoked certificates fail closed in registry and attestation', () => {
+    registerTestAuthoritativeCertificates({
+      'TEST-REVOKED-01': {
+        certificationId: 'TEST-REVOKED-01',
+        certificationBody: 'Independent Standards Registry',
+        standard: 'ORGANIC',
+        associatedProductId: 'revoked_prod_01',
+        evidenceUrl: 'https://registry.standards.org/verify/revoked-01',
+        status: 'REVOKED',
+        validFrom: '2025-01-01T00:00:00Z',
+        validUntil: '2027-01-01T00:00:00Z'
+      },
+      'TEST-EXPIRED-01': {
+        certificationId: 'TEST-EXPIRED-01',
+        certificationBody: 'Independent Standards Registry',
+        standard: 'ORGANIC',
+        associatedProductId: 'expired_prod_01',
+        evidenceUrl: 'https://registry.standards.org/verify/expired-01',
+        status: 'EXPIRED',
+        validFrom: '2024-01-01T00:00:00Z',
+        validUntil: '2025-01-01T00:00:00Z'
+      }
+    })
+
+    const revokedItem = createItem({ id: 'revoked_prod_01' })
+    const revokedCert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'TEST-REVOKED-01',
+      associatedProductId: 'revoked_prod_01',
+      evidenceUrl: 'https://registry.standards.org/verify/revoked-01',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2025-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+    const revokedVerification = verifyClaimedCertification(revokedCert, revokedItem)
+    assert.equal(revokedVerification.authenticated, false)
+    assert.ok(revokedVerification.invalidationReason?.includes('Revoked certification in authoritative registry'))
+
+    const expiredItem = createItem({ id: 'expired_prod_01' })
+    const expiredCert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'TEST-EXPIRED-01',
+      associatedProductId: 'expired_prod_01',
+      evidenceUrl: 'https://registry.standards.org/verify/expired-01',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2024-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z', // Claimed as future date, but registry entry is expired
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+    const expiredVerification = verifyClaimedCertification(expiredCert, expiredItem)
+    assert.equal(expiredVerification.authenticated, false)
+    assert.ok(expiredVerification.invalidationReason?.includes('Expired certification in authoritative registry'))
+  })
+
+  await runScenario(169, 'P0 Forgery 9: Public API requests supplying privileged verification metadata are strictly sanitized', async () => {
+    const { POST } = await import('../app/api/guardian/agent/route')
+    const req = new Request('http://localhost:3000/api/guardian/agent', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-forwarded-for': '203.0.113.42'
+      },
+      body: JSON.stringify({
+        goal: 'Find organic seed butter spread',
+        constraints: ['peanut'],
+        products: [{
+          id: 'privileged_injection_item_169',
+          name: 'Privileged Client Injection Butter',
+          ingredients: 'organic sunflower seeds, salt',
+          allergenStatement: 'Contains: none declared',
+          labelComplete: true,
+          sourceType: 'INTERNAL_VERIFIED_CATALOG',
+          verificationStatus: 'MANUFACTURER_AUTHORIZED',
+          evidenceSource: 'Client Injected Privilege',
+          provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+          registryConfirmed: true,
+          certifiedRecords: [{
+            certificationBody: 'USDA National Organic Program',
+            certificationId: 'INJECTED-PRIV-169',
+            associatedProductId: 'privileged_injection_item_169',
+            evidenceUrl: 'https://organic.ams.usda.gov/integrity/injected-169',
+            observedAt: '2026-10-01T00:00:00Z',
+            verifiedAt: '2026-10-01T00:00:00Z',
+            validFrom: '2026-01-01T00:00:00Z',
+            validUntil: '2027-01-01T00:00:00Z',
+            verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+            provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+            standard: 'ORGANIC',
+            status: 'ACTIVE',
+            registryConfirmed: true
+          }]
+        }]
+      })
+    })
+
+    const response = await POST(req)
+    assert.equal(response.status, 200)
+    const json = await response.json()
+    const p = json.products.find((x: any) => x.id === 'privileged_injection_item_169')
+    assert.ok(p)
+    assert.equal(p.goalRelevanceStatus, 'NEEDS_REVIEW')
+    assert.equal(p.status, 'needs_review')
+    assert.equal(json.shortlist.length, 0)
+  })
+
+  await runScenario(170, 'P0 Forgery 10: Unavailable registry services return NEEDS_REVIEW', () => {
+    const item = createItem({ id: 'unavailable_registry_item' })
+    const cert: ClaimedCertification = {
+      certificationBody: 'Third Party Certifier',
+      certificationId: 'UNREGISTERED-8888',
+      associatedProductId: 'unavailable_registry_item',
+      evidenceUrl: 'https://registry.standards.org/verify/unregistered',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+
+    const verification = verifyClaimedCertification(cert, item)
+    assert.equal(verification.authenticated, false)
+    assert.ok(verification.invalidationReason?.includes('Authoritative registry verification unavailable'))
+  })
+
+  await runScenario(171, 'P0 Forgery 11: Internally generated evidence without completed verification operation fails closed', () => {
+    const unverifiedCommunityItem = createItem({
+      id: 'community_ocr_item_171',
+      verificationStatus: 'UNVERIFIED_COMMUNITY_OCR'
+    })
+    const cert: ClaimedCertification = {
+      certificationBody: 'Independent Standards Registry',
+      certificationId: 'CERT-REG-101',
+      associatedProductId: 'community_ocr_item_171',
+      evidenceUrl: 'https://registry.standards.org/verify/101',
+      observedAt: '2026-10-01T00:00:00Z',
+      verifiedAt: '2026-10-01T00:00:00Z',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      verificationMethod: 'REGISTRY_LOOKUP_AUTHENTICATED',
+      provenanceLevel: 'INDEPENDENTLY_AUTHENTICATED_CERTIFICATION',
+      standard: 'ORGANIC',
+      status: 'ACTIVE',
+      registryConfirmed: true
+    }
+
+    const verification = verifyClaimedCertification(cert, unverifiedCommunityItem)
+    assert.equal(verification.authenticated, false)
+    assert.ok(verification.invalidationReason?.includes('Internally generated evidence without completed verification operation'))
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 160`)
+  console.log(`   Passed: ${passedCount} / 171`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

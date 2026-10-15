@@ -1,12 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.6)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.7)
 
-**Document Version:** 8.6.0  
-**Last Updated:** 2026-10-15T05:30:00Z  
+**Document Version:** 8.7.0  
+**Last Updated:** 2026-10-15T06:10:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
-**Current Development Branch:** `guardian-championship-v8.6`  
-**Git Commit SHA:** `eaf4db5` (V8.6 Hardened Cryptographic Trust Boundary & Category Intelligence Release)  
-**Vercel Preview URL:** `https://scansafe-o31d-jminkrn9o-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 160/160 BENCHMARKS PASSED  
+**Current Development Branch:** `guardian-october15-security-fix`  
+**Git Commit SHA:** `3f11221` (V8.7 Anti-Forgery Trust Boundary & Independent Registry Release)  
+**Vercel Preview URL:** `https://scansafe-o31d-izcksh52v-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 171/171 BENCHMARKS PASSED  
 
 ---
 
@@ -157,7 +157,7 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 160 championship scenarios (incl. 23 adversarial & category tests) | **160 / 160 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:benchmarks` | 171 championship scenarios (incl. 34 adversarial, anti-forgery & category tests) | **171 / 171 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **25 / 25 passed (0 failed)** | 100% |
 | `npm run test:guardian:rls` | RLS isolation & privilege denial | 9 / 9 passed | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS | 0 critical, 0 warnings | 100% |
@@ -165,7 +165,7 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 
 ---
 
-## 4. Adversarial Benchmark Scenarios (Category 11)
+## 4. Adversarial Benchmark Scenarios (Category 11 & 12)
 
 | Scenario | Adversarial Vector | Expected Outcome | Verification Status |
 | :--- | :--- | :--- | :--- |
@@ -197,6 +197,17 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #158 | Category matching: Gluten-free bread vs conventional wheat bread | Wheat bread strictly `EXCLUDED` | ✅ PASSED |
 | #159 | Category matching: Breakfast cereal vs non-food item | Non-food item strictly `EXCLUDED` | ✅ PASSED |
 | #160 | Category matching: Unknown / ambiguous category | Fail closed: `NEEDS_REVIEW` | ✅ PASSED |
+| #161 | P0 Forgery 1: Missing signing secret | Generation throws error; verification fails closed | ✅ PASSED |
+| #162 | P0 Forgery 2: Predictable old fallback secret | Strictly invalidated and rejected | ✅ PASSED |
+| #163 | P0 Forgery 3: Invalid or tampered attestation signature | Timing-safe verification fails closed | ✅ PASSED |
+| #164 | P0 Forgery 4: Forged certificate identifier | Unmatched in registry -> fails closed (`NEEDS_REVIEW`) | ✅ PASSED |
+| #165 | P0 Forgery 5: Genuine certificate ID with different product | Product identity mismatch -> fails closed (`NEEDS_REVIEW`) | ✅ PASSED |
+| #166 | P0 Forgery 6: Genuine certificate ID with different standard | Standard mismatch -> fails closed (`NEEDS_REVIEW`) | ✅ PASSED |
+| #167 | P0 Forgery 7: Genuine certificate ID with different evidence URL | Evidence URL mismatch -> fails closed (`NEEDS_REVIEW`) | ✅ PASSED |
+| #168 | P0 Forgery 8: Expired or revoked certificates in registry | Registry expiration / revocation override -> fails closed | ✅ PASSED |
+| #169 | P0 Forgery 9: Public API requests supplying privileged verification metadata | Public API sanitized to USER_UPLOADED -> fails closed | ✅ PASSED |
+| #170 | P0 Forgery 10: Unavailable registry services | Authoritative registry unavailable -> `NEEDS_REVIEW` | ✅ PASSED |
+| #171 | P0 Forgery 11: Internally generated evidence without completed verification | UNVERIFIED_COMMUNITY_OCR rejected -> fails closed | ✅ PASSED |
 
 ---
 

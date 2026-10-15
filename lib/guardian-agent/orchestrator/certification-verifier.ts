@@ -434,7 +434,16 @@ export function verifyClaimedCertification(
     }
   }
 
-  // 11. CRITICAL TRUST BOUNDARY CHECK:
+  // 11. Internally generated evidence verification operation check:
+  // Community OCR or unverified internal cache records without a completed verification operation cannot establish authenticated certification
+  if (product.verificationStatus === 'UNVERIFIED_COMMUNITY_OCR') {
+    return {
+      authenticated: false,
+      invalidationReason: `Internally generated evidence without completed verification operation: Product verificationStatus is "${product.verificationStatus}"; unverified community OCR cannot establish authenticated certification without documented verification.`
+    }
+  }
+
+  // 12. CRITICAL TRUST BOUNDARY CHECK:
   // A registryConfirmed boolean or approved URL hostname alone is NOT sufficient proof of authentication.
   // Must possess a valid server-side signed attestation OR match an authentic record in the authoritative registry database.
   const hasValidAttestation = verifyServerAttestation(record, product.id)
@@ -443,17 +452,96 @@ export function verifyClaimedCertification(
     ? AUTHORITATIVE_REGISTRY_DATABASE[record.certificationId.trim().toUpperCase()]
     : undefined
 
-  const matchesAuthoritativeRegistry = Boolean(
-    registryEntry &&
-    registryEntry.status === 'ACTIVE' &&
-    registryEntry.associatedProductId === product.id &&
-    (!registryEntry.brand || !product.brand || registryEntry.brand.toLowerCase() === product.brand.toLowerCase())
-  )
+  let matchesAuthoritativeRegistry = false
+  if (registryEntry) {
+    // 1. Revocation check on registry entry
+    if (registryEntry.status === 'REVOKED' || isCertificateRevoked(registryEntry.certificationId)) {
+      return {
+        authenticated: false,
+        invalidationReason: `Revoked certification in authoritative registry: Certificate ID "${record.certificationId}" has been revoked by issuing authority.`
+      }
+    }
+
+    // 2. Expiration check on registry entry
+    if (registryEntry.status === 'EXPIRED') {
+      return {
+        authenticated: false,
+        invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" is marked expired.`
+      }
+    }
+    if (registryEntry.validUntil) {
+      const untilMs = Date.parse(registryEntry.validUntil)
+      if (!Number.isNaN(untilMs) && untilMs < Date.now()) {
+        return {
+          authenticated: false,
+          invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" expired on ${registryEntry.validUntil}.`
+        }
+      }
+    }
+
+    // 3. Product identity binding in registry
+    if (registryEntry.associatedProductId !== product.id || registryEntry.associatedProductId !== record.associatedProductId) {
+      return {
+        authenticated: false,
+        invalidationReason: `Product identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued for product identity "${registryEntry.associatedProductId}", which does not match candidate product "${product.id}".`
+      }
+    }
+
+    // 4. Standard binding in registry
+    if (record.standard && registryEntry.standard) {
+      const regStd = registryEntry.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
+      const recStd = record.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
+      if (regStd !== recStd && !regStd.includes(recStd) && !recStd.includes(regStd)) {
+        return {
+          authenticated: false,
+          invalidationReason: `Standard mismatch in authoritative registry: Certificate ID "${record.certificationId}" is registered for standard "${registryEntry.standard}", which does not match claimed standard "${record.standard}".`
+        }
+      }
+    }
+
+    // 5. Evidence URL binding in registry
+    if (record.evidenceUrl && registryEntry.evidenceUrl) {
+      if (record.evidenceUrl.trim().toLowerCase() !== registryEntry.evidenceUrl.trim().toLowerCase()) {
+        return {
+          authenticated: false,
+          invalidationReason: `Evidence URL mismatch in authoritative registry: Claimed evidence URL "${record.evidenceUrl}" does not match authoritative registry proof URL "${registryEntry.evidenceUrl}" for certificate ID "${record.certificationId}".`
+        }
+      }
+    }
+
+    // 6. Certification body binding in registry
+    if (record.certificationBody && registryEntry.certificationBody) {
+      const regBody = registryEntry.certificationBody.trim().toLowerCase()
+      const recBody = record.certificationBody.trim().toLowerCase()
+      if (regBody !== recBody && !regBody.includes(recBody) && !recBody.includes(regBody)) {
+        return {
+          authenticated: false,
+          invalidationReason: `Issuing authority mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued by "${registryEntry.certificationBody}", which does not match claimed authority "${record.certificationBody}".`
+        }
+      }
+    }
+
+    // 7. Brand binding (if both specify)
+    if (registryEntry.brand && product.brand) {
+      const regBrand = registryEntry.brand.trim().toLowerCase()
+      const prodBrand = product.brand.trim().toLowerCase()
+      if (!regBrand.includes(prodBrand) && !prodBrand.includes(regBrand)) {
+        return {
+          authenticated: false,
+          invalidationReason: `Brand identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was registered for brand "${registryEntry.brand}", which does not match product brand "${product.brand}".`
+        }
+      }
+    }
+
+    if (registryEntry.status === 'ACTIVE') {
+      matchesAuthoritativeRegistry = true
+    }
+  }
 
   if (!hasValidAttestation && !matchesAuthoritativeRegistry) {
     return {
       authenticated: false,
-      invalidationReason: `Unauthenticated registry claim: Certificate proof URL host is an approved domain, but certificate ID "${record.certificationId || 'N/A'}" lacks authoritative registry confirmation or valid server attestation. An approved URL hostname alone does not prove certificate existence or validity.`
+      invalidationReason: `Authoritative registry verification unavailable: Certificate ID "${record.certificationId || 'N/A'}" lacks authoritative registry confirmation or valid server attestation. An approved URL hostname alone does not prove certificate existence or validity.`
     }
   }
 
