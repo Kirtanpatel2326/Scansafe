@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { serverEvidenceStore } from '@/lib/guardian-agent/orchestrator/evidence-store'
 import { checkGuardianRateLimitShared } from '@/lib/guardian-security'
+import { isCertificateRevoked } from '@/lib/guardian-agent/orchestrator/certification-verifier'
 
 /**
  * Public Controlled Read-Only Certification Verification Endpoint.
@@ -63,18 +64,53 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Optional product identity binding verification
-    if (productId && record.associatedProductId !== productId) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Certificate ID ${certificateId} was issued for a different product identity.`
-        },
-        { status: 404 }
-      )
+    // Evaluate authoritative validity, revocation, expiry, freshness, and product binding
+    const now = Date.now()
+    const isRevoked = record.revocationStatus === 'REVOKED' || isCertificateRevoked(record.certificateId)
+    const validUntilMs = record.validUntil ? Date.parse(record.validUntil) : NaN
+    const isExpired = record.revocationStatus === 'EXPIRED' || (!Number.isNaN(validUntilMs) && validUntilMs < now)
+    const validFromMs = record.validFrom ? Date.parse(record.validFrom) : NaN
+    const isNotYetValid = !Number.isNaN(validFromMs) && validFromMs > now
+
+    const revCheckedMs = record.revocationCheckedAt ? Date.parse(record.revocationCheckedAt) : NaN
+    const isStale = !Number.isNaN(revCheckedMs) && (now - revCheckedMs > 30 * 24 * 60 * 60 * 1000)
+
+    const isProductMismatch = Boolean(productId && record.associatedProductId !== productId)
+
+    let verificationStatus:
+      | 'AUTHENTICATED_VALID'
+      | 'REVOKED'
+      | 'EXPIRED'
+      | 'NOT_YET_VALID'
+      | 'STALE_VERIFICATION'
+      | 'PRODUCT_MISMATCH' = 'AUTHENTICATED_VALID'
+
+    let statusReason = 'Certificate is currently authenticated, active, and within its verified validity window.'
+    let recordType: 'CURRENT_AUTHORITATIVE_RECORD' | 'HISTORICAL_EVIDENCE_RECORD' = 'CURRENT_AUTHORITATIVE_RECORD'
+
+    if (isRevoked) {
+      verificationStatus = 'REVOKED'
+      recordType = 'HISTORICAL_EVIDENCE_RECORD'
+      statusReason = 'Certificate has been revoked by issuing authority and is retained as a historical evidence record only.'
+    } else if (isExpired) {
+      verificationStatus = 'EXPIRED'
+      recordType = 'HISTORICAL_EVIDENCE_RECORD'
+      statusReason = 'Certificate validity period has lapsed. Retained as a historical evidence record only.'
+    } else if (isNotYetValid) {
+      verificationStatus = 'NOT_YET_VALID'
+      statusReason = `Certificate validity period has not yet begun (valid from: ${record.validFrom}).`
+    } else if (isStale) {
+      verificationStatus = 'STALE_VERIFICATION'
+      recordType = 'HISTORICAL_EVIDENCE_RECORD'
+      statusReason = 'Authoritative revocation check is older than 30 days. Fresh registry verification is required before reliance.'
+    } else if (isProductMismatch) {
+      verificationStatus = 'PRODUCT_MISMATCH'
+      statusReason = `Certificate was issued for product identity "${record.associatedProductId}", which does not match requested product "${productId}".`
     }
 
-    // Return strictly sanitized public fields
+    const isCurrentlyValid = verificationStatus === 'AUTHENTICATED_VALID'
+
+    // Return strictly sanitized public fields with explicit verification status
     return NextResponse.json(
       {
         success: true,
@@ -90,7 +126,11 @@ export async function GET(request: NextRequest) {
           revocationStatus: record.revocationStatus,
           revocationCheckedAt: record.revocationCheckedAt,
           verificationMethod: record.verificationMethod,
-          verifiedAt: record.timestamp
+          verifiedAt: record.timestamp,
+          verificationStatus,
+          isCurrentlyValid,
+          recordType,
+          statusReason
         }
       },
       {
