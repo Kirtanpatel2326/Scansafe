@@ -1,10 +1,12 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.14)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.15)
 
-**Document Version:** 8.14.0  
-**Last Updated:** 2026-10-15T12:20:00Z  
+**Document Version:** 8.15.0  
+**Last Updated:** 2026-10-15T12:46:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / ZERO-TRUST BOUNDARY HARDENED / 195/195 BENCHMARKS PASSED / 13/13 RLS PASSED / 44/44 NEXT.JS ROUTES COMPILED  
+**Git Commit SHA:** `f4f6372`  
+**Vercel Preview URL:** `https://scansafe-o31d-2n11j6act-kirtanpatel2326s-projects.vercel.app`  
+**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / 205/205 BENCHMARKS PASSED / 13/13 RLS PASSED / 44/44 NEXT.JS ROUTES COMPILED  
 
 ---
 
@@ -230,6 +232,16 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #193 | P0 Consistency 08: Stale cached cert cannot override DB revocation in goal check | Fail closed: `NEEDS_REVIEW` (fresh DB lookup enforced) | ✅ PASSED |
 | #194 | P0 Consistency 09: Stale cached cert cannot override DB record removal | Fail closed: `NEEDS_REVIEW` (stale cache purged) | ✅ PASSED |
 | #195 | P0 Consistency 10: Database outage during async goal check fails closed | Fail closed: `NEEDS_REVIEW` without cache fallback | ✅ PASSED |
+| #196 | P0 Route 01: Missing or malformed dates (`validFrom`, `validUntil`, `verifiedAt`) | Fail closed: `verificationStatus = 'MALFORMED_TIMESTAMPS'`, `isCurrentlyValid = false` | ✅ PASSED |
+| #197 | P0 Route 02: Current date outside validity period (expired or future-dated) | Fail closed: `verificationStatus = 'EXPIRED' / 'NOT_YET_VALID'`, `isCurrentlyValid = false` | ✅ PASSED |
+| #198 | P0 Route 03: Missing or stale revocation evidence (> 30 days) | Fail closed: `verificationStatus = 'STALE_VERIFICATION'`, `isCurrentlyValid = false` | ✅ PASSED |
+| #199 | P0 Route 04: Revoked certificate authoritative check | Fail closed: `verificationStatus = 'REVOKED'`, `recordType = 'HISTORICAL_EVIDENCE_RECORD'` | ✅ PASSED |
+| #200 | P0 Route 05: Strict binding to product, barcode, manufacturer, authority, and standard | Evaluates exact binding; mismatches fail closed with specific status | ✅ PASSED |
+| #201 | P0 Route 06: Database record existence never implies current validity | Expired/revoked records returned as `isCurrentlyValid = false` | ✅ PASSED |
+| #202 | P0 Route 07: Cache-Control header strictly enforces `no-store` on cert status | Real-time verification preserved; proxy/browser caching denied | ✅ PASSED |
+| #203 | P0 Route 08: Fail closed on database failure or missing certificate ID (HTTP 404/400) | Missing or invalid params return HTTP 404/400 error | ✅ PASSED |
+| #204 | P0 Route 09: External POST and PUT submissions rejected | HTTP 405 Method Not Allowed; clients cannot create/mutate certs | ✅ PASSED |
+| #205 | P0 Route 10: Zero-exposure of internal cryptographic hashes or operational metadata | `auditRecordHash`, `auditHistory`, `operationId`, `id` stripped | ✅ PASSED |
 
 
 
