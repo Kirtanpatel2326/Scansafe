@@ -39,6 +39,8 @@ import {
   serverEvidenceStore,
   computeVerificationRecordHash
 } from '../lib/guardian-agent/orchestrator/evidence-store'
+import { NextRequest } from 'next/server'
+import { GET as getPublicCertApi, POST as postPublicCertApi, PUT as putPublicCertApi } from '../app/api/guardian/certification/route'
 
 // Setup verified test signing secret (64 characters)
 if (!process.env.GUARDIAN_ATTESTATION_SECRET) {
@@ -130,7 +132,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 195 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 205 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -3693,9 +3695,258 @@ async function main() {
     }
   })
 
+  // ===========================================================================
+  // CATEGORY 15: Public Certification Route Security & Strict Validation (Scenarios 196 - 205)
+  // ===========================================================================
+  console.log('▶ Category 15: Public Certification Route Security & Strict Validation (196 - 205)')
+
+  await runScenario(196, 'P0 Certification Route 01: Missing or malformed dates return MALFORMED_TIMESTAMPS and isCurrentlyValid = false', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_cert_malformed_date',
+      certificateId: 'CERT-MALFORMED-DATE-01',
+      associatedProductId: 'prod_malformed',
+      validFrom: 'not-a-valid-date',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-MALFORMED-DATE-01')
+    const res = await getPublicCertApi(req)
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'MALFORMED_TIMESTAMPS')
+    assert.equal(body.data.isCurrentlyValid, false)
+    assert.equal(body.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+  })
+
+  await runScenario(197, 'P0 Certification Route 02: Current date outside validity period returns EXPIRED or NOT_YET_VALID with isCurrentlyValid = false', async () => {
+    // Expired cert
+    const expiredOp = createTestVerificationOperation({
+      operationId: 'op_cert_expired_period',
+      certificateId: 'CERT-EXPIRED-PERIOD-01',
+      associatedProductId: 'prod_expired_period',
+      validFrom: '2020-01-01T00:00:00Z',
+      validUntil: '2023-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    // Future cert
+    const futureOp = createTestVerificationOperation({
+      operationId: 'op_cert_future_period',
+      certificateId: 'CERT-FUTURE-PERIOD-01',
+      associatedProductId: 'prod_future_period',
+      validFrom: '2030-01-01T00:00:00Z',
+      validUntil: '2035-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([expiredOp, futureOp])
+
+    const reqExpired = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-EXPIRED-PERIOD-01')
+    const resExpired = await getPublicCertApi(reqExpired)
+    const bodyExpired = await resExpired.json()
+    assert.equal(bodyExpired.data.verificationStatus, 'EXPIRED')
+    assert.equal(bodyExpired.data.isCurrentlyValid, false)
+    assert.equal(bodyExpired.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+
+    const reqFuture = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-FUTURE-PERIOD-01')
+    const resFuture = await getPublicCertApi(reqFuture)
+    const bodyFuture = await resFuture.json()
+    assert.equal(bodyFuture.data.verificationStatus, 'NOT_YET_VALID')
+    assert.equal(bodyFuture.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(198, 'P0 Certification Route 03: Missing or stale revocation evidence (>30d) returns STALE_VERIFICATION and isCurrentlyValid = false', async () => {
+    const staleOp = createTestVerificationOperation({
+      operationId: 'op_cert_stale_rev_check',
+      certificateId: 'CERT-STALE-REV-CHECK-01',
+      associatedProductId: 'prod_stale_rev',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: '2026-01-01T00:00:00Z' // > 30 days old
+    })
+    registerTestVerificationOperations([staleOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-STALE-REV-CHECK-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STALE_VERIFICATION')
+    assert.equal(body.data.isCurrentlyValid, false)
+    assert.equal(body.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+  })
+
+  await runScenario(199, 'P0 Certification Route 04: Revoked certificate returns REVOKED, HISTORICAL_EVIDENCE_RECORD, and isCurrentlyValid = false', async () => {
+    const revokedOp = createTestVerificationOperation({
+      operationId: 'op_cert_revoked_check',
+      certificateId: 'CERT-REVOKED-CHECK-01',
+      associatedProductId: 'prod_revoked_check',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString(),
+      revocationStatus: 'REVOKED'
+    })
+    registerTestVerificationOperations([revokedOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-REVOKED-CHECK-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'REVOKED')
+    assert.equal(body.data.isCurrentlyValid, false)
+    assert.equal(body.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+  })
+
+  await runScenario(200, 'P0 Certification Route 05: Strict binding to product, barcode, manufacturer, authority, and standard', async () => {
+    const bindOp = createTestVerificationOperation({
+      operationId: 'op_cert_binding_check',
+      certificateId: 'CERT-BINDING-CHECK-01',
+      associatedProductId: 'prod_target_123',
+      brand: 'Nature Harvest',
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([bindOp])
+
+    // Product mismatch
+    const reqBadProd = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-BINDING-CHECK-01&productId=wrong_product')
+    const resBadProd = await getPublicCertApi(reqBadProd)
+    const bodyBadProd = await resBadProd.json()
+    assert.equal(bodyBadProd.data.verificationStatus, 'PRODUCT_MISMATCH')
+    assert.equal(bodyBadProd.data.isCurrentlyValid, false)
+
+    // Barcode mismatch
+    const reqBadBarcode = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-BINDING-CHECK-01&barcode=999999999999')
+    const resBadBarcode = await getPublicCertApi(reqBadBarcode)
+    const bodyBadBarcode = await resBadBarcode.json()
+    assert.equal(bodyBadBarcode.data.verificationStatus, 'PRODUCT_MISMATCH')
+    assert.equal(bodyBadBarcode.data.isCurrentlyValid, false)
+
+    // Manufacturer mismatch
+    const reqBadMfr = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-BINDING-CHECK-01&manufacturer=WrongBrand')
+    const resBadMfr = await getPublicCertApi(reqBadMfr)
+    const bodyBadMfr = await resBadMfr.json()
+    assert.equal(bodyBadMfr.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(bodyBadMfr.data.isCurrentlyValid, false)
+
+    // Authority mismatch
+    const reqBadAuth = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-BINDING-CHECK-01&issuingAuthority=FakeAgency')
+    const resBadAuth = await getPublicCertApi(reqBadAuth)
+    const bodyBadAuth = await resBadAuth.json()
+    assert.equal(bodyBadAuth.data.verificationStatus, 'ISSUING_AUTHORITY_MISMATCH')
+    assert.equal(bodyBadAuth.data.isCurrentlyValid, false)
+
+    // Standard mismatch
+    const reqBadStd = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-BINDING-CHECK-01&standard=NON_EXISTENT_STD')
+    const resBadStd = await getPublicCertApi(reqBadStd)
+    const bodyBadStd = await resBadStd.json()
+    assert.equal(bodyBadStd.data.verificationStatus, 'STANDARD_MISMATCH')
+    assert.equal(bodyBadStd.data.isCurrentlyValid, false)
+
+    // Matching query
+    const reqMatch = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-BINDING-CHECK-01&productId=prod_target_123&manufacturer=Nature%20Harvest&issuingAuthority=USDA%20National%20Organic%20Program&standard=NOP_ORGANIC')
+    const resMatch = await getPublicCertApi(reqMatch)
+    const bodyMatch = await resMatch.json()
+    assert.equal(bodyMatch.data.verificationStatus, 'AUTHENTICATED_VALID')
+    assert.equal(bodyMatch.data.isCurrentlyValid, true)
+    assert.equal(bodyMatch.data.recordType, 'CURRENT_AUTHORITATIVE_RECORD')
+  })
+
+  await runScenario(201, 'P0 Certification Route 06: Database record existence never implies current certification validity', async () => {
+    // Record exists in DB but is expired
+    const expiredDbOp = createTestVerificationOperation({
+      operationId: 'op_cert_db_exists_expired',
+      certificateId: 'CERT-EXISTS-BUT-EXPIRED',
+      associatedProductId: 'prod_expired_db',
+      validFrom: '2021-01-01T00:00:00Z',
+      validUntil: '2022-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([expiredDbOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-EXISTS-BUT-EXPIRED')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true) // Database record found
+    assert.equal(body.data.isCurrentlyValid, false, 'Record existence must NEVER imply current validity')
+    assert.equal(body.data.verificationStatus, 'EXPIRED')
+    assert.equal(body.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
+  })
+
+  await runScenario(202, 'P0 Certification Route 07: Cache-Control strictly enforces no-store on certification status', async () => {
+    const validOp = createTestVerificationOperation({
+      operationId: 'op_cert_cache_control_check',
+      certificateId: 'CERT-CACHE-CONTROL-CHECK',
+      associatedProductId: 'prod_cc_check',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([validOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-CACHE-CONTROL-CHECK')
+    const res = await getPublicCertApi(req)
+    const ccHeader = res.headers.get('cache-control')
+    assert.ok(ccHeader, 'Cache-Control header must be present')
+    assert.ok(ccHeader.includes('no-store'), 'Cache-Control must contain no-store')
+    assert.ok(ccHeader.includes('no-cache'), 'Cache-Control must contain no-cache')
+  })
+
+  await runScenario(203, 'P0 Certification Route 08: Fail closed on database failure or non-existent certificate ID (HTTP 404/400)', async () => {
+    // Non-existent cert
+    const reqNotFound = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=NON-EXISTENT-CERT-999999')
+    const resNotFound = await getPublicCertApi(reqNotFound)
+    assert.equal(resNotFound.status, 404)
+    const bodyNotFound = await resNotFound.json()
+    assert.equal(bodyNotFound.success, false)
+
+    // Missing certificateId
+    const reqMissing = new NextRequest('http://localhost:3000/api/guardian/certification')
+    const resMissing = await getPublicCertApi(reqMissing)
+    assert.equal(resMissing.status, 400)
+  })
+
+  await runScenario(204, 'P0 Certification Route 09: Externally submitted POST/PUT requests strictly rejected with HTTP 405 Method Not Allowed', async () => {
+    const postRes = await postPublicCertApi()
+    assert.equal(postRes.status, 405, 'POST must be rejected with 405')
+    const postBody = await postRes.json()
+    assert.equal(postBody.success, false)
+    assert.ok(postBody.error.includes('prohibited'))
+
+    const putRes = await putPublicCertApi()
+    assert.equal(putRes.status, 405, 'PUT must be rejected with 405')
+    const putBody = await putRes.json()
+    assert.equal(putBody.success, false)
+  })
+
+  await runScenario(205, 'P0 Certification Route 10: Zero exposure of internal cryptographic hashes or operational metadata in public response', async () => {
+    const safeOp = createTestVerificationOperation({
+      operationId: 'op_cert_zero_exposure',
+      certificateId: 'CERT-ZERO-EXPOSURE-01',
+      associatedProductId: 'prod_zero_exposure',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString(),
+      auditHistory: [{ timestamp: new Date().toISOString(), action: 'VERIFIED_BY_AGENT', actor: 'internal_agent' }]
+    })
+    registerTestVerificationOperations([safeOp])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=CERT-ZERO-EXPOSURE-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    const data = body.data
+
+    assert.equal(data.auditRecordHash, undefined, 'auditRecordHash must NEVER be exposed')
+    assert.equal(data.auditHistory, undefined, 'auditHistory must NEVER be exposed')
+    assert.equal(data.operationId, undefined, 'operationId must NEVER be exposed')
+    assert.equal(data.id, undefined, 'id must NEVER be exposed')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 195`)
+  console.log(`   Passed: ${passedCount} / 205`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }
