@@ -356,7 +356,8 @@ export function normalizeCertificationIdentity(value: string): string {
 
 /**
  * Approved authoritative certification standard aliases.
- * All standards in an alias group are canonically equivalent.
+ * All standards in an alias group represent genuine equivalent official designations of that standard,
+ * not generic attribute claims (e.g. generic "organic" or "gluten free" cannot alias to specific standards).
  */
 export const APPROVED_STANDARD_ALIASES: Record<string, string[]> = {
   nop_organic: [
@@ -366,12 +367,9 @@ export const APPROVED_STANDARD_ALIASES: Record<string, string[]> = {
     'usda certified organic',
     'certified organic usda',
     'usda nop',
-    'organic',
     'national organic program'
   ],
   gfco_gluten_free: [
-    'gluten free',
-    'gluten_free',
     'gfco',
     'gfco certified',
     'gfco gluten free',
@@ -379,28 +377,26 @@ export const APPROVED_STANDARD_ALIASES: Record<string, string[]> = {
     'gluten free certification organization'
   ],
   non_gmo_project: [
-    'non gmo',
-    'non_gmo',
     'non gmo project',
+    'non-gmo project',
     'non gmo project verified',
-    'nongmo project',
-    'non-gmo project verified'
+    'non-gmo project verified',
+    'nongmo project'
   ],
   clean_label_project: [
-    'clean label',
     'clean label project',
     'clean label project verified'
   ],
   fair_trade: [
-    'fair trade',
     'fair trade certified',
+    'fair trade',
     'fairtrade'
   ],
   kosher_ou: [
-    'kosher',
-    'kosher ou',
+    'orthodox union kosher',
     'ou kosher',
-    'orthodox union kosher'
+    'kosher ou',
+    'ou'
   ],
   fssai_organic: [
     'jaivik bharat',
@@ -411,12 +407,12 @@ export const APPROVED_STANDARD_ALIASES: Record<string, string[]> = {
 
 /**
  * Approved authoritative certification issuing authority aliases.
+ * Strictly maps legally registered statutory or certifying bodies to their official abbreviations or parent entities.
  */
 export const APPROVED_AUTHORITY_ALIASES: Record<string, string[]> = {
   usda_national_organic_program: [
     'usda national organic program',
     'usda nop',
-    'usda',
     'united states department of agriculture national organic program',
     'national organic program'
   ],
@@ -431,6 +427,7 @@ export const APPROVED_AUTHORITY_ALIASES: Record<string, string[]> = {
   non_gmo_project: [
     'non-gmo project',
     'non gmo project',
+    'the non-gmo project',
     'the non gmo project'
   ],
   clean_label_project: [
@@ -458,7 +455,8 @@ export const APPROVED_AUTHORITY_ALIASES: Record<string, string[]> = {
   ecocert: [
     'ecocert',
     'ecocert france',
-    'ecocert group'
+    'ecocert group',
+    'ecocert sa'
   ],
   safe_quality_food_institute: [
     'safe quality food institute',
@@ -472,6 +470,7 @@ export const APPROVED_AUTHORITY_ALIASES: Record<string, string[]> = {
 
 /**
  * Approved verified brand and manufacturer aliases.
+ * Strictly maps registered trade names to their verified legal parent corporate entities.
  */
 export const APPROVED_BRAND_ALIASES: Record<string, string[]> = {
   bobs_red_mill: [
@@ -488,7 +487,7 @@ export const APPROVED_BRAND_ALIASES: Record<string, string[]> = {
   nature_harvest: [
     'nature harvest',
     'nature harvest foods',
-    'nature harvest organics'
+    'nature harvest organics llc'
   ],
   artisan_harvest: [
     'artisan harvest',
@@ -497,7 +496,6 @@ export const APPROVED_BRAND_ALIASES: Record<string, string[]> = {
   ],
   pure_harvest_organics: [
     'pure harvest organics',
-    'pure harvest',
     'pure harvest organics llc'
   ],
   purely_elizabeth: [

@@ -132,7 +132,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 240 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 255 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -4970,9 +4970,325 @@ async function main() {
     assert.equal(goalResB.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
   })
 
+  // ---------------------------------------------------------------------------
+  // Category 18: Misleading Aliases, Missing Fields & Forged Claims Regression Suite (241 - 255)
+  // ---------------------------------------------------------------------------
+  console.log('▶ Category 18: Misleading Aliases, Missing Fields & Forged Claims Regression Suite (241 - 255)')
+
+  await runScenario(241, 'P0 Regression 01: Misleading brand alias (Nature Valley vs Nature Harvest) strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_mislead_brand_1',
+      certificateId: 'REG-MISLEAD-B1',
+      associatedProductId: 'prod_mislead_b1',
+      brand: 'Nature Harvest',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-MISLEAD-B1&manufacturer=Nature%20Valley')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(242, 'P0 Regression 02: Misleading brand alias (General Mills vs Simple Mills) strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_mislead_brand_2',
+      certificateId: 'REG-MISLEAD-B2',
+      associatedProductId: 'prod_mislead_b2',
+      brand: 'Simple Mills',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-MISLEAD-B2&manufacturer=General%20Mills')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(243, 'P0 Regression 03: Generic standard claim (organic) claiming NOP_ORGANIC strictly fails closed without generic alias leak', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_mislead_std_1',
+      certificateId: 'REG-MISLEAD-S1',
+      associatedProductId: 'prod_mislead_s1',
+      standard: 'NOP_ORGANIC',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Querying with generic marketing string "organic" against NOP_ORGANIC must fail
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-MISLEAD-S1&standard=organic')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STANDARD_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(244, 'P0 Regression 04: Generic standard claim (gluten free) claiming GFCO_GLUTEN_FREE strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_mislead_std_2',
+      certificateId: 'REG-MISLEAD-S2',
+      associatedProductId: 'prod_mislead_s2',
+      standard: 'GFCO_GLUTEN_FREE',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-MISLEAD-S2&standard=gluten%20free')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STANDARD_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(245, 'P0 Regression 05: Marketing buzzword (clean label) claiming CLEAN_LABEL_PROJECT strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_mislead_std_3',
+      certificateId: 'REG-MISLEAD-S3',
+      associatedProductId: 'prod_mislead_s3',
+      standard: 'CLEAN_LABEL_PROJECT',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-MISLEAD-S3&standard=clean%20label')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STANDARD_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(246, 'P0 Regression 06: Misleading authority name (USDA Quality Certification vs USDA National Organic Program) strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_mislead_auth_1',
+      certificateId: 'REG-MISLEAD-A1',
+      associatedProductId: 'prod_mislead_a1',
+      issuingAuthority: 'USDA National Organic Program',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-MISLEAD-A1&issuingAuthority=USDA%20Quality%20Certification')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'ISSUING_AUTHORITY_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(247, 'P0 Regression 07: Authoritative record with empty string standard fails closed with STANDARD_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_missing_field_std',
+      certificateId: 'REG-EMPTY-STD-01',
+      associatedProductId: 'prod_empty_std',
+      standard: '',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-EMPTY-STD-01&standard=NOP_ORGANIC')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STANDARD_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(248, 'P0 Regression 08: Authoritative record with empty string issuingAuthority fails closed with ISSUING_AUTHORITY_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_missing_field_auth',
+      certificateId: 'REG-EMPTY-AUTH-01',
+      associatedProductId: 'prod_empty_auth',
+      issuingAuthority: '',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-EMPTY-AUTH-01&issuingAuthority=USDA%20National%20Organic%20Program')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'ISSUING_AUTHORITY_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(249, 'P0 Regression 09: Authoritative record with empty string brand fails closed with MANUFACTURER_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_missing_field_brand',
+      certificateId: 'REG-EMPTY-BRAND-01',
+      associatedProductId: 'prod_empty_brand',
+      brand: '',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-EMPTY-BRAND-01&manufacturer=Nature%20Harvest')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(250, 'P0 Regression 10: Authoritative record with empty string evidenceUrl fails closed with EVIDENCE_URL_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_missing_field_url',
+      certificateId: 'REG-EMPTY-URL-01',
+      associatedProductId: 'prod_empty_url',
+      evidenceUrl: '',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=REG-EMPTY-URL-01&evidenceUrl=https://ams.usda.gov/verify')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'EVIDENCE_URL_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(251, 'P0 Regression 11: Forged claim with unapproved spoof registry domain (ams.usda.gov.attacker.com) strictly rejected', async () => {
+    const cert = createValidCert('prod_spoof_url', {
+      certificationId: 'FORGED-URL-01',
+      evidenceUrl: 'https://ams.usda.gov.attacker.com/verify/fake-cert'
+    })
+    const item = createItem({ id: 'prod_spoof_url', certifiedRecords: [cert] })
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Forged or unapproved registry URL'))
+  })
+
+  await runScenario(252, 'P0 Regression 12: Forged claim with tampered server attestation token strictly rejected', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_tamper_token',
+      certificateId: 'FORGED-TOKEN-01',
+      associatedProductId: 'prod_tamper_token',
+      issuingAuthority: 'Independent Standards Registry',
+      standard: 'ORGANIC',
+      evidenceUrl: 'https://registry.standards.org/verify/prod_tamper_token',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const cert = createValidCert('prod_tamper_token', {
+      certificationId: 'FORGED-TOKEN-01',
+      serverAttestationToken: 'v1.k1.2027-01-01T00:00:00.000Z.deadbeefbadc0ffee'
+    })
+    const item = createItem({ id: 'prod_tamper_token', certifiedRecords: [cert] })
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Invalid cryptographic attestation token'))
+  })
+
+  await runScenario(253, 'P0 Regression 13: Stolen attestation token generated for another product ID strictly fails verification', async () => {
+    const validCertForProductA = createValidCert('prod_legitimate_a', {
+      certificationId: 'STOLEN-TOKEN-01'
+    })
+    const stolenToken = generateServerAttestation(validCertForProductA, 'prod_legitimate_a')
+
+    const op = createTestVerificationOperation({
+      operationId: 'op_stolen_token_b',
+      certificateId: 'STOLEN-TOKEN-01',
+      associatedProductId: 'prod_attacker_b',
+      issuingAuthority: 'Independent Standards Registry',
+      standard: 'ORGANIC',
+      evidenceUrl: 'https://registry.standards.org/verify/prod_attacker_b',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Attacker mounts stolen token onto Product B
+    const certOnProductB = createValidCert('prod_attacker_b', {
+      certificationId: 'STOLEN-TOKEN-01',
+      serverAttestationToken: stolenToken
+    })
+    const itemB = createItem({ id: 'prod_attacker_b', certifiedRecords: [certOnProductB] })
+
+    const asyncRes = await verifyClaimedCertificationAsync(certOnProductB, itemB)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Invalid cryptographic attestation token'))
+  })
+
+  await runScenario(254, 'P0 Regression 14: Attestation token past its cryptographic expiration timestamp strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_expired_token',
+      certificateId: 'EXPIRED-TOKEN-01',
+      associatedProductId: 'prod_expired_token',
+      issuingAuthority: 'Independent Standards Registry',
+      standard: 'ORGANIC',
+      evidenceUrl: 'https://registry.standards.org/verify/prod_expired_token',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const cert = createValidCert('prod_expired_token', {
+      certificationId: 'EXPIRED-TOKEN-01'
+    })
+    const pastExpires = new Date(Date.now() - 3600 * 1000).toISOString()
+    const kid = 'k1'
+    const secret = process.env.GUARDIAN_ATTESTATION_SECRET!
+    const payload = ['v1', kid, pastExpires, 'prod_expired_token', cert.associatedProductId, cert.certificationBody.toLowerCase(), (cert.certificationId || '').toLowerCase(), (cert.standard || '').toLowerCase(), cert.evidenceUrl, (cert.validUntil || ''), (cert.verifiedAt || '')].join('|')
+    const hmac = crypto.createHmac('sha256', secret).update(payload).digest('hex')
+    cert.serverAttestationToken = ['v1', kid, pastExpires, hmac].join('.')
+
+    const item = createItem({ id: 'prod_expired_token', certifiedRecords: [cert] })
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Invalid cryptographic attestation token'))
+  })
+
+  await runScenario(255, 'P0 Regression 15: Recommendation engine rejects forged claim without completed verification operation and awards zero bonus', async () => {
+    // Product claiming certified organic with spoof URL and unverified server operation
+    const forgedCert = createValidCert('prod_forged_recom', {
+      certificationId: 'FORGED-RECOM-01',
+      certificationBody: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://attacker-spoofed-domain.com/cert'
+    })
+    const item = createItem({
+      id: 'prod_forged_recom',
+      name: 'Forged Organic Cereal',
+      certifiedRecords: [forgedCert]
+    })
+
+    const goal = decomposeUserGoal('Find certified organic breakfast', [])
+    const goalRes = await evaluateProductGoalRelevanceAsync(item, goal)
+
+    assert.notEqual(goalRes.attributeEvidence['organic']?.status, 'MATCH')
+    assert.equal(goalRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 240`)
+  console.log(`   Passed: ${passedCount} / 255`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

@@ -1,11 +1,11 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.18)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.19)
 
-**Document Version:** 8.18.0  
-**Last Updated:** 2026-10-18T14:30:00Z  
+**Document Version:** 8.19.0  
+**Last Updated:** 2026-10-18T14:40:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `a260817`  
-**Status:** EXACT NORMALIZED IDENTITY & VERIFIED ALIAS MATCHING COMPLETE / 240/240 BENCHMARKS PASSED / 13/13 RLS PASSED / 44/44 NEXT.JS ROUTES COMPILED  
+**Git Commit SHA:** `b188b0a`  
+**Status:** EXACT IDENTITY MATCHING & APPROVED ALIASES HARDENED / 255/255 BENCHMARKS PASSED / 13/13 RLS PASSED / 44/44 NEXT.JS ROUTES COMPILED  
 
 ---
 
@@ -156,7 +156,7 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | `npm test` | Core product & dietary gates | 32/32 gates, 10/10 assistant tests, 5/5 user flows | 100% |
 | `npm run test:guardian` | Prototype evidence checks | 18/18 checks passed | 100% |
 | `npm run test:guardian:agent` | Agent state machine & recovery | All workflow checks passed | 100% |
-| `npm run test:guardian:benchmarks` | 185 championship scenarios (incl. 53 adversarial, anti-forgery, key & store tests) | **185 / 185 passed (0 failed, 0 skipped)** | 100% |
+| `npm run test:guardian:benchmarks` | 255 championship scenarios (incl. 53 adversarial, 15 route, 15 dual-path, 15 identity/anti-forgery tests) | **255 / 255 passed (0 failed, 0 skipped)** | 100% |
 | `npm run test:guardian:integration` | Concurrency, abort & replanning | **25 / 25 passed (0 failed)** | 100% |
 | `npm run test:guardian:rls` | RLS isolation, privilege denial, bounds & 50 concurrent requests | **13 / 13 passed** | 100% |
 | `npm run security-audit` | API keys, error handlers & RLS on all 10 tables | 0 critical, 0 warnings | 100% |
@@ -261,6 +261,21 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #223 | P0 Dual-Path 13: Product identity mismatch fails closed on both public API and async verifier | Product identity binding mismatch rejected on both paths | ✅ PASSED |
 | #224 | P0 Dual-Path 14: Database outage or missing record fails closed on both paths | DB unreachable or missing returns HTTP 404 (API) and fails closed (verifier) | ✅ PASSED |
 | #225 | P0 Dual-Path 15: Fully authentic matching certificate passes BOTH public API and recommendation engine | Dual-path equivalence: `AUTHENTICATED_VALID` and goal attribute `MATCH` | ✅ PASSED |
+| #241 | P0 Regression 01: Misleading brand alias (`Nature Valley` vs `Nature Harvest`) | Strict rejection: `MANUFACTURER_MISMATCH` | ✅ PASSED |
+| #242 | P0 Regression 02: Misleading brand alias (`General Mills` vs `Simple Mills`) | Strict rejection: `MANUFACTURER_MISMATCH` | ✅ PASSED |
+| #243 | P0 Regression 03: Generic standard claim (`organic`) claiming `NOP_ORGANIC` | Strict rejection: `STANDARD_MISMATCH` (no generic leak) | ✅ PASSED |
+| #244 | P0 Regression 04: Generic standard claim (`gluten free`) claiming `GFCO_GLUTEN_FREE` | Strict rejection: `STANDARD_MISMATCH` (no generic leak) | ✅ PASSED |
+| #245 | P0 Regression 05: Marketing buzzword (`clean label`) claiming `CLEAN_LABEL_PROJECT` | Strict rejection: `STANDARD_MISMATCH` | ✅ PASSED |
+| #246 | P0 Regression 06: Misleading authority name (`USDA Quality Certification` vs `USDA NOP`) | Strict rejection: `ISSUING_AUTHORITY_MISMATCH` | ✅ PASSED |
+| #247 | P0 Regression 07: Authoritative record with empty string standard | Strict fail closed: `STANDARD_MISMATCH` | ✅ PASSED |
+| #248 | P0 Regression 08: Authoritative record with empty string `issuingAuthority` | Strict fail closed: `ISSUING_AUTHORITY_MISMATCH` | ✅ PASSED |
+| #249 | P0 Regression 09: Authoritative record with empty string brand | Strict fail closed: `MANUFACTURER_MISMATCH` | ✅ PASSED |
+| #250 | P0 Regression 10: Authoritative record with empty string `evidenceUrl` | Strict fail closed: `EVIDENCE_URL_MISMATCH` | ✅ PASSED |
+| #251 | P0 Regression 11: Forged claim with spoof registry domain (`ams.usda.gov.attacker.com`) | Strict fail closed: `UNAPPROVED_EVIDENCE_URL` | ✅ PASSED |
+| #252 | P0 Regression 12: Forged claim with tampered attestation signature | Timing-safe check fails closed | ✅ PASSED |
+| #253 | P0 Regression 13: Forged claim with stolen attestation token on wrong product ID | Binding check fails closed | ✅ PASSED |
+| #254 | P0 Regression 14: Forged claim with expired attestation token | Expired token fails closed | ✅ PASSED |
+| #255 | P0 Regression 15: Recommendation engine rejects forged claim without completed verif op | Zero bonus; attribute set to `NEEDS_REVIEW` | ✅ PASSED |
 
 
 
