@@ -148,7 +148,8 @@ export async function checkGuardianRateLimitShared(
   }
 
   // Strict Production Safety: Never silently fall back to uncoordinated memory in production!
-  if (process.env.NODE_ENV === 'production') {
+  const isStrictProduction = process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV !== 'preview'
+  if (isStrictProduction) {
     console.error('[Guardian RateLimit] Shared atomic rate limiter unavailable in production environment.')
     return NextResponse.json(
       { error: 'Service temporarily unavailable: Shared rate limit coordination offline.' },
@@ -239,7 +240,8 @@ export async function acquireGuardianExecutionSlotShared(
   }
 
   // Strict Production Safety: Never silently fall back to uncoordinated memory in production!
-  if (process.env.NODE_ENV === 'production') {
+  const isStrictProduction = process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV !== 'preview'
+  if (isStrictProduction) {
     console.error('[Guardian Concurrency] Shared lease table unavailable in production environment.')
     return {
       acquired: false,
