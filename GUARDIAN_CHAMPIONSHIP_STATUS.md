@@ -1,12 +1,11 @@
-# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.15)
+# ScanSafe Guardian AI — Championship Architecture & Production Status (V8.17)
 
-**Document Version:** 8.15.0  
-**Last Updated:** 2026-10-15T12:46:00Z  
+**Document Version:** 8.17.0  
+**Last Updated:** 2026-10-18T14:10:00Z  
 **Target Event:** Dubai Create AI Agents Championship  
 **Current Development Branch:** `guardian-october15-security-fix`  
-**Git Commit SHA:** `f4f6372`  
-**Vercel Preview URL:** `https://scansafe-o31d-2n11j6act-kirtanpatel2326s-projects.vercel.app`  
-**Status:** VERCEL PREVIEW ACTIVE (HTTP 200) / 205/205 BENCHMARKS PASSED / 13/13 RLS PASSED / 44/44 NEXT.JS ROUTES COMPILED  
+**Git Commit SHA:** Pending commit  
+**Status:** FULL CERTIFICATION CONSISTENCY FIX COMPLETE / 225/225 BENCHMARKS PASSED / 13/13 RLS PASSED / 44/44 NEXT.JS ROUTES COMPILED  
 
 ---
 
@@ -242,6 +241,26 @@ Guardian enforces strict cryptographic and provenance trust boundaries for all c
 | #203 | P0 Route 08: Fail closed on database failure or missing certificate ID (HTTP 404/400) | Missing or invalid params return HTTP 404/400 error | ✅ PASSED |
 | #204 | P0 Route 09: External POST and PUT submissions rejected | HTTP 405 Method Not Allowed; clients cannot create/mutate certs | ✅ PASSED |
 | #205 | P0 Route 10: Zero-exposure of internal cryptographic hashes or operational metadata | `auditRecordHash`, `auditHistory`, `operationId`, `id` stripped | ✅ PASSED |
+| #206 | P0 Route 11: Contradictory validity dates (`validFrom > validUntil`) | Fail closed: `CONTRADICTORY_VALIDITY_DATES`, `isCurrentlyValid = false` | ✅ PASSED |
+| #207 | P0 Route 12: Future verification/revocation timestamp beyond 5-min clock skew | Fail closed: `FUTURE_DATED_VERIFICATION`, `isCurrentlyValid = false` | ✅ PASSED |
+| #208 | P0 Route 13: Strict matching when stored field is missing | Fail closed with mismatch status rather than skipping validation | ✅ PASSED |
+| #209 | P0 Route 14: Tampered/unauthorized operation lacking registry provenance | Returns HTTP 404; anti-tamper hash mismatch fails closed | ✅ PASSED |
+| #210 | P0 Route 15: Revoked certificate previously in memory invalidated via `bypassCache` | `bypassCache: true` immediately catches revocation across instances | ✅ PASSED |
+| #211 | P0 Dual-Path 01: Missing/malformed dates fail closed on both public API and async verifier | Dual-path equivalence: `MALFORMED_TIMESTAMPS` on both paths | ✅ PASSED |
+| #212 | P0 Dual-Path 02: Contradictory validity dates fail closed on both public API and async verifier | Dual-path equivalence: `CONTRADICTORY_VALIDITY_DATES` on both paths | ✅ PASSED |
+| #213 | P0 Dual-Path 03: Future-dated `verifiedAt` fails closed on both public API and async verifier | Dual-path equivalence: `FUTURE_DATED_VERIFICATION` on both paths | ✅ PASSED |
+| #214 | P0 Dual-Path 04: Future-dated `revocationCheckedAt` fails closed on both public API and async verifier | Dual-path equivalence: `FUTURE_DATED_VERIFICATION` on both paths | ✅ PASSED |
+| #215 | P0 Dual-Path 05: Missing standard on authoritative record fails closed with `STANDARD_MISMATCH` | Authoritative field omission triggers mismatch; never skipped | ✅ PASSED |
+| #216 | P0 Dual-Path 06: Missing `evidenceUrl` on authoritative record fails closed with `EVIDENCE_URL_MISMATCH` | Authoritative field omission triggers mismatch; never skipped | ✅ PASSED |
+| #217 | P0 Dual-Path 07: Missing `issuingAuthority` on authoritative record fails closed with `ISSUING_AUTHORITY_MISMATCH` | Authoritative field omission triggers mismatch; never skipped | ✅ PASSED |
+| #218 | P0 Dual-Path 08: Missing brand on authoritative record fails closed with `MANUFACTURER_MISMATCH` | Authoritative field omission triggers mismatch; never skipped | ✅ PASSED |
+| #219 | P0 Dual-Path 09: Stale revocation evidence (>30 days) fails closed on both public API and recommendation engine | Goal relevance degrades to `NEEDS_REVIEW`; public API flags `STALE_VERIFICATION` | ✅ PASSED |
+| #220 | P0 Dual-Path 10: Revoked certificate fails closed on both public API and recommendation engine | Goal relevance degrades to `NEEDS_REVIEW`; public API flags `REVOKED` | ✅ PASSED |
+| #221 | P0 Dual-Path 11: Expired certificate fails closed on both public API and recommendation engine | Goal relevance degrades to `NEEDS_REVIEW`; public API flags `EXPIRED` | ✅ PASSED |
+| #222 | P0 Dual-Path 12: Certificate not yet valid fails closed on both public API and recommendation engine | Goal relevance degrades to `NEEDS_REVIEW`; public API flags `NOT_YET_VALID` | ✅ PASSED |
+| #223 | P0 Dual-Path 13: Product identity mismatch fails closed on both public API and async verifier | Product identity binding mismatch rejected on both paths | ✅ PASSED |
+| #224 | P0 Dual-Path 14: Database outage or missing record fails closed on both paths | DB unreachable or missing returns HTTP 404 (API) and fails closed (verifier) | ✅ PASSED |
+| #225 | P0 Dual-Path 15: Fully authentic matching certificate passes BOTH public API and recommendation engine | Dual-path equivalence: `AUTHENTICATED_VALID` and goal attribute `MATCH` | ✅ PASSED |
 
 
 

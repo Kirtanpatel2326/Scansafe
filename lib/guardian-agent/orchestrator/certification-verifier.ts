@@ -3,7 +3,11 @@ import {
   ClaimedCertification,
   ProductEvidence
 } from './types'
-import { serverEvidenceStore, AuditableVerificationOperation } from './evidence-store'
+import {
+  serverEvidenceStore,
+  AuditableVerificationOperation,
+  computeVerificationRecordHash
+} from './evidence-store'
 
 /**
  * Server-Controlled Certification Verification Service
@@ -335,6 +339,314 @@ export function verifyServerAttestation(
   return false
 }
 
+export interface CertificationMatchCriteria {
+  productId?: string
+  barcode?: string
+  manufacturer?: string
+  issuingAuthority?: string
+  standard?: string
+  evidenceUrl?: string
+}
+
+export type CertificationVerificationStatus =
+  | 'AUTHENTICATED_VALID'
+  | 'REVOKED'
+  | 'EXPIRED'
+  | 'NOT_YET_VALID'
+  | 'STALE_VERIFICATION'
+  | 'MALFORMED_TIMESTAMPS'
+  | 'CONTRADICTORY_VALIDITY_DATES'
+  | 'FUTURE_DATED_VERIFICATION'
+  | 'UNAUTHORIZED_VERIFICATION_OPERATION'
+  | 'PRODUCT_MISMATCH'
+  | 'MANUFACTURER_MISMATCH'
+  | 'ISSUING_AUTHORITY_MISMATCH'
+  | 'STANDARD_MISMATCH'
+  | 'EVIDENCE_URL_MISMATCH'
+
+export interface CertificationEvaluationResult {
+  isValid: boolean
+  verificationStatus: CertificationVerificationStatus
+  statusReason: string
+  recordType: 'CURRENT_AUTHORITATIVE_RECORD' | 'HISTORICAL_EVIDENCE_RECORD'
+  invalidationReason?: string
+}
+
+/**
+ * Shared Authoritative Certification Record Evaluation Engine.
+ *
+ * Enforces unified verification rules across both the public certification API (/api/guardian/certification)
+ * and Guardian's recommendation engine (verifyClaimedCertification / verifyClaimedCertificationAsync),
+ * guaranteeing that decisions cannot diverge.
+ *
+ * Rules:
+ * 1. Requires valid, parseable validFrom, validUntil, verifiedAt (timestamp), and revocationCheckedAt.
+ * 2. Rejects missing, malformed, contradictory (validFrom > validUntil), expired, future-dated, or stale (>30 days) evidence.
+ * 3. Uses documented minimal clock-skew tolerance (MAX_CLOCK_SKEW_MS = 5 * 60 * 1000).
+ * 4. Strictly validates authorized completed verification operation (hash integrity, approved method, source, operationId).
+ * 5. Requires strict matches for product identity, barcode, manufacturer/brand, issuing authority, certificate standard, and evidence URL.
+ * 6. Never skips verification when the authoritative field is missing.
+ * 7. Strictly rejects revoked records and enforces fail-closed semantics.
+ */
+export function evaluateAuthoritativeCertificationRecord(
+  record: AuditableVerificationOperation,
+  criteria: CertificationMatchCriteria = {},
+  options?: {
+    now?: number
+    maxClockSkewMs?: number
+    maxStaleMs?: number
+  }
+): CertificationEvaluationResult {
+  const now = options?.now ?? Date.now()
+  const maxClockSkewMs = options?.maxClockSkewMs ?? MAX_CLOCK_SKEW_MS
+  const maxStaleMs = options?.maxStaleMs ?? (30 * 24 * 60 * 60 * 1000)
+
+  // 1. Revocation check (explicit status enum or revocation registry)
+  const isRevoked = record.revocationStatus === 'REVOKED' || isCertificateRevoked(record.certificateId)
+  if (isRevoked) {
+    return {
+      isValid: false,
+      verificationStatus: 'REVOKED',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: 'Certificate has been revoked by issuing authority and is retained as a historical evidence record only.',
+      invalidationReason: `Revoked certification in authoritative registry: Certificate ID "${record.certificateId}" has been revoked by issuing authority.`
+    }
+  }
+
+  // 2. Strict timestamp parsing & presence check
+  const validFromMs = record.validFrom ? Date.parse(record.validFrom) : NaN
+  const validUntilMs = record.validUntil ? Date.parse(record.validUntil) : NaN
+  const verifiedAtStr = record.timestamp || (record as any).verifiedAt
+  const verifiedAtMs = verifiedAtStr ? Date.parse(verifiedAtStr) : NaN
+  const revCheckedMs = record.revocationCheckedAt ? Date.parse(record.revocationCheckedAt) : NaN
+
+  const isMissingOrMalformed =
+    Number.isNaN(validFromMs) ||
+    Number.isNaN(validUntilMs) ||
+    Number.isNaN(verifiedAtMs) ||
+    Number.isNaN(revCheckedMs)
+
+  if (isMissingOrMalformed) {
+    return {
+      isValid: false,
+      verificationStatus: 'MALFORMED_TIMESTAMPS',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: 'Certificate evidence contains missing or invalid timestamp specifications.',
+      invalidationReason: `Malformed timestamps in authoritative registry: Certificate ID "${record.certificateId}" contains missing or invalid timestamp specifications (validFrom, validUntil, verifiedAt, or revocationCheckedAt).`
+    }
+  }
+
+  // 3. Contradictory validity dates (validFrom later than validUntil)
+  if (validFromMs > validUntilMs) {
+    return {
+      isValid: false,
+      verificationStatus: 'CONTRADICTORY_VALIDITY_DATES',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: `Certificate validity dates are contradictory: validFrom (${record.validFrom}) is later than validUntil (${record.validUntil}).`,
+      invalidationReason: `Contradictory validity dates in authoritative registry: validFrom (${record.validFrom}) is later than validUntil (${record.validUntil}).`
+    }
+  }
+
+  // 4. Future verification and revocation timestamps beyond clock-skew tolerance
+  const isFutureTimestamps =
+    verifiedAtMs > now + maxClockSkewMs ||
+    revCheckedMs > now + maxClockSkewMs
+
+  if (isFutureTimestamps) {
+    return {
+      isValid: false,
+      verificationStatus: 'FUTURE_DATED_VERIFICATION',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: 'Verification or revocation-check timestamp is future-dated beyond acceptable clock skew (max 5 minutes).',
+      invalidationReason: `Future-dated verification timestamp in authoritative registry: Certificate ID "${record.certificateId}" contains future-dated verification or revocation timestamp exceeding acceptable clock skew (max 5 minutes).`
+    }
+  }
+
+  // 5. Authorized completed verification operation check & cryptographic hash integrity
+  const hasAuthorizedMethod =
+    record.verificationMethod === 'REGISTRY_LOOKUP_AUTHENTICATED' ||
+    record.verificationMethod === 'EXTERNAL_STANDARDS_VERIFIER'
+  const hasAuthorizedSource = Boolean(record.authoritativeSource && record.authoritativeSource.trim().length > 0)
+  const hasValidOperationId = Boolean(record.operationId && record.operationId.trim().length > 0)
+  const expectedHash = computeVerificationRecordHash(record)
+  const isIntegrityVerified = record.auditRecordHash === expectedHash
+  const isAuthorizedOperation = hasAuthorizedMethod && hasAuthorizedSource && hasValidOperationId && isIntegrityVerified
+
+  if (!isAuthorizedOperation) {
+    return {
+      isValid: false,
+      verificationStatus: 'UNAUTHORIZED_VERIFICATION_OPERATION',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: 'Record lacks proof of an authorized completed verification operation against an authoritative registry.',
+      invalidationReason: `Unauthorized verification operation in authoritative registry: Certificate ID "${record.certificateId}" lacks verified operation provenance or fails hash integrity check.`
+    }
+  }
+
+  // 6. Expiration check
+  const isExpired = record.revocationStatus === 'EXPIRED' || validUntilMs < now
+  if (isExpired) {
+    return {
+      isValid: false,
+      verificationStatus: 'EXPIRED',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: 'Certificate validity period has lapsed. Retained as a historical evidence record only.',
+      invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificateId}" ${record.revocationStatus === 'EXPIRED' ? 'is marked expired.' : `expired on ${record.validUntil}.`}`
+    }
+  }
+
+  // 7. Not yet valid check
+  if (validFromMs > now) {
+    return {
+      isValid: false,
+      verificationStatus: 'NOT_YET_VALID',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: `Certificate validity period has not yet begun (valid from: ${record.validFrom}).`,
+      invalidationReason: `Certificate validity period not yet started in authoritative registry: Certificate ID "${record.certificateId}" is only valid starting ${record.validFrom}.`
+    }
+  }
+
+  // 8. Staleness check (>30 days since revocation check)
+  if (now - revCheckedMs > maxStaleMs) {
+    return {
+      isValid: false,
+      verificationStatus: 'STALE_VERIFICATION',
+      recordType: 'HISTORICAL_EVIDENCE_RECORD',
+      statusReason: 'Authoritative revocation check is older than 30 days. Fresh registry verification is required before reliance.',
+      invalidationReason: `Stale revocation evidence: Revocation check for certificate ID "${record.certificateId}" is older than 30 days (${record.revocationCheckedAt}); fresh verification required.`
+    }
+  }
+
+  // 9. Product identity binding
+  if (criteria.productId && criteria.productId.trim()) {
+    const critProd = criteria.productId.trim()
+    if (!record.associatedProductId || record.associatedProductId.trim() !== critProd) {
+      return {
+        isValid: false,
+        verificationStatus: 'PRODUCT_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate was issued for product identity "${record.associatedProductId || 'None'}", which does not match requested product "${critProd}".`,
+        invalidationReason: `Product identity mismatch in authoritative registry: Certificate ID "${record.certificateId}" was issued for product identity "${record.associatedProductId || 'None'}", which does not match candidate product "${critProd}".`
+      }
+    }
+  }
+
+  // 10. Barcode identity binding
+  if (criteria.barcode && criteria.barcode.trim()) {
+    const critBarcode = criteria.barcode.trim()
+    if (!record.associatedProductId || record.associatedProductId.trim() !== critBarcode) {
+      return {
+        isValid: false,
+        verificationStatus: 'PRODUCT_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate was issued for product identity "${record.associatedProductId || 'None'}", which does not match requested barcode "${critBarcode}".`,
+        invalidationReason: `Product identity mismatch in authoritative registry: Certificate ID "${record.certificateId}" was issued for product identity "${record.associatedProductId || 'None'}", which does not match candidate product "${critBarcode}".`
+      }
+    }
+  }
+
+  // 11. Manufacturer / Brand binding
+  if (criteria.manufacturer && criteria.manufacturer.trim()) {
+    const critMfr = criteria.manufacturer.trim().toLowerCase()
+    if (!record.brand || !record.brand.trim()) {
+      return {
+        isValid: false,
+        verificationStatus: 'MANUFACTURER_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate was issued for brand "None", which does not match requested manufacturer "${criteria.manufacturer}".`,
+        invalidationReason: `Brand identity mismatch in authoritative registry: Certificate ID "${record.certificateId}" was registered for brand "None", which does not match product brand "${criteria.manufacturer}".`
+      }
+    }
+    const recBrand = record.brand.trim().toLowerCase()
+    if (recBrand !== critMfr && !recBrand.includes(critMfr) && !critMfr.includes(recBrand)) {
+      return {
+        isValid: false,
+        verificationStatus: 'MANUFACTURER_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate was issued for brand "${record.brand}", which does not match requested manufacturer "${criteria.manufacturer}".`,
+        invalidationReason: `Brand identity mismatch in authoritative registry: Certificate ID "${record.certificateId}" was registered for brand "${record.brand}", which does not match product brand "${criteria.manufacturer}".`
+      }
+    }
+  }
+
+  // 12. Issuing Authority binding
+  if (criteria.issuingAuthority && criteria.issuingAuthority.trim()) {
+    const critAuth = criteria.issuingAuthority.trim().toLowerCase()
+    if (!record.issuingAuthority || !record.issuingAuthority.trim()) {
+      return {
+        isValid: false,
+        verificationStatus: 'ISSUING_AUTHORITY_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate issuing authority "None" does not match requested authority "${criteria.issuingAuthority}".`,
+        invalidationReason: `Issuing authority mismatch in authoritative registry: Certificate ID "${record.certificateId}" was issued by "None", which does not match claimed authority "${criteria.issuingAuthority}".`
+      }
+    }
+    const recAuth = record.issuingAuthority.trim().toLowerCase()
+    if (recAuth !== critAuth && !recAuth.includes(critAuth) && !critAuth.includes(recAuth)) {
+      return {
+        isValid: false,
+        verificationStatus: 'ISSUING_AUTHORITY_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate issuing authority "${record.issuingAuthority}" does not match requested authority "${criteria.issuingAuthority}".`,
+        invalidationReason: `Issuing authority mismatch in authoritative registry: Certificate ID "${record.certificateId}" was issued by "${record.issuingAuthority}", which does not match claimed authority "${criteria.issuingAuthority}".`
+      }
+    }
+  }
+
+  // 13. Certificate Standard binding
+  if (criteria.standard && criteria.standard.trim()) {
+    if (!record.standard || !record.standard.trim()) {
+      return {
+        isValid: false,
+        verificationStatus: 'STANDARD_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate standard "None" does not match requested standard "${criteria.standard}".`,
+        invalidationReason: `Standard mismatch in authoritative registry: Certificate ID "${record.certificateId}" is registered for standard "None", which does not match claimed standard "${criteria.standard}".`
+      }
+    }
+    const regStd = record.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
+    const critStd = criteria.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
+    if (regStd !== critStd && !regStd.includes(critStd) && !critStd.includes(regStd)) {
+      return {
+        isValid: false,
+        verificationStatus: 'STANDARD_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate standard "${record.standard}" does not match requested standard "${criteria.standard}".`,
+        invalidationReason: `Standard mismatch in authoritative registry: Certificate ID "${record.certificateId}" is registered for standard "${record.standard}", which does not match claimed standard "${criteria.standard}".`
+      }
+    }
+  }
+
+  // 14. Evidence URL binding
+  if (criteria.evidenceUrl && criteria.evidenceUrl.trim()) {
+    if (!record.evidenceUrl || !record.evidenceUrl.trim()) {
+      return {
+        isValid: false,
+        verificationStatus: 'EVIDENCE_URL_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate evidence URL "None" does not match requested proof URL "${criteria.evidenceUrl}".`,
+        invalidationReason: `Evidence URL mismatch in authoritative registry: Claimed evidence URL "${criteria.evidenceUrl}" does not match authoritative registry proof URL "None" for certificate ID "${record.certificateId}".`
+      }
+    }
+    if (record.evidenceUrl.trim().toLowerCase() !== criteria.evidenceUrl.trim().toLowerCase()) {
+      return {
+        isValid: false,
+        verificationStatus: 'EVIDENCE_URL_MISMATCH',
+        recordType: 'HISTORICAL_EVIDENCE_RECORD',
+        statusReason: `Certificate evidence URL "${record.evidenceUrl}" does not match requested proof URL "${criteria.evidenceUrl}".`,
+        invalidationReason: `Evidence URL mismatch in authoritative registry: Claimed evidence URL "${criteria.evidenceUrl}" does not match authoritative registry proof URL "${record.evidenceUrl}" for certificate ID "${record.certificateId}".`
+      }
+    }
+  }
+
+  // All authoritative checks passed!
+  return {
+    isValid: true,
+    verificationStatus: 'AUTHENTICATED_VALID',
+    recordType: 'CURRENT_AUTHORITATIVE_RECORD',
+    statusReason: 'Certificate is currently authenticated, active, and within its verified validity window.'
+  }
+}
+
 /**
  * Evaluates a claimed certificate against all trust-boundary rules.
  * Fails closed if any check fails or authentication cannot be confirmed.
@@ -517,93 +829,20 @@ export function verifyClaimedCertification(
     }
   }
 
-  // 1. Revocation check on verification operation record
-  if (verifiedOp.revocationStatus === 'REVOKED' || isCertificateRevoked(verifiedOp.certificateId)) {
+  // Unified authoritative record evaluation using shared engine
+  const evaluation = evaluateAuthoritativeCertificationRecord(verifiedOp, {
+    productId: product.id,
+    barcode: record.barcode || product.gtin,
+    manufacturer: product.brand || record.brand,
+    issuingAuthority: record.certificationBody,
+    standard: record.standard,
+    evidenceUrl: record.evidenceUrl
+  })
+
+  if (!evaluation.isValid) {
     return {
       authenticated: false,
-      invalidationReason: `Revoked certification in authoritative registry: Certificate ID "${record.certificationId}" has been revoked by issuing authority.`
-    }
-  }
-
-  // 1b. Staleness check on verification operation record (max 30 days allowed)
-  if (verifiedOp.revocationCheckedAt) {
-    const revCheckedMs = Date.parse(verifiedOp.revocationCheckedAt)
-    if (Number.isNaN(revCheckedMs) || Date.now() - revCheckedMs > 30 * 24 * 60 * 60 * 1000) {
-      return {
-        authenticated: false,
-        invalidationReason: `Stale revocation evidence: Revocation check for certificate ID "${record.certificationId}" is older than 30 days (${verifiedOp.revocationCheckedAt}); fresh verification required.`
-      }
-    }
-  }
-
-  // 2. Expiration check on verification operation record
-  if (verifiedOp.revocationStatus === 'EXPIRED') {
-    return {
-      authenticated: false,
-      invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" is marked expired.`
-    }
-  }
-  if (verifiedOp.validUntil) {
-    const untilMs = Date.parse(verifiedOp.validUntil)
-    if (!Number.isNaN(untilMs) && untilMs < Date.now()) {
-      return {
-        authenticated: false,
-        invalidationReason: `Expired certification in authoritative registry: Certificate ID "${record.certificationId}" expired on ${verifiedOp.validUntil}.`
-      }
-    }
-  }
-
-  // 3. Product identity binding
-  if (verifiedOp.associatedProductId !== product.id || verifiedOp.associatedProductId !== record.associatedProductId) {
-    return {
-      authenticated: false,
-      invalidationReason: `Product identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued for product identity "${verifiedOp.associatedProductId}", which does not match candidate product "${product.id}".`
-    }
-  }
-
-  // 4. Standard binding
-  if (record.standard && verifiedOp.standard) {
-    const regStd = verifiedOp.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
-    const recStd = record.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
-    if (regStd !== recStd && !regStd.includes(recStd) && !recStd.includes(regStd)) {
-      return {
-        authenticated: false,
-        invalidationReason: `Standard mismatch in authoritative registry: Certificate ID "${record.certificationId}" is registered for standard "${verifiedOp.standard}", which does not match claimed standard "${record.standard}".`
-      }
-    }
-  }
-
-  // 5. Evidence URL binding
-  if (record.evidenceUrl && verifiedOp.evidenceUrl) {
-    if (record.evidenceUrl.trim().toLowerCase() !== verifiedOp.evidenceUrl.trim().toLowerCase()) {
-      return {
-        authenticated: false,
-        invalidationReason: `Evidence URL mismatch in authoritative registry: Claimed evidence URL "${record.evidenceUrl}" does not match authoritative registry proof URL "${verifiedOp.evidenceUrl}" for certificate ID "${record.certificationId}".`
-      }
-    }
-  }
-
-  // 6. Issuing authority binding
-  if (record.certificationBody && verifiedOp.issuingAuthority) {
-    const regBody = verifiedOp.issuingAuthority.trim().toLowerCase()
-    const recBody = record.certificationBody.trim().toLowerCase()
-    if (regBody !== recBody && !regBody.includes(recBody) && !recBody.includes(regBody)) {
-      return {
-        authenticated: false,
-        invalidationReason: `Issuing authority mismatch in authoritative registry: Certificate ID "${record.certificationId}" was issued by "${verifiedOp.issuingAuthority}", which does not match claimed authority "${record.certificationBody}".`
-      }
-    }
-  }
-
-  // 7. Brand binding (if both specify)
-  if (verifiedOp.brand && product.brand) {
-    const regBrand = verifiedOp.brand.trim().toLowerCase()
-    const prodBrand = product.brand.trim().toLowerCase()
-    if (!regBrand.includes(prodBrand) && !prodBrand.includes(regBrand)) {
-      return {
-        authenticated: false,
-        invalidationReason: `Brand identity mismatch in authoritative registry: Certificate ID "${record.certificationId}" was registered for brand "${verifiedOp.brand}", which does not match product brand "${product.brand}".`
-      }
+      invalidationReason: evaluation.invalidationReason || evaluation.statusReason
     }
   }
 

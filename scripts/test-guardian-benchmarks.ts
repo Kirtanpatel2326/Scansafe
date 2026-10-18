@@ -132,7 +132,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 210 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 225 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -4068,9 +4068,511 @@ async function main() {
     assert.equal(body2.data.recordType, 'HISTORICAL_EVIDENCE_RECORD')
   })
 
+  // ===========================================================================
+  // CATEGORY 16: Shared Certification Consistency & Dual-Path Equivalence (Scenarios 211 - 225)
+  // ===========================================================================
+  console.log('▶ Category 16: Shared Certification Consistency & Dual-Path Equivalence (211 - 225)')
+
+  const { evaluateProductGoalRelevanceAsync, decomposeUserGoal } = await import('../lib/guardian-agent/orchestrator/goal-verifier')
+
+  await runScenario(211, 'P0 Dual-Path 01: Missing/malformed dates fail closed on both public API and async verifier', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_malformed_01',
+      certificateId: 'DUAL-MALFORMED-DATE-01',
+      associatedProductId: 'prod_dual_malformed',
+      validFrom: 'invalid-date-string',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public Certification API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-MALFORMED-DATE-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MALFORMED_TIMESTAMPS')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Guardian Recommendation Engine / Async Verifier
+    const cert = createValidCert('prod_dual_malformed', {
+      certificationId: 'DUAL-MALFORMED-DATE-01'
+    })
+    const item = createItem({ id: 'prod_dual_malformed', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Malformed timestamps in authoritative registry'))
+  })
+
+  await runScenario(212, 'P0 Dual-Path 02: Contradictory validity dates fail closed on both public API and async verifier', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_contra_01',
+      certificateId: 'DUAL-CONTRA-DATES-01',
+      associatedProductId: 'prod_dual_contra',
+      validFrom: '2028-01-01T00:00:00Z', // later than validUntil!
+      validUntil: '2026-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public Certification API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-CONTRA-DATES-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'CONTRADICTORY_VALIDITY_DATES')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Guardian Recommendation Engine / Async Verifier
+    const cert = createValidCert('prod_dual_contra', { certificationId: 'DUAL-CONTRA-DATES-01' })
+    const item = createItem({ id: 'prod_dual_contra', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Contradictory validity dates in authoritative registry'))
+  })
+
+  await runScenario(213, 'P0 Dual-Path 03: Future-dated verifiedAt fails closed on both public API and async verifier', async () => {
+    const futureTime = new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1 hour future
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_future_ver_01',
+      certificateId: 'DUAL-FUTURE-VER-01',
+      associatedProductId: 'prod_dual_future_ver',
+      timestamp: futureTime,
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-FUTURE-VER-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'FUTURE_DATED_VERIFICATION')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_dual_future_ver', { certificationId: 'DUAL-FUTURE-VER-01' })
+    const item = createItem({ id: 'prod_dual_future_ver', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Future-dated verification timestamp in authoritative registry'))
+  })
+
+  await runScenario(214, 'P0 Dual-Path 04: Future-dated revocationCheckedAt fails closed on both public API and async verifier', async () => {
+    const futureRevTime = new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1 hour future
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_future_rev_01',
+      certificateId: 'DUAL-FUTURE-REV-01',
+      associatedProductId: 'prod_dual_future_rev',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: futureRevTime
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-FUTURE-REV-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'FUTURE_DATED_VERIFICATION')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_dual_future_rev', { certificationId: 'DUAL-FUTURE-REV-01' })
+    const item = createItem({ id: 'prod_dual_future_rev', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Future-dated verification timestamp in authoritative registry'))
+  })
+
+  await runScenario(215, 'P0 Dual-Path 05: Missing standard on authoritative record fails closed with STANDARD_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_missing_std',
+      certificateId: 'DUAL-MISSING-STD-01',
+      associatedProductId: 'prod_dual_missing_std',
+      issuingAuthority: 'USDA National Organic Program',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/cert',
+      standard: '', // authoritative field is missing/empty!
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API with standard query
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-MISSING-STD-01&standard=NOP_ORGANIC')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STANDARD_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier with standard on claim
+    const cert = createValidCert('prod_dual_missing_std', {
+      certificationId: 'DUAL-MISSING-STD-01',
+      certificationBody: 'USDA National Organic Program',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/cert',
+      standard: 'NOP_ORGANIC'
+    })
+    const item = createItem({ id: 'prod_dual_missing_std', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Standard mismatch in authoritative registry'))
+  })
+
+  await runScenario(216, 'P0 Dual-Path 06: Missing evidenceUrl on authoritative record fails closed with EVIDENCE_URL_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_missing_url',
+      certificateId: 'DUAL-MISSING-URL-01',
+      associatedProductId: 'prod_dual_missing_url',
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: '', // authoritative field is missing/empty!
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API with evidenceUrl query
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-MISSING-URL-01&evidenceUrl=https://ams.usda.gov/organic/cert')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'EVIDENCE_URL_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier with evidenceUrl on claim
+    const cert = createValidCert('prod_dual_missing_url', {
+      certificationId: 'DUAL-MISSING-URL-01',
+      certificationBody: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/cert'
+    })
+    const item = createItem({ id: 'prod_dual_missing_url', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Evidence URL mismatch in authoritative registry'))
+  })
+
+  await runScenario(217, 'P0 Dual-Path 07: Missing issuingAuthority on authoritative record fails closed with ISSUING_AUTHORITY_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_missing_auth',
+      certificateId: 'DUAL-MISSING-AUTH-01',
+      associatedProductId: 'prod_dual_missing_auth',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/cert',
+      issuingAuthority: '', // authoritative field is missing/empty!
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-MISSING-AUTH-01&issuingAuthority=USDA%20National%20Organic%20Program')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'ISSUING_AUTHORITY_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_dual_missing_auth', {
+      certificationId: 'DUAL-MISSING-AUTH-01',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/cert',
+      certificationBody: 'USDA National Organic Program'
+    })
+    const item = createItem({ id: 'prod_dual_missing_auth', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Issuing authority mismatch in authoritative registry'))
+  })
+
+  await runScenario(218, 'P0 Dual-Path 08: Missing brand on authoritative record fails closed with MANUFACTURER_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_missing_brand',
+      certificateId: 'DUAL-MISSING-BRAND-01',
+      associatedProductId: 'prod_dual_missing_brand',
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/cert',
+      brand: undefined, // authoritative field missing!
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-MISSING-BRAND-01&manufacturer=Artisan%20Harvest')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier with candidate product brand
+    const cert = createValidCert('prod_dual_missing_brand', {
+      certificationId: 'DUAL-MISSING-BRAND-01',
+      certificationBody: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/cert'
+    })
+    const item = createItem({
+      id: 'prod_dual_missing_brand',
+      brand: 'Artisan Harvest',
+      certifiedRecords: [cert]
+    })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Brand identity mismatch in authoritative registry'))
+  })
+
+  await runScenario(219, 'P0 Dual-Path 09: Stale revocation evidence (>30 days) fails closed on both public API and recommendation engine', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_stale_rev',
+      certificateId: 'DUAL-STALE-REV-01',
+      associatedProductId: 'prod_dual_stale_rev',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: '2026-01-01T00:00:00Z' // > 30 days old
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-STALE-REV-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STALE_VERIFICATION')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_dual_stale_rev', { certificationId: 'DUAL-STALE-REV-01' })
+    const item = createItem({ id: 'prod_dual_stale_rev', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Stale revocation evidence'))
+
+    // Path 3: Recommendation Engine (evaluateProductGoalRelevanceAsync)
+    const goal = decomposeUserGoal('Find certified organic products', [])
+    const goalRes = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.notEqual(goalRes.attributeEvidence['organic']?.status, 'MATCH')
+    assert.equal(goalRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
+  })
+
+  await runScenario(220, 'P0 Dual-Path 10: Revoked certificate fails closed on both public API and recommendation engine', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_revoked',
+      certificateId: 'DUAL-REVOKED-01',
+      associatedProductId: 'prod_dual_revoked',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString(),
+      revocationStatus: 'REVOKED'
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-REVOKED-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'REVOKED')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_dual_revoked', { certificationId: 'DUAL-REVOKED-01' })
+    const item = createItem({ id: 'prod_dual_revoked', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Revoked certification in authoritative registry'))
+
+    // Path 3: Goal Relevance
+    const goal = decomposeUserGoal('Find certified organic products', [])
+    const goalRes = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.notEqual(goalRes.attributeEvidence['organic']?.status, 'MATCH')
+    assert.equal(goalRes.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
+  })
+
+  await runScenario(221, 'P0 Dual-Path 11: Expired certificate fails closed on both public API and recommendation engine', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_expired',
+      certificateId: 'DUAL-EXPIRED-01',
+      associatedProductId: 'prod_dual_expired',
+      validFrom: '2020-01-01T00:00:00Z',
+      validUntil: '2022-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-EXPIRED-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'EXPIRED')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_dual_expired', { certificationId: 'DUAL-EXPIRED-01' })
+    const item = createItem({ id: 'prod_dual_expired', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Expired certification in authoritative registry'))
+  })
+
+  await runScenario(222, 'P0 Dual-Path 12: Certificate not yet valid fails closed on both public API and recommendation engine', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_future_period',
+      certificateId: 'DUAL-FUTURE-PERIOD-01',
+      associatedProductId: 'prod_dual_future_period',
+      validFrom: '2030-01-01T00:00:00Z',
+      validUntil: '2035-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-FUTURE-PERIOD-01')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'NOT_YET_VALID')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_dual_future_period', { certificationId: 'DUAL-FUTURE-PERIOD-01' })
+    const item = createItem({ id: 'prod_dual_future_period', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Certificate validity period not yet started in authoritative registry'))
+  })
+
+  await runScenario(223, 'P0 Dual-Path 13: Product identity mismatch fails closed on both public API and async verifier', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_prod_mismatch',
+      certificateId: 'DUAL-PROD-MISMATCH-01',
+      associatedProductId: 'real_product_123',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API with wrong productId
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-PROD-MISMATCH-01&productId=wrong_product_999')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'PRODUCT_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier with candidate item having wrong product ID
+    const cert = createValidCert('real_product_123', { certificationId: 'DUAL-PROD-MISMATCH-01' })
+    const itemWithWrongId = createItem({ id: 'wrong_product_999', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, itemWithWrongId)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(
+      asyncRes.invalidationReason?.includes('Certification identity mismatch') ||
+      asyncRes.invalidationReason?.includes('Product identity mismatch in authoritative registry')
+    )
+  })
+
+  await runScenario(224, 'P0 Dual-Path 14: Database outage or missing record fails closed on both paths', async () => {
+    // Non-existent certificate ID
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=NON-EXISTENT-CERT-DUAL-999')
+    const res = await getPublicCertApi(req)
+    assert.equal(res.status, 404)
+    const body = await res.json()
+    assert.equal(body.success, false)
+
+    // Async Verifier with non-existent cert
+    const cert = createValidCert('prod_outage_check', { certificationId: 'NON-EXISTENT-CERT-DUAL-999' })
+    const item = createItem({ id: 'prod_outage_check', certifiedRecords: [cert] })
+
+    // Simulate DB returning null
+    const originalFetch = serverEvidenceStore.fetchRecordFromDatabase.bind(serverEvidenceStore)
+    serverEvidenceStore.fetchRecordFromDatabase = async () => null
+
+    try {
+      const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+      assert.equal(asyncRes.authenticated, false)
+      assert.ok(asyncRes.invalidationReason?.includes('could not be confirmed in the authoritative database'))
+    } finally {
+      serverEvidenceStore.fetchRecordFromDatabase = originalFetch
+    }
+  })
+
+  await runScenario(225, 'P0 Dual-Path 15: Fully authentic matching certificate passes BOTH public API and recommendation engine', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_dual_perfect_match',
+      certificateId: 'DUAL-PERFECT-MATCH-01',
+      associatedProductId: 'prod_perfect_123',
+      brand: 'Pure Harvest Organics',
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/perfect-123',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API with full matching query
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=DUAL-PERFECT-MATCH-01&productId=prod_perfect_123&manufacturer=Pure%20Harvest%20Organics&issuingAuthority=USDA%20National%20Organic%20Program&standard=NOP_ORGANIC&evidenceUrl=https://ams.usda.gov/organic/verify/perfect-123')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+    assert.equal(body.data.isCurrentlyValid, true)
+    assert.equal(body.data.recordType, 'CURRENT_AUTHORITATIVE_RECORD')
+
+    // Path 2: Async Verifier
+    const cert = createValidCert('prod_perfect_123', {
+      certificationId: 'DUAL-PERFECT-MATCH-01',
+      certificationBody: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/perfect-123',
+      brand: 'Pure Harvest Organics'
+    })
+    const item = createItem({
+      id: 'prod_perfect_123',
+      brand: 'Pure Harvest Organics',
+      certifiedRecords: [cert]
+    })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, true, 'Fully authentic certificate must authenticate in async verifier')
+
+    // Path 3: Recommendation Engine (Goal Relevance)
+    const goal = decomposeUserGoal('Find certified organic breakfast', [])
+    const goalRes = await evaluateProductGoalRelevanceAsync(item, goal)
+    assert.equal(goalRes.attributeEvidence['organic']?.status, 'MATCH', 'Goal verifier must award MATCH for authentic certificate')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 210`)
+  console.log(`   Passed: ${passedCount} / 225`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }
