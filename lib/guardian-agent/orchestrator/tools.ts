@@ -101,7 +101,7 @@ export async function searchPublicOpenFoodFacts(
   try {
     timer = setTimeout(() => controller.abort(), 8000)
     const fetchOff = async (q: string) => {
-      const hosts = ['world.openfoodfacts.org', 'us.openfoodfacts.org']
+      const hosts = ['world.openfoodfacts.net', 'world.openfoodfacts.org', 'us.openfoodfacts.org']
       for (const host of hosts) {
         if (controller.signal.aborted) break
         try {
