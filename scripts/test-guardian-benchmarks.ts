@@ -132,7 +132,7 @@ function createItem(overrides: Partial<ProductEvidence> = {}): ProductEvidence {
 
 async function main() {
   console.log('======================================================================')
-  console.log('🛡️  SCANSAFE GUARDIAN AI — 225 AUTONOMOUS BENCHMARK SCENARIO SUITE')
+  console.log('🛡️  SCANSAFE GUARDIAN AI — 240 AUTONOMOUS BENCHMARK SCENARIO SUITE')
   console.log('======================================================================\n')
 
   // ===========================================================================
@@ -4570,9 +4570,409 @@ async function main() {
     assert.equal(goalRes.attributeEvidence['organic']?.status, 'MATCH', 'Goal verifier must award MATCH for authentic certificate')
   })
 
+  // ---------------------------------------------------------------------------
+  // Category 17: Exact Normalized Certification Identity & Verified Alias Matching (226 - 240)
+  // ---------------------------------------------------------------------------
+  console.log('▶ Category 17: Exact Normalized Certification Identity & Verified Alias Matching (226 - 240)')
+
+  await runScenario(226, 'P0 Identity 01: Unsafe partial substring brand match (Harvest vs Nature Harvest) strictly fails with MANUFACTURER_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_sub_brand',
+      certificateId: 'ID-SUB-BRAND-01',
+      associatedProductId: 'prod_sub_brand',
+      brand: 'Nature Harvest',
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/sub-brand',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API with partial substring "Harvest"
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-SUB-BRAND-01&manufacturer=Harvest')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+
+    // Path 2: Async Verifier with candidate item having brand "Harvest"
+    const cert = createValidCert('prod_sub_brand', {
+      certificationId: 'ID-SUB-BRAND-01',
+      brand: 'Nature Harvest'
+    })
+    const item = createItem({ id: 'prod_sub_brand', brand: 'Harvest', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, false)
+    assert.ok(asyncRes.invalidationReason?.includes('Brand identity mismatch'))
+  })
+
+  await runScenario(227, 'P0 Identity 02: Adversarial prefix brand match (Acme vs Acme Fraudulent Foods LLC) strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_pref_brand',
+      certificateId: 'ID-PREF-BRAND-01',
+      associatedProductId: 'prod_pref_brand',
+      brand: 'Acme Fraudulent Foods LLC',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-PREF-BRAND-01&manufacturer=Acme')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+  })
+
+  await runScenario(228, 'P0 Identity 03: Approved brand alias (Bobs Red Mill Natural Foods Inc <-> Bobs Red Mill) successfully authenticates', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_alias_brand',
+      certificateId: 'ID-ALIAS-BRAND-01',
+      associatedProductId: 'prod_bobs_123',
+      brand: "Bob's Red Mill",
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/bobs',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API querying with registered business alias
+    const req = new NextRequest("http://localhost:3000/api/guardian/certification?certificateId=ID-ALIAS-BRAND-01&manufacturer=Bob's%20Red%20Mill%20Natural%20Foods%20Inc")
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+    assert.equal(body.data.isCurrentlyValid, true)
+
+    // Path 2: Async verifier
+    const cert = createValidCert('prod_bobs_123', {
+      certificationId: 'ID-ALIAS-BRAND-01',
+      brand: "Bob's Red Mill",
+      certificationBody: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/bobs'
+    })
+    const item = createItem({
+      id: 'prod_bobs_123',
+      brand: "Bob's Red Mill Natural Foods Inc",
+      certifiedRecords: [cert]
+    })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, true)
+  })
+
+  await runScenario(229, 'P0 Identity 04: Unsafe partial substring issuing authority (National vs USDA National Organic Program) strictly fails with ISSUING_AUTHORITY_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_sub_auth',
+      certificateId: 'ID-SUB-AUTH-01',
+      associatedProductId: 'prod_sub_auth',
+      issuingAuthority: 'USDA National Organic Program',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-SUB-AUTH-01&issuingAuthority=National')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'ISSUING_AUTHORITY_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(230, 'P0 Identity 05: Substring authority spoofing (USDA claiming Fraudulent USDA Organic Body) strictly fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_spoof_auth',
+      certificateId: 'ID-SPOOF-AUTH-01',
+      associatedProductId: 'prod_spoof_auth',
+      issuingAuthority: 'Fraudulent USDA Organic Body',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-SPOOF-AUTH-01&issuingAuthority=USDA')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'ISSUING_AUTHORITY_MISMATCH')
+  })
+
+  await runScenario(231, 'P0 Identity 06: Approved authority alias (USDA NOP <-> USDA National Organic Program) successfully authenticates', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_usda_alias',
+      certificateId: 'ID-USDA-ALIAS-01',
+      associatedProductId: 'prod_usda_alias',
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/usda',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Query with alias "USDA NOP"
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-USDA-ALIAS-01&issuingAuthority=USDA%20NOP')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+  })
+
+  await runScenario(232, 'P0 Identity 07: Approved authority alias (GFCO <-> Gluten-Free Certification Organization) successfully authenticates', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_gfco_alias',
+      certificateId: 'ID-GFCO-ALIAS-01',
+      associatedProductId: 'prod_gfco_alias',
+      issuingAuthority: 'Gluten-Free Certification Organization',
+      standard: 'GFCO_GLUTEN_FREE',
+      evidenceUrl: 'https://gfco.org/verify/alias',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Query with abbreviation alias "GFCO"
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-GFCO-ALIAS-01&issuingAuthority=GFCO')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+  })
+
+  await runScenario(233, 'P0 Identity 08: Unsafe partial substring standard (ORGANIC vs NON_ORGANIC) strictly fails with STANDARD_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_sub_std',
+      certificateId: 'ID-SUB-STD-01',
+      associatedProductId: 'prod_sub_std',
+      standard: 'NON_ORGANIC',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-SUB-STD-01&standard=ORGANIC')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STANDARD_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(234, 'P0 Identity 09: Substring standard suffix injection (GLUTEN_FREE_EXCLUDED vs GLUTEN_FREE) fails closed', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_suffix_std',
+      certificateId: 'ID-SUFFIX-STD-01',
+      associatedProductId: 'prod_suffix_std',
+      standard: 'GLUTEN_FREE_EXCLUDED',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-SUFFIX-STD-01&standard=GLUTEN_FREE')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'STANDARD_MISMATCH')
+  })
+
+  await runScenario(235, 'P0 Identity 10: Slug and whitespace normalization on standard matches accurately', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_norm_std',
+      certificateId: 'ID-NORM-STD-01',
+      associatedProductId: 'prod_norm_std',
+      standard: 'NOP_ORGANIC',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Query with dashed lowercase "nop-organic"
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-NORM-STD-01&standard=nop-organic')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+  })
+
+  await runScenario(236, 'P0 Identity 11: Approved standard alias (USDA Organic <-> NOP_ORGANIC) successfully authenticates on both paths', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_usda_std_alias',
+      certificateId: 'ID-USDA-STD-ALIAS-01',
+      associatedProductId: 'prod_usda_std',
+      standard: 'NOP_ORGANIC',
+      issuingAuthority: 'USDA National Organic Program',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/std-alias',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Path 1: Public API with standard "USDA Organic"
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-USDA-STD-ALIAS-01&standard=USDA%20Organic')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+
+    // Path 2: Async verifier
+    const cert = createValidCert('prod_usda_std', {
+      certificationId: 'ID-USDA-STD-ALIAS-01',
+      standard: 'USDA Organic',
+      certificationBody: 'USDA National Organic Program',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/std-alias'
+    })
+    const item = createItem({ id: 'prod_usda_std', certifiedRecords: [cert] })
+    registerTestVerificationOperations([op])
+
+    const asyncRes = await verifyClaimedCertificationAsync(cert, item)
+    assert.equal(asyncRes.authenticated, true)
+  })
+
+  await runScenario(237, 'P0 Identity 12: Approved standard alias (Certified Gluten Free <-> GFCO_GLUTEN_FREE) successfully authenticates', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_cgf_alias',
+      certificateId: 'ID-CGF-ALIAS-01',
+      associatedProductId: 'prod_cgf_alias',
+      standard: 'GFCO_GLUTEN_FREE',
+      issuingAuthority: 'Gluten-Free Certification Organization',
+      evidenceUrl: 'https://gfco.org/verify/cgf',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-CGF-ALIAS-01&standard=Certified%20Gluten%20Free')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+  })
+
+  await runScenario(238, 'P0 Identity 13: Punctuation normalization on brand (Bobs Red Mill vs Bobs Red Mill) matches without substrings', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_punct_brand',
+      certificateId: 'ID-PUNCT-BRAND-01',
+      associatedProductId: 'prod_punct_brand',
+      brand: "Bob's Red Mill",
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    // Query without apostrophe: "Bobs Red Mill"
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-PUNCT-BRAND-01&manufacturer=Bobs%20Red%20Mill')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.success, true)
+    assert.equal(body.data.verificationStatus, 'AUTHENTICATED_VALID')
+  })
+
+  await runScenario(239, 'P0 Identity 14: Non-aliased arbitrary string similarity (Simple Organics vs Simple Mills) strictly fails with MANUFACTURER_MISMATCH', async () => {
+    const op = createTestVerificationOperation({
+      operationId: 'op_id_fake_sim',
+      certificateId: 'ID-FAKE-SIM-01',
+      associatedProductId: 'prod_fake_sim',
+      brand: 'Simple Mills',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    registerTestVerificationOperations([op])
+
+    const req = new NextRequest('http://localhost:3000/api/guardian/certification?certificateId=ID-FAKE-SIM-01&manufacturer=Simple%20Organics')
+    const res = await getPublicCertApi(req)
+    const body = await res.json()
+    assert.equal(body.data.verificationStatus, 'MANUFACTURER_MISMATCH')
+    assert.equal(body.data.isCurrentlyValid, false)
+  })
+
+  await runScenario(240, 'P0 Identity 15: Full recommendation engine honors approved brand & standard aliases while denying unsafe partial substring claim', async () => {
+    // Product A: Approved brand alias "Bob's Red Mill Natural Foods Inc" + approved standard alias "USDA Organic"
+    const opA = createTestVerificationOperation({
+      operationId: 'op_id_recom_a',
+      certificateId: 'ID-RECOM-A-01',
+      associatedProductId: 'prod_recom_a',
+      brand: "Bob's Red Mill",
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/recom-a',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    const certA = createValidCert('prod_recom_a', {
+      certificationId: 'ID-RECOM-A-01',
+      brand: "Bob's Red Mill",
+      certificationBody: 'USDA National Organic Program',
+      standard: 'USDA Organic',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/recom-a'
+    })
+    const itemA = createItem({
+      id: 'prod_recom_a',
+      brand: "Bob's Red Mill Natural Foods Inc",
+      name: 'Organic Rolled Oats',
+      certifiedRecords: [certA]
+    })
+
+    // Product B: Unsafe partial substring brand "Harvest" claiming certificate for "Nature Harvest"
+    const opB = createTestVerificationOperation({
+      operationId: 'op_id_recom_b',
+      certificateId: 'ID-RECOM-B-01',
+      associatedProductId: 'prod_recom_b',
+      brand: 'Nature Harvest',
+      issuingAuthority: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/recom-b',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2027-01-01T00:00:00Z',
+      revocationCheckedAt: new Date().toISOString()
+    })
+    const certB = createValidCert('prod_recom_b', {
+      certificationId: 'ID-RECOM-B-01',
+      brand: 'Nature Harvest',
+      certificationBody: 'USDA National Organic Program',
+      standard: 'NOP_ORGANIC',
+      evidenceUrl: 'https://ams.usda.gov/organic/verify/recom-b'
+    })
+    const itemB = createItem({
+      id: 'prod_recom_b',
+      brand: 'Harvest', // Unsafe substring!
+      name: 'Organic Rolled Oats',
+      certifiedRecords: [certB]
+    })
+
+    registerTestVerificationOperations([opA, opB])
+
+    const goal = decomposeUserGoal('Find certified organic oats', [])
+
+    const goalResA = await evaluateProductGoalRelevanceAsync(itemA, goal)
+    assert.equal(goalResA.attributeEvidence['organic']?.status, 'MATCH', 'Product A with approved alias must receive MATCH')
+
+    const goalResB = await evaluateProductGoalRelevanceAsync(itemB, goal)
+    assert.notEqual(goalResB.attributeEvidence['organic']?.status, 'MATCH', 'Product B with unsafe partial substring brand MUST NOT receive MATCH')
+    assert.equal(goalResB.attributeEvidence['organic']?.status, 'NEEDS_REVIEW')
+  })
+
   console.log('\n======================================================================')
   console.log(`🎉 ALL ${passedCount} GUARDIAN BENCHMARK SCENARIOS PASSED WITH ZERO ERRORS!`)
-  console.log(`   Passed: ${passedCount} / 225`)
+  console.log(`   Passed: ${passedCount} / 240`)
   console.log(`   Failed: ${failedCount}`)
   console.log('======================================================================\n')
 }

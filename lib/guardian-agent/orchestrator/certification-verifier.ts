@@ -339,6 +339,217 @@ export function verifyServerAttestation(
   return false
 }
 
+/**
+ * Normalizes a certification identity field by trimming, lowercasing,
+ * stripping common punctuation (quotes, periods, commas), and collapsing whitespace.
+ */
+export function normalizeCertificationIdentity(value: string): string {
+  if (!value) return ''
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/['"’`]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Approved authoritative certification standard aliases.
+ * All standards in an alias group are canonically equivalent.
+ */
+export const APPROVED_STANDARD_ALIASES: Record<string, string[]> = {
+  nop_organic: [
+    'nop organic',
+    'nop_organic',
+    'usda organic',
+    'usda certified organic',
+    'certified organic usda',
+    'usda nop',
+    'organic',
+    'national organic program'
+  ],
+  gfco_gluten_free: [
+    'gluten free',
+    'gluten_free',
+    'gfco',
+    'gfco certified',
+    'gfco gluten free',
+    'certified gluten free',
+    'gluten free certification organization'
+  ],
+  non_gmo_project: [
+    'non gmo',
+    'non_gmo',
+    'non gmo project',
+    'non gmo project verified',
+    'nongmo project',
+    'non-gmo project verified'
+  ],
+  clean_label_project: [
+    'clean label',
+    'clean label project',
+    'clean label project verified'
+  ],
+  fair_trade: [
+    'fair trade',
+    'fair trade certified',
+    'fairtrade'
+  ],
+  kosher_ou: [
+    'kosher',
+    'kosher ou',
+    'ou kosher',
+    'orthodox union kosher'
+  ],
+  fssai_organic: [
+    'jaivik bharat',
+    'fssai jaivik bharat',
+    'fssai organic'
+  ]
+}
+
+/**
+ * Approved authoritative certification issuing authority aliases.
+ */
+export const APPROVED_AUTHORITY_ALIASES: Record<string, string[]> = {
+  usda_national_organic_program: [
+    'usda national organic program',
+    'usda nop',
+    'usda',
+    'united states department of agriculture national organic program',
+    'national organic program'
+  ],
+  gluten_free_certification_organization: [
+    'gluten-free certification organization',
+    'gluten free certification organization',
+    'gluten free certification organization (gfco)',
+    'gluten-free certification organization (gfco)',
+    'gfco',
+    'gluten intolerance group'
+  ],
+  non_gmo_project: [
+    'non-gmo project',
+    'non gmo project',
+    'the non gmo project'
+  ],
+  clean_label_project: [
+    'clean label project',
+    'the clean label project'
+  ],
+  orthodox_union: [
+    'orthodox union',
+    'ou',
+    'ou kosher',
+    'union of orthodox jewish congregations of america'
+  ],
+  fssai: [
+    'fssai',
+    'food safety and standards authority of india'
+  ],
+  independent_standards_registry: [
+    'independent standards registry',
+    'standards registry'
+  ],
+  allergen_control_group: [
+    'allergen control group',
+    'acg'
+  ],
+  ecocert: [
+    'ecocert',
+    'ecocert france',
+    'ecocert group'
+  ],
+  safe_quality_food_institute: [
+    'safe quality food institute',
+    'sqfi'
+  ],
+  the_vegan_society: [
+    'the vegan society',
+    'vegan society'
+  ]
+}
+
+/**
+ * Approved verified brand and manufacturer aliases.
+ */
+export const APPROVED_BRAND_ALIASES: Record<string, string[]> = {
+  bobs_red_mill: [
+    "bob's red mill",
+    'bobs red mill',
+    "bob's red mill natural foods",
+    'bobs red mill natural foods inc',
+    "bob's red mill natural foods inc"
+  ],
+  simple_mills: [
+    'simple mills',
+    'simple mills inc'
+  ],
+  nature_harvest: [
+    'nature harvest',
+    'nature harvest foods',
+    'nature harvest organics'
+  ],
+  artisan_harvest: [
+    'artisan harvest',
+    'artisan harvest bakeries',
+    'artisan harvest llc'
+  ],
+  pure_harvest_organics: [
+    'pure harvest organics',
+    'pure harvest',
+    'pure harvest organics llc'
+  ],
+  purely_elizabeth: [
+    'purely elizabeth',
+    'purely elizabeth llc'
+  ]
+}
+
+/**
+ * Strictly verifies identity match between authoritative record and candidate claim.
+ * Requires either exact normalized equivalence or explicit membership in an approved verified alias set.
+ * Unsafe partial substring matching (.includes) is strictly prohibited.
+ */
+export function matchesNormalizedOrAlias(
+  actual: string,
+  expected: string,
+  aliasRegistry?: Record<string, string[]>
+): boolean {
+  if (!actual || !expected) return false
+
+  const normActual = normalizeCertificationIdentity(actual)
+  const normExpected = normalizeCertificationIdentity(expected)
+
+  // 1. Direct exact normalized match
+  if (normActual === normExpected && normActual.length > 0) return true
+
+  // 2. Slug match (ignoring whitespace differences e.g. "noporganic" vs "nop organic")
+  const slugActual = normActual.replace(/\s+/g, '')
+  const slugExpected = normExpected.replace(/\s+/g, '')
+  if (slugActual === slugExpected && slugActual.length > 0) return true
+
+  // 3. Approved verified alias lookup
+  if (aliasRegistry) {
+    for (const [key, aliases] of Object.entries(aliasRegistry)) {
+      const canonicalNorm = normalizeCertificationIdentity(key)
+      const canonicalSlug = canonicalNorm.replace(/\s+/g, '')
+
+      const allSlugs = new Set([
+        canonicalSlug,
+        ...aliases.map(a => normalizeCertificationIdentity(a).replace(/\s+/g, ''))
+      ])
+
+      if (allSlugs.has(slugActual) && allSlugs.has(slugExpected)) {
+        return true
+      }
+    }
+  }
+
+  // Exact normalized match and verified aliases failed; no partial substring match is permitted
+  return false
+}
+
 export interface CertificationMatchCriteria {
   productId?: string
   barcode?: string
@@ -546,7 +757,6 @@ export function evaluateAuthoritativeCertificationRecord(
 
   // 11. Manufacturer / Brand binding
   if (criteria.manufacturer && criteria.manufacturer.trim()) {
-    const critMfr = criteria.manufacturer.trim().toLowerCase()
     if (!record.brand || !record.brand.trim()) {
       return {
         isValid: false,
@@ -556,8 +766,8 @@ export function evaluateAuthoritativeCertificationRecord(
         invalidationReason: `Brand identity mismatch in authoritative registry: Certificate ID "${record.certificateId}" was registered for brand "None", which does not match product brand "${criteria.manufacturer}".`
       }
     }
-    const recBrand = record.brand.trim().toLowerCase()
-    if (recBrand !== critMfr && !recBrand.includes(critMfr) && !critMfr.includes(recBrand)) {
+    const isBrandMatch = matchesNormalizedOrAlias(record.brand, criteria.manufacturer, APPROVED_BRAND_ALIASES)
+    if (!isBrandMatch) {
       return {
         isValid: false,
         verificationStatus: 'MANUFACTURER_MISMATCH',
@@ -570,7 +780,6 @@ export function evaluateAuthoritativeCertificationRecord(
 
   // 12. Issuing Authority binding
   if (criteria.issuingAuthority && criteria.issuingAuthority.trim()) {
-    const critAuth = criteria.issuingAuthority.trim().toLowerCase()
     if (!record.issuingAuthority || !record.issuingAuthority.trim()) {
       return {
         isValid: false,
@@ -580,8 +789,8 @@ export function evaluateAuthoritativeCertificationRecord(
         invalidationReason: `Issuing authority mismatch in authoritative registry: Certificate ID "${record.certificateId}" was issued by "None", which does not match claimed authority "${criteria.issuingAuthority}".`
       }
     }
-    const recAuth = record.issuingAuthority.trim().toLowerCase()
-    if (recAuth !== critAuth && !recAuth.includes(critAuth) && !critAuth.includes(recAuth)) {
+    const isAuthMatch = matchesNormalizedOrAlias(record.issuingAuthority, criteria.issuingAuthority, APPROVED_AUTHORITY_ALIASES)
+    if (!isAuthMatch) {
       return {
         isValid: false,
         verificationStatus: 'ISSUING_AUTHORITY_MISMATCH',
@@ -603,9 +812,8 @@ export function evaluateAuthoritativeCertificationRecord(
         invalidationReason: `Standard mismatch in authoritative registry: Certificate ID "${record.certificateId}" is registered for standard "None", which does not match claimed standard "${criteria.standard}".`
       }
     }
-    const regStd = record.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
-    const critStd = criteria.standard.trim().toLowerCase().replace(/[-_ ]/g, '')
-    if (regStd !== critStd && !regStd.includes(critStd) && !critStd.includes(regStd)) {
+    const isStdMatch = matchesNormalizedOrAlias(record.standard, criteria.standard, APPROVED_STANDARD_ALIASES)
+    if (!isStdMatch) {
       return {
         isValid: false,
         verificationStatus: 'STANDARD_MISMATCH',
@@ -669,9 +877,8 @@ export function verifyClaimedCertification(
 
   // 2. Brand identity binding check (if both certificate and product specify a brand)
   if (record.brand && product.brand) {
-    const recBrandNorm = record.brand.trim().toLowerCase()
-    const prodBrandNorm = product.brand.trim().toLowerCase()
-    if (!recBrandNorm.includes(prodBrandNorm) && !prodBrandNorm.includes(recBrandNorm)) {
+    const isBrandMatch = matchesNormalizedOrAlias(record.brand, product.brand, APPROVED_BRAND_ALIASES)
+    if (!isBrandMatch) {
       return {
         authenticated: false,
         invalidationReason: `Brand identity mismatch: Certificate from ${record.certificationBody} was issued for brand "${record.brand}", which does not match product brand "${product.brand}".`
