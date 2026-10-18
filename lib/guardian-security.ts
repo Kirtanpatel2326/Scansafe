@@ -90,9 +90,25 @@ export function checkGuardianRateLimit(
 }
 
 /**
+ * Determines whether the current execution runtime is a remotely accessible deployed environment.
+ * Remotely accessible deployed environments include:
+ * - Vercel deployments of any kind (VERCEL === '1', VERCEL_ENV === 'production', 'preview', etc.)
+ * - Production builds (NODE_ENV === 'production')
+ *
+ * Process-local in-memory fallback is permitted ONLY in explicitly configured local development
+ * or isolated automated tests. Never infer safety solely from VERCEL_ENV.
+ */
+export function isDeployedEnvironment(): boolean {
+  if (process.env.VERCEL === '1') return true
+  if (Boolean(process.env.VERCEL_ENV)) return true
+  if (process.env.NODE_ENV === 'production') return true
+  return false
+}
+
+/**
  * Production-grade shared atomic rate limiter suitable for Vercel serverless lambdas.
  * Uses PostgreSQL stored procedure `guardian_consume_rate_limit` for single-transaction atomic evaluation.
- * Never silently falls back to uncoordinated memory in production.
+ * Never silently falls back to uncoordinated memory in production or preview deployments.
  */
 export async function checkGuardianRateLimitShared(
   request: Request,
@@ -147,10 +163,10 @@ export async function checkGuardianRateLimitShared(
     }
   }
 
-  // Strict Production Safety: Never silently fall back to uncoordinated memory in production!
-  const isStrictProduction = process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV !== 'preview'
-  if (isStrictProduction) {
-    console.error('[Guardian RateLimit] Shared atomic rate limiter unavailable in production environment.')
+  // Strict Deployed Safety: In every remotely accessible deployed environment (including Vercel Preview and Production),
+  // shared atomic database coordination is required. If shared coordination is unavailable, fail closed with 503.
+  if (isDeployedEnvironment()) {
+    console.error('[Guardian RateLimit] Shared atomic rate limiter unavailable in deployed environment.')
     return NextResponse.json(
       { error: 'Service temporarily unavailable: Shared rate limit coordination offline.' },
       {
@@ -163,7 +179,7 @@ export async function checkGuardianRateLimitShared(
     )
   }
 
-  // Graceful deterministic fallback for offline tests & local development
+  // Process-local fallback permitted ONLY in explicitly configured local development or isolated automated tests
   return checkGuardianRateLimit(request, userId, options)
 }
 
@@ -239,10 +255,10 @@ export async function acquireGuardianExecutionSlotShared(
     }
   }
 
-  // Strict Production Safety: Never silently fall back to uncoordinated memory in production!
-  const isStrictProduction = process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV !== 'preview'
-  if (isStrictProduction) {
-    console.error('[Guardian Concurrency] Shared lease table unavailable in production environment.')
+  // Strict Deployed Safety: In every remotely accessible deployed environment (including Vercel Preview and Production),
+  // shared atomic database leases are required. If shared coordination is unavailable, fail closed with DATABASE_UNAVAILABLE.
+  if (isDeployedEnvironment()) {
+    console.error('[Guardian Concurrency] Shared lease table unavailable in deployed environment.')
     return {
       acquired: false,
       leaseToken: null,
@@ -250,7 +266,7 @@ export async function acquireGuardianExecutionSlotShared(
     }
   }
 
-  // Fallback to in-memory slot for local development and offline unit tests
+  // Fallback to in-memory slot permitted ONLY in explicitly configured local development or isolated automated tests
   const acquired = acquireGuardianExecutionSlot(clientId, maxConcurrent)
   return {
     acquired,

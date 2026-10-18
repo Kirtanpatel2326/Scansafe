@@ -248,6 +248,39 @@ async function main() {
     }
   })
 
+  await runTest('Vercel Preview mode failure safety: rejects execution with 503 and DATABASE_UNAVAILABLE when shared coordination is unavailable', async () => {
+    const origEnv = process.env.NODE_ENV
+    const origVercel = process.env.VERCEL
+    const origVercelEnv = process.env.VERCEL_ENV
+    const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    try {
+      // Emulate Vercel Preview environment with database unconfigured
+      (process.env as any).NODE_ENV = 'production'
+      ;(process.env as any).VERCEL = '1'
+      ;(process.env as any).VERCEL_ENV = 'preview'
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL
+
+      const dummyReq = new Request('http://localhost:3000/api/guardian/agent', {
+        headers: { 'x-forwarded-for': '203.0.113.196' }
+      })
+
+      const { checkGuardianRateLimitShared, acquireGuardianExecutionSlotShared } = await import('../lib/guardian-security')
+      const res = await checkGuardianRateLimitShared(dummyReq, undefined, { routeLabel: 'preview-safety-test' })
+
+      assert(res !== null, 'Expected rate limiter to block request in Vercel Preview when DB unavailable')
+      assert(res?.status === 503, `Expected HTTP 503 Service Unavailable in Vercel Preview, got ${res?.status}`)
+
+      const leaseRes = await acquireGuardianExecutionSlotShared('preview_test_client', 2, 30)
+      assert(leaseRes.acquired === false, 'Must not acquire lease in Vercel Preview without shared database')
+      assert(leaseRes.status === 'DATABASE_UNAVAILABLE', 'Expected DATABASE_UNAVAILABLE status in Vercel Preview')
+    } finally {
+      (process.env as any).NODE_ENV = origEnv
+      if (origVercel !== undefined) (process.env as any).VERCEL = origVercel; else delete (process.env as any).VERCEL
+      if (origVercelEnv !== undefined) (process.env as any).VERCEL_ENV = origVercelEnv; else delete (process.env as any).VERCEL_ENV
+      if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl
+    }
+  })
+
   await runTest('runGuardianAutonomousAgent strictly validates direct caller inputs fail-closed', async () => {
     const { runGuardianAutonomousAgent } = await import('../lib/guardian-agent/orchestrator/engine')
     
