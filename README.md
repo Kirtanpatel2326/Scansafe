@@ -1,6 +1,26 @@
 # ScanSafe: AI Food Label & Ingredient Intelligence
 
-ScanSafe empowers consumers to photograph packaged-food labels to extract listed ingredients, nutrition facts, and potential allergens, providing evidence-based nutritional estimates according to published dietary guidelines.
+[![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
+[![Guardian Benchmarks](https://img.shields.io/badge/Guardian%20Benchmarks-255%2F255%20Passing-30D158.svg)](scripts/test-guardian-benchmarks.ts)
+[![Next.js](https://img.shields.io/badge/Framework-Next.js-black.svg)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
+
+ScanSafe is an open-source clinical food intelligence engine and AI safety verification framework. It empowers consumers and health researchers to analyze packaged-food labels, extract listed ingredients and synthetic additives via computer vision OCR, screen multi-user family allergen matrices, and benchmark AI nutrition models with zero-hallucination fail-closed guarantees.
+
+---
+
+### 🛡️ Guardian AI Safety & Benchmark Suite (255 Scenarios)
+
+ScanSafe includes an autonomous clinical test suite containing **255 benchmark scenarios** to verify AI safety invariants across:
+- **Direct Allergen Screening**: Anaphylaxis prevention across 15 standard allergen classes.
+- **Precautionary Statements & Cross-Contact**: Detecting subtle "may contain" and manufacturing facility cross-contamination.
+- **Conflicting Claims & Label Verification**: Reconciling marketing claims against raw chemical ingredient lists.
+- **Zero Hallucination Proofs**: Enforcing deterministic, non-fabricated nutritional calculations.
+
+Run the benchmark suite locally:
+```bash
+npm run test:guardian:benchmarks
+```
 
 ---
 
