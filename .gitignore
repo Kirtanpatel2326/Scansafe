@@ -35,6 +35,11 @@ yarn-error.log*
 .env*
 !.env.example
 
+# scratch and local test utilities
+scratch/
+*.mp3
+*.wav
+
 # vercel
 .vercel
 
