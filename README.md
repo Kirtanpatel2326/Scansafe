@@ -1,6 +1,7 @@
 # ScanSafe: AI Food Label & Ingredient Intelligence
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
+[![CI](https://github.com/Kirtanpatel2326/Scansafe/actions/workflows/ci.yml/badge.svg)](https://github.com/Kirtanpatel2326/Scansafe/actions/workflows/ci.yml)
 [![Guardian Benchmarks](https://img.shields.io/badge/Guardian%20Benchmarks-255%2F255%20Passing-30D158.svg)](scripts/test-guardian-benchmarks.ts)
 [![Next.js](https://img.shields.io/badge/Framework-Next.js-black.svg)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
