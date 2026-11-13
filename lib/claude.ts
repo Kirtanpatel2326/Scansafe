@@ -1312,6 +1312,10 @@ JSON.stringify({
       );
       break;
     } catch (err: any) {
+      if (err?.response?.status === 402 || err?.response?.data?.error?.code === 402) {
+        const detail = err?.response?.data?.error?.message || "Your prepayment credits are depleted on Google AI Studio.";
+        throw new Error(`Gemini AI credits depleted (HTTP 402): ${detail}`);
+      }
       retryCount++;
       if (retryCount > maxRetries) throw err;
       console.warn("Gemini API attempt " + retryCount + " failed. Retrying... Error: " + err.message);
@@ -1741,24 +1745,33 @@ JSON.stringify({
   alternatives_detailed: [{ name: "Clean Alternative", brand: "Brand", reason: "Why better", estimated_price_inr: 100, buy_url_blinkit: "url" }]
 }, null, 2) + "\nDo NOT wrap with markdown. Return ONLY raw JSON.";
 
-  const response = await axios.post(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiApiKey,
-    {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [
-        {
-          parts: [
-            { text: "Product: " + productName + "\nBrand: " + brand + "\nRaw Ingredients: " + ingredientsText + langPrompt }
-          ]
-        }
-      ],
-      generationConfig: { responseMimeType: "application/json" }
-    },
-    {
-      headers: { "content-type": "application/json" },
-      httpsAgent: keepAliveAgent
+  let response;
+  try {
+    response = await axios.post(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiApiKey,
+      {
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [
+          {
+            parts: [
+              { text: "Product: " + productName + "\nBrand: " + brand + "\nRaw Ingredients: " + ingredientsText + langPrompt }
+            ]
+          }
+        ],
+        generationConfig: { responseMimeType: "application/json" }
+      },
+      {
+        headers: { "content-type": "application/json" },
+        httpsAgent: keepAliveAgent
+      }
+    );
+  } catch (err: any) {
+    if (err?.response?.status === 402 || err?.response?.data?.error?.code === 402) {
+      const detail = err?.response?.data?.error?.message || "Your prepayment credits are depleted on Google AI Studio.";
+      throw new Error(`Gemini AI credits depleted (HTTP 402): ${detail}`);
     }
-  );
+    throw err;
+  }
 
   const candidate = response && response.data && response.data.candidates && response.data.candidates[0];
   const responseText = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text ? candidate.content.parts[0].text.trim() : null;

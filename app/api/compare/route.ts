@@ -634,9 +634,12 @@ JSON.stringify({
     if (activeReservationOpId && currentUserId && activeWorkerId && typeof activeFencingToken === "number") {
       await releaseOperationOnFailure(currentUserId, activeReservationOpId, activeWorkerId, err.message || "Comparison processing error", activeFencingToken);
     }
+    const isPaymentRequired = err?.response?.status === 402 || err?.message?.includes('402');
     return NextResponse.json({
-      error: "COMPARISON_FAILED",
-      message: err.message || "An error occurred during comparison analysis. Your credits have not been deducted."
-    }, { status: 500 });
+      error: isPaymentRequired ? "AI_CREDITS_DEPLETED" : "COMPARISON_FAILED",
+      message: isPaymentRequired
+        ? "AI service credits depleted (HTTP 402). Please top up your Google AI Studio prepayment balance or provide an active Gemini API key. Your scan credits were not deducted."
+        : (err.message || "An error occurred during comparison analysis. Your credits have not been deducted.")
+    }, { status: isPaymentRequired ? 402 : 500 });
   }
 }

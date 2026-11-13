@@ -815,9 +815,13 @@ export async function POST(request: Request) {
       await releaseOperationOnFailure(currentUserId, activeReservationOpId, activeWorkerId, error.message || "Scan execution error", activeFencingToken);
     }
 
+    const isPaymentRequired = error?.response?.status === 402 || error?.message?.includes('402');
+
     return NextResponse.json({
-      error: "ANALYSIS_FAILED",
-      message: error.message || "An unexpected error occurred during scan processing. Your credits have not been deducted."
-    }, { status: 500 });
+      error: isPaymentRequired ? "AI_CREDITS_DEPLETED" : "ANALYSIS_FAILED",
+      message: isPaymentRequired
+        ? "AI service credits depleted (HTTP 402). Please top up your Google AI Studio prepayment balance or provide an active Gemini API key. Your scan credits were not deducted."
+        : (error.message || "An unexpected error occurred during scan processing. Your credits have not been deducted.")
+    }, { status: isPaymentRequired ? 402 : 500 });
   }
 }

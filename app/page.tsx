@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/Header'
 import ArDemo from '@/components/ArDemo'
-import { Sparkles, Camera, ShieldCheck, Star, ChevronRight, Zap, Check, FileText, Activity, AlertTriangle, Fingerprint, Search, Smartphone } from 'lucide-react'
+import { Sparkles, Camera, ShieldCheck, Star, ChevronRight, Zap, Check, FileText, Activity, AlertTriangle, Fingerprint, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { motion, useScroll, useTransform, Variants } from 'framer-motion'
 
@@ -116,12 +116,6 @@ export default function LandingPage() {
           </motion.p>
 
           <motion.div variants={itemVars} className="mt-12 flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
-            <a
-              href="/app"
-              className="group relative w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-black px-8 py-4 font-black text-lg hover:scale-105 transition-all duration-300 shadow-[0_0_35px_rgba(16,185,129,0.35)]"
-            >
-              <Smartphone className="w-5 h-5 transition-transform group-hover:scale-110" /> Launch Mobile App
-            </a>
             <a
               href={isLoggedIn ? '/scan' : '/auth'}
               className="group relative w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-white text-black px-8 py-4 font-bold text-lg hover:scale-105 transition-all duration-300 shadow-[0_0_40px_rgba(255,255,255,0.3)]"

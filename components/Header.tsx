@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
-import { LogOut, User as UserIcon, ShieldAlert, Sparkles, History, Camera, CreditCard, ChevronDown, FileText, Zap, Crown, GitCompare, Menu, X, Bookmark, Smartphone } from 'lucide-react'
+import { LogOut, User as UserIcon, ShieldAlert, Sparkles, History, Camera, CreditCard, ChevronDown, FileText, Zap, Crown, GitCompare, Menu, X, Bookmark } from 'lucide-react'
 import LanguageSwitcher from './LanguageSwitcher'
 import { useTranslation } from '@/lib/translations'
 
@@ -176,15 +176,6 @@ export default function Header() {
 
         {/* User Actions & Toggle */}
         <div className="flex items-center gap-2.5">
-          {/* Quick link to Mobile App UI */}
-          <a
-            href="/app"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition shadow-sm"
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>Mobile App</span>
-          </a>
-
           {/* Custom Language Switcher - hidden on mobile header, shown on desktop */}
           <div className="hidden md:flex items-center">
             <LanguageSwitcher />
@@ -303,15 +294,6 @@ export default function Header() {
             <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Select Language</span>
             <LanguageSwitcher />
           </div>
-
-          <a
-            href="/app"
-            onClick={() => setIsMobileMenuOpen(false)}
-            className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl transition text-sm font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 shadow-sm"
-          >
-            <Smartphone className="w-4 h-4 text-emerald-400" />
-            Launch Mobile App Experience
-          </a>
 
           <a
             href="/guardian"
