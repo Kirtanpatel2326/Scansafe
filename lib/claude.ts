@@ -21,6 +21,8 @@ const keepAliveAgent = new https.Agent({
   keepAliveMsecs: 1000,
 });
 
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+
 export const NutritionValuesSchema = z.object({
   calories: z.number().nullable().optional(),
   fat_g: z.number().nullable().optional(),
@@ -1285,7 +1287,7 @@ JSON.stringify({
   while (retryCount <= maxRetries) {
     try {
       response = await axios.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey,
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
         {
           systemInstruction: {
             parts: [{ text: systemPrompt }]
@@ -1412,7 +1414,7 @@ CRITICAL: All numbers in per_100g (calories, fat_g, carbs_g, protein_g, sodium_m
 Return ONLY raw JSON.`;
 
       const enrichRes = await axios.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey,
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
         {
           contents: [{ parts: [{ text: enrichmentPrompt }] }],
           generationConfig: { responseMimeType: "application/json" }
@@ -1748,7 +1750,7 @@ JSON.stringify({
   let response;
   try {
     response = await axios.post(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiApiKey,
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiApiKey}`,
       {
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [

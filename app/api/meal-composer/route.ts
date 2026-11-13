@@ -433,8 +433,9 @@ Provide a concise 3-sentence scientific assessment of this combination (macro ba
 Respond in language: ${preferredLanguage}.
 Return ONLY plain text.`;
 
+        const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
         const geminiRes = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiApiKey}`,
           {
             contents: [{ parts: [{ text: promptText }] }]
           },

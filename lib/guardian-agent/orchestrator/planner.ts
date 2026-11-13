@@ -96,7 +96,8 @@ Respond strictly in valid JSON matching this schema:
 }
 IMPORTANT: searchQueries MUST identify the target food category. For instance, if seeking seed butter, search "seed butter" or "sunflower butter", NEVER ordinary "butter". Do NOT include allergen or dietary adjectives like gluten-free or vegan in searchQueries because dietary safety is checked deterministically afterwards.`
 
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
+      const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite'
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${process.env.GEMINI_API_KEY}`
       const res = await fetch(endpoint, {
         method: 'POST',
         signal: controller.signal,
