@@ -8,6 +8,7 @@ import { CorrectionModal } from "./CorrectionModal"
 import NutritionTable from "./NutritionTable"
 import ScanFeedback from "./ScanFeedback"
 import { DietaryAlert } from "@/lib/preferences"
+import type { ChemicalSynergy, GreenwashingFlag, SmartSwapItem } from "@/lib/claude"
 import { 
   Sparkles, 
   ShieldCheck, 
@@ -31,7 +32,11 @@ import {
   X,
   HelpCircle,
   Clock,
-  Layers
+  Layers,
+  ArrowRight,
+  ExternalLink,
+  Flame,
+  Search
 } from "lucide-react"
 
 export interface IngredientAnalysisResult {
@@ -149,6 +154,9 @@ export interface IngredientAnalysisResult {
     disclaimers?: string[]
     unsupported_preferences?: string[]
   }
+  chemical_synergies?: ChemicalSynergy[]
+  greenwashing_flags?: GreenwashingFlag[]
+  smart_swaps?: SmartSwapItem[]
 }
 
 interface ResultCardProps {
@@ -212,7 +220,10 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
     pack_size,
     nutrition_basis = "per_100g",
     evidence_images = [],
-    is_sample
+    is_sample,
+    chemical_synergies = [],
+    greenwashing_flags = [],
+    smart_swaps = []
   } = result
 
   const reportId = scanId || result.id
@@ -724,6 +735,199 @@ export default function ResultCard({ result, scanId, imageUrl, onScanAnother }: 
         unsupportedPreferences={dietary_compatibility?.unsupported_preferences}
         isCompatible={dietary_compatibility?.is_compatible}
       />
+
+      {/* ================= 1. COMBINATORIAL CHEMICAL SYNERGIES ================= */}
+      {chemical_synergies && chemical_synergies.length > 0 && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-950/20 p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                <Flame className="w-4 h-4" />
+              </span>
+              <h3 className="text-sm font-black text-rose-300 uppercase tracking-wider">
+                Combinatorial Chemical Interaction Detected
+              </h3>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase">
+              {chemical_synergies.length} Additive Cocktail{chemical_synergies.length > 1 ? "s" : ""}
+            </span>
+          </div>
+
+          <div className="grid gap-3">
+            {chemical_synergies.map((syn) => (
+              <div key={syn.id} className="rounded-xl bg-black/40 border border-rose-900/50 p-4 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="font-bold text-white text-sm">{syn.title}</h4>
+                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                    syn.severity === "critical" ? "bg-rose-600 text-white" : "bg-amber-600 text-white"
+                  }`}>
+                    {syn.severity.toUpperCase()} RISK
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 items-center text-xs">
+                  <span className="text-zinc-400 font-semibold text-[11px]">Ingredients in cocktail:</span>
+                  {syn.ingredients_involved.map((ing, i) => (
+                    <span key={i} className="px-2 py-0.5 rounded bg-rose-950/60 border border-rose-800/60 text-rose-200 text-[11px] font-medium">
+                      {ing}
+                    </span>
+                  ))}
+                </div>
+
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  {syn.mechanism}
+                </p>
+
+                <div className="pt-2 border-t border-rose-950/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
+                  <span className="text-zinc-500 font-medium">
+                    📚 <strong className="text-zinc-400">Reference:</strong> {syn.scientific_reference}
+                  </span>
+                  <span className="text-rose-300 font-semibold">
+                    {syn.clinical_verdict}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ================= 2. GREENWASHING & DECEPTIVE MARKETING DETECTOR ================= */}
+      {greenwashing_flags && greenwashing_flags.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-950/15 p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                <Search className="w-4 h-4" />
+              </span>
+              <h3 className="text-sm font-black text-amber-300 uppercase tracking-wider">
+                Greenwashing &amp; Label Deception Exposer
+              </h3>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase">
+              {greenwashing_flags.length} Misleading Claim{greenwashing_flags.length > 1 ? "s" : ""}
+            </span>
+          </div>
+
+          <div className="grid gap-3">
+            {greenwashing_flags.map((gw) => (
+              <div key={gw.id} className="rounded-xl bg-black/40 border border-amber-900/40 p-4 space-y-3">
+                <div className="grid sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800">
+                    <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1">
+                      Front-of-Pack Claim:
+                    </span>
+                    <span className="text-zinc-300 font-semibold line-through decoration-amber-400">
+                      {gw.claim_detected}
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-800/40">
+                    <span className="text-[10px] uppercase font-bold text-amber-400 block mb-1">
+                      Back-of-Pack Reality:
+                    </span>
+                    <span className="text-white font-semibold">
+                      {gw.reality_uncovered}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-xs space-y-1 text-zinc-400">
+                  <p>
+                    <strong className="text-zinc-300">Loophole Exploited:</strong> {gw.loophole_technique}
+                  </p>
+                  <p className="text-amber-200 font-medium">
+                    <strong>Clinical Verdict:</strong> {gw.clinical_verdict}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ================= 3. SMART SWAP HERO (BUY THIS INSTEAD) ================= */}
+      {smart_swaps && smart_swaps.length > 0 && (health_score == null || health_score < 75 || chemical_synergies.length > 0) && (
+        <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/30 via-zinc-900/60 to-black p-5 space-y-4 shadow-xl">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <Sparkles className="w-4 h-4" />
+              </span>
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                  ScanSafe Smart Swap — Buy This Instead
+                </h3>
+                <p className="text-[11px] text-zinc-400">Clean, verified alternative to replace this product on your shelf.</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              Verified Clean
+            </span>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-3">
+            {smart_swaps.map((item) => (
+              <div key={item.id} className="rounded-xl bg-zinc-900/80 border border-emerald-500/20 p-4 flex flex-col justify-between gap-3 hover:border-emerald-500/40 transition">
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{item.brand}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Score {item.health_score}/100
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-white text-sm">{item.name}</h4>
+                  <p className="text-xs text-zinc-300 mt-1.5 leading-relaxed">{item.why_better}</p>
+
+                  <div className="flex flex-wrap gap-1 mt-2.5">
+                    {item.clean_badges.map((b, i) => (
+                      <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                        ✓ {b}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between gap-2 mt-1">
+                  <span className="text-white font-extrabold text-sm">₹{item.estimated_price_inr}</span>
+                  <div className="flex items-center gap-1.5">
+                    {item.quick_links.blinkit && (
+                      <a
+                        href={item.quick_links.blinkit}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-[11px] inline-flex items-center gap-1"
+                      >
+                        Blinkit <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                    {item.quick_links.zepto && (
+                      <a
+                        href={item.quick_links.zepto}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-[11px] inline-flex items-center gap-1"
+                      >
+                        Zepto <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                    {item.quick_links.bigbasket && (
+                      <a
+                        href={item.quick_links.bigbasket}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-[11px] inline-flex items-center gap-1"
+                      >
+                        BigBasket <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Information Tiers Tabs */}
       <div className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-900/30 overflow-hidden">

@@ -7,13 +7,20 @@ import {
   splitCompoundIngredients, 
   CANONICAL_PREFERENCES 
 } from "./preferences";
+import { detectChemicalSynergies, ChemicalSynergy } from "./synergies";
+import { detectGreenwashing, GreenwashingFlag } from "./greenwashing";
+import { getSmartSwaps, SmartSwapItem } from "./smart-swap";
 
 export { 
   evaluateDietaryCompatibility, 
   DietaryCompatibilitySchema, 
   splitCompoundIngredients, 
-  CANONICAL_PREFERENCES 
+  CANONICAL_PREFERENCES,
+  detectChemicalSynergies,
+  detectGreenwashing,
+  getSmartSwaps
 };
+export type { ChemicalSynergy, GreenwashingFlag, SmartSwapItem };
 
 const keepAliveAgent = new https.Agent({
   keepAlive: true,
@@ -91,6 +98,44 @@ export const AlternativeItemSchema = z.object({
   estimated_price_inr: z.number().nullable().optional(),
   buy_url_blinkit: z.string().nullable().optional(),
   buy_url_bigbasket: z.string().nullable().optional(),
+});
+
+export const ChemicalSynergySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  severity: z.enum(["high", "medium", "critical"]),
+  category: z.string(),
+  ingredients_involved: z.array(z.string()),
+  mechanism: z.string(),
+  scientific_reference: z.string(),
+  clinical_verdict: z.string(),
+});
+
+export const GreenwashingFlagSchema = z.object({
+  id: z.string(),
+  claim_detected: z.string(),
+  reality_uncovered: z.string(),
+  severity: z.enum(["high", "medium", "critical"]),
+  loophole_technique: z.string(),
+  clinical_verdict: z.string(),
+  evidence_ingredient: z.string().optional(),
+});
+
+export const SmartSwapItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  brand: z.string(),
+  category: z.string(),
+  why_better: z.string(),
+  health_score: z.number(),
+  clean_badges: z.array(z.string()),
+  estimated_price_inr: z.number(),
+  quick_links: z.object({
+    blinkit: z.string().optional(),
+    zepto: z.string().optional(),
+    bigbasket: z.string().optional(),
+    amazon: z.string().optional(),
+  }),
 });
 
 /**
@@ -196,6 +241,8 @@ export const RawProductFactsSchema = z.object({
   ingredients: z.array(IngredientItemSchema).default([]),
   additives: z.array(AdditiveItemSchema).default([]),
   allergens_declared: z.array(z.string()).default([]),
+  front_claims: z.array(z.string()).default([]),
+  marketing_claims: z.array(z.string()).default([]),
   nutrition_facts: NutritionFactsSchema.default({ panel_status: "extracted" }),
   upf_score: z.number().min(1).max(4).nullable().optional(),
   upf_reason: z.string().nullable().optional(),
@@ -203,6 +250,9 @@ export const RawProductFactsSchema = z.object({
   glycemic_reason: z.string().nullable().optional(),
   recommendations: z.array(z.string()).default([]),
   alternatives_detailed: z.array(AlternativeItemSchema).default([]),
+  chemical_synergies: z.array(ChemicalSynergySchema).default([]),
+  greenwashing_flags: z.array(GreenwashingFlagSchema).default([]),
+  smart_swaps: z.array(SmartSwapItemSchema).default([]),
 });
 
 export const ComparisonResultSchema = z.object({
@@ -265,6 +315,8 @@ export interface IngredientAnalysis {
   }>;
   allergens: string[];
   allergens_declared?: string[];
+  front_claims?: string[];
+  marketing_claims?: string[];
   nutrition_facts: z.infer<typeof NutritionFactsSchema>;
   recommendations: string[];
   alternatives_detailed?: Array<{
@@ -280,6 +332,9 @@ export interface IngredientAnalysis {
   glycemic_index_estimate?: "low" | "medium" | "high" | null;
   glycemic_reason?: string | null;
   dietary_compatibility?: DietaryCompatibility;
+  chemical_synergies?: ChemicalSynergy[];
+  greenwashing_flags?: GreenwashingFlag[];
+  smart_swaps?: SmartSwapItem[];
   image_url?: string;
   is_sample?: boolean;
 }
@@ -908,6 +963,35 @@ export function applyPreferences(
       return ing;
     });
   }
+
+  // 1. Detect Combinatorial Chemical Interactions & Toxic Cocktails
+  cloned.chemical_synergies = detectChemicalSynergies(cloned.ingredients || [], cloned.additives || []);
+
+  // 2. Detect Greenwashing & Deceptive Marketing Loopholes
+  const claimsList = [
+    ...(cloned.front_claims || []),
+    ...(cloned.marketing_claims || [])
+  ];
+  cloned.greenwashing_flags = detectGreenwashing(
+    cloned.product_name || "",
+    cloned.description || "",
+    cloned.ingredients || [],
+    cloned.nutrition_facts,
+    claimsList
+  );
+
+  // 3. Generate Verified Smart Swaps ("Buy This Instead")
+  const hasHazards = (cloned.chemical_synergies && cloned.chemical_synergies.length > 0) ||
+                     (cloned.greenwashing_flags && cloned.greenwashing_flags.length > 0) ||
+                     (cloned.safety_level === "danger" || cloned.safety_level === "moderate") ||
+                     (cloned.health_score !== null && cloned.health_score < 75);
+
+  cloned.smart_swaps = getSmartSwaps(
+    cloned.product_name || "",
+    cloned.description || "",
+    cloned.health_score,
+    hasHazards
+  );
 
   return cloned;
 }

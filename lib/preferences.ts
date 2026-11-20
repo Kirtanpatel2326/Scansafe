@@ -279,6 +279,60 @@ export const CANONICAL_PREFERENCES: PreferenceDefinition[] = [
     declaredAllergenTriggers: [],
     precautionaryTriggers: [],
     disclaimer: "Pregnancy-safe screening flags specific high-risk food hazards. It is an educational tool and does not replace clinical prenatal care."
+  },
+  {
+    id: "pcod-pcos",
+    label: "PCOD / PCOS Hormonal Care",
+    category: "health_condition",
+    description: "Screens for high-insulin spike sugars, inflammatory refined seed oils, and endocrine-disrupting additives.",
+    aliases: ["pcod", "pcos", "pcod-pcos", "polycystic", "hormone-friendly"],
+    searchTerms: [
+      "maltodextrin", "high fructose corn syrup", "corn syrup", "liquid glucose", "dextrose", 
+      "invert sugar", "palm oil", "palmolein", "hydrogenated fat", "vanaspati", 
+      "cottonseed oil", "soybean oil", "sucralose", "aspartame"
+    ],
+    exclusions: [
+      "stevia", "monk fruit", "dates", "olive oil", "avocado oil", "coconut oil", "ghee"
+    ],
+    declaredAllergenTriggers: [],
+    precautionaryTriggers: [],
+    disclaimer: "PCOD/PCOS screening highlights high-glycemic and inflammatory matrices. Consult your reproductive endocrinologist."
+  },
+  {
+    id: "kids-safe",
+    label: "Kids & Toddler Clean Screen",
+    category: "health_condition",
+    description: "Zero tolerance for synthetic food dyes (Southampton six), artificial intense sweeteners, and petroleum antioxidants (TBHQ, BHA).",
+    aliases: ["kids-safe", "kid-safe", "children", "toddler", "baby-safe", "child-safe"],
+    searchTerms: [
+      "tartrazine", "sunset yellow", "allura red", "quinoline yellow", "carmoisine", "ponceau 4r", 
+      "brilliant blue", "red 40", "yellow 5", "yellow 6", "blue 1", "aspartame", "sucralose", 
+      "acesulfame potassium", "acesulfame k", "saccharin", "tbhq", "bha", "bht", "caffeine", "taurine"
+    ],
+    exclusions: [
+      "beetroot juice", "paprika extract", "curcumin", "chlorophyll", "spirulina extract", "annatto"
+    ],
+    declaredAllergenTriggers: [],
+    precautionaryTriggers: [],
+    disclaimer: "Flags synthetic chemical additives and intense artificial sweeteners restricted in pediatric settings."
+  },
+  {
+    id: "renal-kidney",
+    label: "Renal / Kidney-Conscious",
+    category: "health_condition",
+    description: "Screens for highly absorbable inorganic phosphate additives and added potassium salts.",
+    aliases: ["renal", "kidney", "renal-kidney", "low-phosphorus", "low-potassium"],
+    searchTerms: [
+      "phosphoric acid", "disodium phosphate", "trisodium phosphate", "sodium tripolyphosphate", 
+      "monosodium phosphate", "dipotassium phosphate", "potassium chloride", "potassium sorbate", 
+      "sodium hexametaphosphate", "pyrophosphate"
+    ],
+    exclusions: [
+      "calcium carbonate", "salt", "sodium chloride"
+    ],
+    declaredAllergenTriggers: [],
+    precautionaryTriggers: [],
+    disclaimer: "Renal screening flags inorganic added phosphorus and potassium salts. Consult your nephrologist for individual laboratory stage targets."
   }
 ];
 
