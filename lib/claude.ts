@@ -1161,6 +1161,94 @@ export const SAMPLE_PRODUCTS: Record<string, IngredientAnalysis> = {
     glycemic_index_estimate: "high",
     glycemic_reason: "High concentration of refined sugars and syrups causes immediate blood glucose surge.",
     is_sample: true
+  },
+  sample_cocktail: {
+    product_name: "Ultra Spark Diet Citrus Soda",
+    brand: "Spark Beverages",
+    health_score: 28,
+    health_score_reason: "High chemical additive cocktail with multiple synthetic sweeteners and potential benzene precursor combination.",
+    safety_level: "danger",
+    description: "Commercial zero-calorie citrus carbonated beverage featuring synthetic sweeteners and chemical preservatives.",
+    panel_status: "extracted",
+    front_claims: ["Zero Sugar", "Natural Refreshment", "100% Guilt Free"],
+    ingredients: [
+      { name: "Carbonated Water", status: "safe", reason: "Standard beverage base." },
+      { name: "Citric Acid", status: "caution", reason: "Acidifier (E330)." },
+      { name: "Sodium Benzoate", status: "caution", reason: "Synthetic preservative (E211)." },
+      { name: "Ascorbic Acid (Vitamin C)", status: "safe", reason: "Antioxidant and nutrient (E300)." },
+      { name: "Sucralose", status: "avoid", reason: "High-intensity artificial sweetener (E955)." },
+      { name: "Acesulfame Potassium", status: "avoid", reason: "Synthetic sweetener (E950)." },
+      { name: "Tartrazine", status: "avoid", reason: "Southampton azo color dye (E102)." }
+    ],
+    additives: [
+      { name: "Sodium Benzoate", code: "E211", risk: "high", description: "Preservative linked to benzene formation when mixed with ascorbic acid.", source: "FDA" },
+      { name: "Ascorbic Acid", code: "E300", risk: "low", description: "Antioxidant.", source: "EFSA" },
+      { name: "Sucralose", code: "E955", risk: "medium", description: "Synthetic sweetener.", source: "WHO" },
+      { name: "Acesulfame Potassium", code: "E950", risk: "medium", description: "Synthetic sweetener.", source: "WHO" },
+      { name: "Tartrazine", code: "E102", risk: "high", description: "Azo dye requiring EU hyperactivity warning label.", source: "EFSA / Lancet" }
+    ],
+    allergens: [],
+    allergens_declared: [],
+    nutrition_facts: {
+      panel_status: "extracted",
+      serving_size: "250ml",
+      per_serving: {
+        calories: 0,
+        fat_g: 0,
+        saturated_fat_g: 0,
+        trans_fat_g: 0,
+        cholesterol_mg: 0,
+        sodium_mg: 45,
+        carbs_g: 0,
+        fiber_g: 0,
+        sugar_g: 0,
+        added_sugar_g: 0,
+        protein_g: 0
+      },
+      per_100g: {
+        calories: 0,
+        fat_g: 0,
+        saturated_fat_g: 0,
+        trans_fat_g: 0,
+        cholesterol_mg: 0,
+        sodium_mg: 18,
+        carbs_g: 0,
+        fiber_g: 0,
+        sugar_g: 0,
+        added_sugar_g: 0,
+        protein_g: 0
+      },
+      calories: 0,
+      calories_100g: 0,
+      fat: "0g",
+      fat_100g: "0g",
+      saturated_fat: "0g",
+      saturated_fat_100g: "0g",
+      trans_fat: "0g",
+      trans_fat_100g: "0g",
+      cholesterol: "0mg",
+      cholesterol_100g: "0mg",
+      sodium: "45mg",
+      sodium_100g: "18mg",
+      carbs: "0g",
+      carbs_100g: "0g",
+      fiber: "0g",
+      fiber_100g: "0g",
+      sugar: "0g",
+      sugar_100g: "0g",
+      protein: "0g",
+      protein_100g: "0g"
+    },
+    recommendations: [
+      "Naturally carbonated water with cold-pressed lemon juice",
+      "Kombucha or cold-brewed herbal iced tea"
+    ],
+    alternatives_detailed: [],
+    upf_score: 4,
+    upf_reason: "NOVA Group 4 - Ultra-processed beverage with artificial sweeteners and synthetic preservatives.",
+    glycemic_index_estimate: "low",
+    glycemic_reason: "Contains zero digestible sugars, though artificial sweeteners stimulate sweet receptors.",
+    is_sample: true
   }
 };
 

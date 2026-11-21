@@ -8,11 +8,11 @@ import ResultCard from '@/components/ResultCard'
 import { AlertTriangle, ArrowRight, RefreshCw, CheckCircle, Info, Filter } from 'lucide-react'
 
 export default function GuestDemoPage() {
-  const [selectedKey, setSelectedKey] = useState<'sample_cookies' | 'sample_oats'>('sample_cookies')
+  const [selectedKey, setSelectedKey] = useState<'sample_cookies' | 'sample_oats' | 'sample_cocktail'>('sample_cocktail')
   const [selectedAllergies, setSelectedAllergies] = useState<string[]>([])
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  const baseProduct = SAMPLE_PRODUCTS[selectedKey]
+  const baseProduct = SAMPLE_PRODUCTS[selectedKey] || SAMPLE_PRODUCTS['sample_cookies']
   const currentAnalysis: IngredientAnalysis = applyPreferences(baseProduct, selectedAllergies)
 
   const toggleAllergy = (allergy: string) => {
@@ -62,34 +62,60 @@ export default function GuestDemoPage() {
         </div>
 
         {/* SAMPLE SELECTOR & CONTROLS */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-2">
-          {/* Sample Product 1 */}
+        <div className="mb-8 grid gap-4 sm:grid-cols-3">
+          {/* Sample Product 3: Chemical Synergies & Greenwashing */}
           <button
-            onClick={() => setSelectedKey('sample_cookies')}
+            onClick={() => setSelectedKey('sample_cocktail')}
             className={`p-5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between ${
-              selectedKey === 'sample_cookies'
-                ? 'border-emerald-500 bg-zinc-900/90 shadow-md ring-1 ring-emerald-500/40'
+              selectedKey === 'sample_cocktail'
+                ? 'border-rose-500 bg-zinc-900/90 shadow-md ring-1 ring-rose-500/40'
                 : 'border-zinc-800 bg-zinc-950/60 hover:bg-zinc-900/40'
             }`}
           >
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-rose-400">Sample 1: Ultra-Processed Confectionery</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-400">Sample 1: Additive Synergies & Greenwashing</span>
+                {selectedKey === 'sample_cocktail' && (
+                  <CheckCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+              </div>
+              <h3 className="text-base font-bold text-white">Ultra Spark Diet Citrus Soda</h3>
+              <p className="text-xs text-zinc-400 mt-1 line-clamp-2">
+                Features Benzene precursor synergy (E211 + E300), Southampton ADHD dyes, and greenwashed 'Natural Refreshment' claims.
+              </p>
+            </div>
+            <div className="mt-4 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
+              <span className="text-rose-400 font-bold">Score: 28/100</span> • <span>Synergies Detected</span>
+            </div>
+          </button>
+
+          {/* Sample Product 1: Ultra-processed Confectionery */}
+          <button
+            onClick={() => setSelectedKey('sample_cookies')}
+            className={`p-5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between ${
+              selectedKey === 'sample_cookies'
+                ? 'border-amber-500 bg-zinc-900/90 shadow-md ring-1 ring-amber-500/40'
+                : 'border-zinc-800 bg-zinc-950/60 hover:bg-zinc-900/40'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-400">Sample 2: Ultra-Processed Confectionery</span>
                 {selectedKey === 'sample_cookies' && (
-                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <CheckCircle className="w-4 h-4 text-amber-400 shrink-0" />
                 )}
               </div>
               <h3 className="text-base font-bold text-white">Lotte Choco Pie</h3>
               <p className="text-xs text-zinc-400 mt-1 line-clamp-2">
-                Multi-ingredient sweet snack with hydrogenated palm fats, high added sugars, and synthetic emulsifiers.
+                Hydrogenated palm fats, high refined sugars, and synthetic emulsifiers triggering Smart Swaps.
               </p>
             </div>
             <div className="mt-4 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
-              <span className="text-rose-400 font-bold">Score: 24/100</span> • <span>NOVA 4 Ultra-Processed</span>
+              <span className="text-amber-400 font-bold">Score: 24/100</span> • <span>NOVA 4 UPF</span>
             </div>
           </button>
 
-          {/* Sample Product 2 */}
+          {/* Sample Product 2: Clean Single-Ingredient Whole Grain */}
           <button
             onClick={() => setSelectedKey('sample_oats')}
             className={`p-5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between ${
@@ -100,18 +126,18 @@ export default function GuestDemoPage() {
           >
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Sample 2: Clean Single-Ingredient Whole Grain</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Sample 3: Clean Single-Ingredient Whole Grain</span>
                 {selectedKey === 'sample_oats' && (
                   <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                 )}
               </div>
-              <h3 className="text-base font-bold text-white">Quaker Rolled Oats 100% Whole Grain</h3>
+              <h3 className="text-base font-bold text-white">Quaker Rolled Oats 100%</h3>
               <p className="text-xs text-zinc-400 mt-1 line-clamp-2">
-                Single-ingredient 100% whole grain rolled oats with high beta-glucan soluble fiber, zero added sugar, and no additives.
+                100% whole grain rolled oats with high beta-glucan soluble fiber, zero added sugar, and no additives.
               </p>
             </div>
             <div className="mt-4 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
-              <span className="text-emerald-400 font-bold">Score: 95/100</span> • <span>NOVA 1 Whole Grain</span>
+              <span className="text-emerald-400 font-bold">Score: 95/100</span> • <span>NOVA 1 Clean</span>
             </div>
           </button>
         </div>
@@ -121,7 +147,7 @@ export default function GuestDemoPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400">
               <Filter className="w-4 h-4 text-emerald-400" />
-              <span>Simulate User Dietary Profiles (Client-Side Filtering)</span>
+              <span>Simulate User Clinical & Dietary Profiles (Client-Side Filtering)</span>
             </div>
             <button
               onClick={handleSimulateRescan}
@@ -133,10 +159,13 @@ export default function GuestDemoPage() {
             </button>
           </div>
           <p className="text-xs text-zinc-500 mb-3">
-            Toggle allergens below to see how ScanSafe customizes allergen warnings and dietary compatibility without altering neutral base scores:
+            Toggle clinical profiles below to see how ScanSafe evaluates specialized health conditions, chemical synergies, and allergens in real time:
           </p>
           <div className="flex flex-wrap gap-2">
             {[
+              { id: 'pcod-pcos', label: 'PCOD / PCOS Care' },
+              { id: 'kids-safe', label: 'Kids Clean Screen' },
+              { id: 'renal-kidney', label: 'Renal / Kidney Care' },
               { id: 'gluten', label: 'Gluten / Wheat' },
               { id: 'milk', label: 'Dairy / Milk' },
               { id: 'soy', label: 'Soy' },

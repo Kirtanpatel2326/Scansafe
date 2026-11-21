@@ -100,13 +100,16 @@ export default function Header() {
           {/* Navigation Links - Desktop */}
           <nav className="hidden md:flex items-center gap-1 text-sm font-medium text-zinc-400">
             <a
-              href="/guardian"
+              href="/guardian/agent"
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:text-white ${
-                isActive('/guardian') ? 'text-emerald-400 bg-emerald-950/10' : ''
+                isActive('/guardian') || isActive('/guardian/agent') ? 'text-emerald-400 bg-emerald-950/20 border border-emerald-500/30' : 'text-zinc-300'
               }`}
             >
               <Sparkles className="w-4 h-4 text-emerald-400" />
-              Guardian AI
+              <span>Guardian AI</span>
+              <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Agent
+              </span>
             </a>
             <a
               href="/scan"
@@ -296,14 +299,19 @@ export default function Header() {
           </div>
 
           <a
-            href="/guardian"
+            href="/guardian/agent"
             onClick={() => setIsMobileMenuOpen(false)}
-            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl transition text-sm font-bold ${
-              isActive('/guardian') ? 'text-emerald-400 bg-emerald-950/10' : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
+            className={`flex items-center justify-between px-4 py-2.5 rounded-xl transition text-sm font-bold ${
+              isActive('/guardian') || isActive('/guardian/agent') ? 'text-emerald-400 bg-emerald-950/20' : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
             }`}
           >
-            <Sparkles className="w-4 h-4 text-emerald-400" />
-            Guardian AI
+            <span className="flex items-center gap-2.5">
+              <Sparkles className="w-4 h-4 text-emerald-400" />
+              Guardian AI Agent
+            </span>
+            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+              Live
+            </span>
           </a>
           <a
             href="/scan"

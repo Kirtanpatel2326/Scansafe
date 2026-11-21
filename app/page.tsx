@@ -2,12 +2,35 @@
 
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import Header from '@/components/Header'
 import ArDemo from '@/components/ArDemo'
-import { Sparkles, Camera, ShieldCheck, Star, ChevronRight, Zap, Check, FileText, Activity, AlertTriangle, Fingerprint, Search } from 'lucide-react'
+import { 
+  Sparkles, 
+  Camera, 
+  ShieldCheck, 
+  Star, 
+  ChevronRight, 
+  Zap, 
+  Check, 
+  FileText, 
+  Activity, 
+  AlertTriangle, 
+  Fingerprint, 
+  Search, 
+  ArrowRight, 
+  ShieldAlert, 
+  ShoppingBag, 
+  Lock, 
+  Microscope, 
+  RefreshCw, 
+  Layers,
+  HeartPulse,
+  Baby,
+  ActivitySquare
+} from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { motion, useScroll, useTransform, Variants } from 'framer-motion'
-
 import { useTranslation } from '@/lib/translations'
 
 export default function LandingPage() {
@@ -37,7 +60,6 @@ export default function LandingPage() {
       const email = session?.user?.email?.toLowerCase()
       const isAdmin = email && ['kirtanpatel2326@gmail.com', 'kirtanpatel2305@gmail.com'].includes(email)
       
-      // Track page view only if not an admin to keep analytics accurate
       if (!isAdmin) {
         fetch('/api/track', {
           method: 'POST',
@@ -61,18 +83,18 @@ export default function LandingPage() {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
-      transition: { staggerChildren: 0.15, delayChildren: 0.2 }
+      transition: { staggerChildren: 0.12, delayChildren: 0.15 }
     }
   }
 
   const itemVars: Variants = {
-    hidden: { opacity: 0, y: 30 },
-    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 50 } }
+    hidden: { opacity: 0, y: 25 },
+    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 60 } }
   }
 
   const fadeUpVars: Variants = {
-    hidden: { opacity: 0, y: 40 },
-    whileInView: { opacity: 1, y: 0, transition: { duration: 0.8, ease: "easeOut" } }
+    hidden: { opacity: 0, y: 35 },
+    whileInView: { opacity: 1, y: 0, transition: { duration: 0.7, ease: "easeOut" } }
   }
 
   return (
@@ -80,18 +102,18 @@ export default function LandingPage() {
       <Header />
 
       {/* ================= HERO SECTION ================= */}
-      <section className="relative pt-24 pb-20 md:pt-36 md:pb-32 overflow-hidden flex flex-col items-center justify-center min-h-[90vh]">
+      <section className="relative pt-20 pb-20 md:pt-32 md:pb-28 overflow-hidden flex flex-col items-center justify-center min-h-[92vh]">
         {/* Dynamic Aurora Background */}
         <motion.div style={{ y: yBg }} className="absolute inset-0 -z-10 flex items-center justify-center">
           <motion.div 
-            animate={{ scale: [1, 1.1, 1], opacity: [0.4, 0.6, 0.4] }} 
+            animate={{ scale: [1, 1.15, 1], opacity: [0.35, 0.55, 0.35] }} 
             transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute top-1/4 h-[500px] w-[500px] rounded-full bg-emerald-600/20 blur-[150px]" 
+            className="absolute top-1/4 h-[550px] w-[550px] rounded-full bg-emerald-600/20 blur-[160px]" 
           />
           <motion.div 
-            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }} 
-            transition={{ duration: 12, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-            className="absolute top-1/3 left-1/4 h-[400px] w-[400px] rounded-full bg-indigo-600/20 blur-[150px]" 
+            animate={{ scale: [1, 1.25, 1], opacity: [0.25, 0.45, 0.25] }} 
+            transition={{ duration: 13, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+            className="absolute top-1/3 left-1/4 h-[420px] w-[420px] rounded-full bg-indigo-600/20 blur-[150px]" 
           />
         </motion.div>
 
@@ -101,51 +123,332 @@ export default function LandingPage() {
           animate="show"
           className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center flex flex-col items-center relative z-10"
         >
-          <motion.div variants={itemVars} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-4 py-1.5 text-xs font-semibold text-zinc-300 mb-8 shadow-xl">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-400" /> {t.heroBadge}
+          {/* Main Top Badge */}
+          <motion.div variants={itemVars} className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-950/40 backdrop-blur-md px-4 py-1.5 text-xs font-bold text-emerald-300 mb-6 shadow-xl">
+            <Sparkles className="w-4 h-4 text-emerald-400" />
+            <span>World's 1st Evidence-First Food Safety & Shopping Intelligence</span>
           </motion.div>
 
-          <motion.h1 variants={itemVars} className="max-w-5xl text-6xl font-black tracking-tighter text-white sm:text-7xl md:text-8xl leading-[1.1]">
-            {t.heroTitle1} <br />
-            <span className="bg-gradient-to-br from-white via-zinc-200 to-zinc-500 bg-clip-text text-transparent">{t.heroTitle2}</span> <br/>
-            {t.heroTitle3}
+          {/* Main Bold Headline */}
+          <motion.h1 variants={itemVars} className="max-w-5xl text-5xl font-black tracking-tight text-white sm:text-6xl md:text-7xl lg:text-8xl leading-[1.08]">
+            Unmask Every Label. <br />
+            <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-indigo-400 bg-clip-text text-transparent">
+              Expose Chemical Traps.
+            </span> <br />
+            Shop With Zero Fear.
           </motion.h1>
 
-          <motion.p variants={itemVars} className="mt-8 max-w-2xl text-lg text-zinc-400 leading-relaxed font-medium">
-            {t.heroDesc}
+          {/* Value Proposition Description */}
+          <motion.p variants={itemVars} className="mt-6 max-w-2xl text-base md:text-lg text-zinc-300 leading-relaxed font-normal">
+            Scan packaging labels instantly or let our autonomous <strong>Guardian AI Agent</strong> cross-examine front-of-pack claims, uncover dangerous additive cocktails, and find verified clean swaps you can buy in 1-click.
           </motion.p>
 
-          <motion.div variants={itemVars} className="mt-12 flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
-            <a
+          {/* Trust Metric Badges */}
+          <motion.div variants={itemVars} className="mt-8 flex flex-wrap items-center justify-center gap-3 text-xs font-semibold text-zinc-400">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 border border-zinc-800 px-3 py-1">
+              <Check className="w-3.5 h-3.5 text-emerald-400" /> 255/255 Verified Benchmarks
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 border border-zinc-800 px-3 py-1">
+              <Lock className="w-3.5 h-3.5 text-emerald-400" /> Zero Hallucinations Guaranteed
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 border border-zinc-800 px-3 py-1">
+              <Microscope className="w-3.5 h-3.5 text-emerald-400" /> Additive Cocktail Detection
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 border border-zinc-800 px-3 py-1">
+              <ShoppingBag className="w-3.5 h-3.5 text-emerald-400" /> 1-Click Smart Swaps
+            </span>
+          </motion.div>
+
+          {/* Primary Call to Action Buttons */}
+          <motion.div variants={itemVars} className="mt-10 flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+            <Link
+              href="/guardian/agent"
+              className="group relative w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-black px-8 py-4 font-black text-lg hover:scale-105 transition-all duration-300 shadow-[0_0_40px_rgba(16,185,129,0.35)]"
+            >
+              <Sparkles className="w-5 h-5 text-black" /> 
+              <span>Launch Guardian Agent</span>
+              <ArrowRight className="w-5 h-5 text-black transition-transform group-hover:translate-x-1" />
+            </Link>
+
+            <Link
               href={isLoggedIn ? '/scan' : '/auth'}
-              className="group relative w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-white text-black px-8 py-4 font-bold text-lg hover:scale-105 transition-all duration-300 shadow-[0_0_40px_rgba(255,255,255,0.3)]"
+              className="group w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-white text-black px-7 py-4 font-bold text-lg hover:bg-zinc-200 transition-all duration-300 shadow-lg"
             >
-              <Camera className="w-5 h-5 transition-transform group-hover:rotate-12" /> {t.heroBtnStart}
-            </a>
-            <a
+              <Camera className="w-5 h-5 text-black transition-transform group-hover:rotate-12" /> 
+              <span>Scan Food Label</span>
+            </Link>
+
+            <Link
               href="/demo"
-              className="group w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 px-8 py-4 font-bold text-lg transition-all duration-300 backdrop-blur-md"
+              className="group w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 px-6 py-4 font-bold text-base transition-all duration-300 backdrop-blur-md"
             >
-              <Sparkles className="w-5 h-5 text-emerald-400" /> Try Guest Demo
-            </a>
-            <a
-              href="/pitch"
-              className="group w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-white px-8 py-4 font-semibold text-lg transition-all duration-300 backdrop-blur-md"
-            >
-              <FileText className="w-5 h-5 text-zinc-400 group-hover:text-white transition-colors" /> {t.heroBtnPitch}
-            </a>
+              <Star className="w-4 h-4 text-amber-400" />
+              <span>Try Interactive Demo</span>
+            </Link>
           </motion.div>
         </motion.div>
 
         {/* Hero Interactive AR Demo */}
         <motion.div 
-          initial={{ opacity: 0, y: 100 }}
+          initial={{ opacity: 0, y: 80 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1.2, delay: 0.6, type: "spring" }}
-          className="mt-16 w-full max-w-5xl z-20"
+          transition={{ duration: 1.1, delay: 0.5, type: "spring" }}
+          className="mt-16 w-full max-w-5xl z-20 px-4"
         >
           <ArDemo />
         </motion.div>
+      </section>
+
+      {/* ================= 4 UNBEATABLE MARKET-LEADING CAPABILITIES ================= */}
+      <section className="py-24 border-t border-white/10 bg-gradient-to-b from-zinc-950 via-black to-zinc-950">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <motion.div 
+            initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
+            className="text-center max-w-3xl mx-auto mb-16"
+          >
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1 text-xs font-bold text-emerald-400 mb-4 uppercase tracking-widest">
+              Unrivaled Competitive Advantage
+            </div>
+            <h2 className="text-3xl md:text-5xl font-black tracking-tight text-white mb-4">
+              Why Nobody Can Compete With ScanSafe
+            </h2>
+            <p className="text-zinc-400 text-base md:text-lg">
+              Generic nutrition apps count calories. ScanSafe acts as your clinical food guardian, exposing additive synergies, marketing deception, and finding verified clean replacements.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Feature Card 1: Combinatorial Chemical Synergies */}
+            <motion.div 
+              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
+              className="rounded-3xl border border-rose-500/30 bg-gradient-to-br from-rose-950/20 via-zinc-900/60 to-black p-8 relative overflow-hidden group hover:border-rose-500/50 transition-all shadow-xl"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                  <Microscope className="w-6 h-6" />
+                </span>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-rose-400">Pioneering Science</span>
+                  <h3 className="text-xl font-black text-white">Combinatorial Chemical Synergies</h3>
+                </div>
+              </div>
+              <p className="text-zinc-300 text-sm leading-relaxed mb-4">
+                Detects dangerous additive "cocktail effects" when two individually approved additives combine in a single product:
+              </p>
+              <ul className="space-y-2 text-xs text-zinc-400 mb-6 font-mono">
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                  <strong>Benzene Carcinogen Formation:</strong> Sodium Benzoate (E211) + Vitamin C (E300).
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                  <strong>Southampton ADHD Cocktail:</strong> Tartrazine (E102) + Sodium Benzoate.
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                  <strong>Gut Barrier Degradation:</strong> Polysorbate 80 (E433) + Carboxymethylcellulose (CMC).
+                </li>
+              </ul>
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-300 bg-rose-500/10 px-3 py-1.5 rounded-xl border border-rose-500/20">
+                <span>Backed by Lancet, Nature, and FDA monographs</span>
+              </div>
+            </motion.div>
+
+            {/* Feature Card 2: Greenwashing & Deceptive Marketing Exposer */}
+            <motion.div 
+              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
+              className="rounded-3xl border border-amber-500/30 bg-gradient-to-br from-amber-950/20 via-zinc-900/60 to-black p-8 relative overflow-hidden group hover:border-amber-500/50 transition-all shadow-xl"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <ShieldAlert className="w-6 h-6" />
+                </span>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">Label Forensic Audit</span>
+                  <h3 className="text-xl font-black text-white">Greenwashing & Deception Exposer</h3>
+                </div>
+              </div>
+              <p className="text-zinc-300 text-sm leading-relaxed mb-4">
+                Cross-examines flashy front-of-pack claims against factual back-of-pack ingredient realities:
+              </p>
+              <ul className="space-y-2 text-xs text-zinc-400 mb-6 font-mono">
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  <strong>Zero Sugar Illusion:</strong> Exposes hidden high-glycemic Maltodextrin (GI &gt; 110).
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  <strong>Premium Oil Dilution:</strong> Catches "Real Olive Oil" containing 97% Refined Palm Olein.
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  <strong>Whole Wheat Ruse:</strong> Flags products where #1 ingredient is Refined Maida.
+                </li>
+              </ul>
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-300 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">
+                <span>Never fooled by front-of-pack marketing claims</span>
+              </div>
+            </motion.div>
+
+            {/* Feature Card 3: Smart Swap Engine ("Buy This Instead") */}
+            <motion.div 
+              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
+              className="rounded-3xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 via-zinc-900/60 to-black p-8 relative overflow-hidden group hover:border-emerald-500/50 transition-all shadow-xl"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <ShoppingBag className="w-6 h-6" />
+                </span>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Actionable Health</span>
+                  <h3 className="text-xl font-black text-white">Smart Swap — "Buy This Instead"</h3>
+                </div>
+              </div>
+              <p className="text-zinc-300 text-sm leading-relaxed mb-4">
+                Don't just get warned—get better choices. Whenever a scanned product fails clinical tests, ScanSafe serves clean alternatives:
+              </p>
+              <ul className="space-y-2 text-xs text-zinc-400 mb-6 font-mono">
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  <strong>Verified Clean Badges:</strong> Zero Palm Oil, No Maida, Stoneground Whole Grains.
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  <strong>Clinical Rationale:</strong> Clear breakdown of why the alternative is superior.
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  <strong>1-Click Quick Purchase:</strong> Direct delivery links for Blinkit, Zepto, BigBasket, Amazon.
+                </li>
+              </ul>
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                <span>Turns health warnings into seamless clean shopping</span>
+              </div>
+            </motion.div>
+
+            {/* Feature Card 4: Hyper-Personalized Clinical Health Profiles */}
+            <motion.div 
+              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
+              className="rounded-3xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/20 via-zinc-900/60 to-black p-8 relative overflow-hidden group hover:border-indigo-500/50 transition-all shadow-xl"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                  <HeartPulse className="w-6 h-6" />
+                </span>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">Clinical Personalization</span>
+                  <h3 className="text-xl font-black text-white">Hyper-Personalized Health Profiles</h3>
+                </div>
+              </div>
+              <p className="text-zinc-300 text-sm leading-relaxed mb-4">
+                Beyond basic allergens, ScanSafe protects specialized, vulnerable metabolic and endocrine states:
+              </p>
+              <ul className="space-y-2 text-xs text-zinc-400 mb-6 font-mono">
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                  <strong>PCOD / PCOS Care:</strong> Flags insulin-spiking liquid sugars and inflammatory seed oils.
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                  <strong>Kids & Toddler Clean Screen:</strong> Zero tolerance for synthetic dyes & intense sweeteners.
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                  <strong>Renal / Kidney-Conscious:</strong> Filters absorbable inorganic phosphates & potassium salts.
+                </li>
+              </ul>
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-300 bg-indigo-500/10 px-3 py-1.5 rounded-xl border border-indigo-500/20">
+                <span>Personalized clinical protection for every family member</span>
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+
+      {/* ================= GUARDIAN AI AUTONOMOUS AGENT SHOWCASE ================= */}
+      <section className="py-24 border-t border-white/10 bg-black relative">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="rounded-3xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/30 via-zinc-950 to-black p-8 md:p-12 relative overflow-hidden shadow-2xl">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8 mb-10">
+              <div className="max-w-2xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-400 mb-3 uppercase tracking-wider">
+                  Autonomous Agent Workflow
+                </div>
+                <h2 className="text-3xl md:text-5xl font-black tracking-tight text-white mb-4">
+                  Meet ScanSafe Guardian AI
+                </h2>
+                <p className="text-zinc-300 text-base leading-relaxed">
+                  Give Guardian a complex natural-language shopping goal with strict dietary restrictions and a budget. The autonomous state machine retrieves candidate evidence, cross-examines dietary rules deterministically, and builds an evidence-backed shopping shortlist.
+                </p>
+              </div>
+
+              <Link
+                href="/guardian/agent"
+                className="inline-flex items-center gap-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black px-8 py-4 font-black text-lg transition-transform hover:scale-105 shadow-xl shrink-0"
+              >
+                <Sparkles className="w-5 h-5 text-black" />
+                <span>Launch Agent Workspace</span>
+                <ChevronRight className="w-5 h-5 text-black" />
+              </Link>
+            </div>
+
+            {/* State Machine Flow Visualization */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+                <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase">Stage 01</span>
+                <h4 className="font-bold text-white text-sm mt-1">Goal Decomposition</h4>
+                <p className="text-xs text-zinc-400 mt-2">
+                  Extracts target categories, positive keywords, excluded tokens, and currency constraints without dropping rules.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+                <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase">Stage 02</span>
+                <h4 className="font-bold text-white text-sm mt-1">Multi-Source Discovery</h4>
+                <p className="text-xs text-zinc-400 mt-2">
+                  Searches curated databases and public feeds with dynamic replanning and rate-limited concurrency leases.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+                <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase">Stage 03</span>
+                <h4 className="font-bold text-white text-sm mt-1">Deterministic Safety</h4>
+                <p className="text-xs text-zinc-400 mt-2">
+                  Safety is strictly verified by deterministic code rules across 15 allergen families—NEVER left to probabilistic LLMs.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+                <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase">Stage 04</span>
+                <h4 className="font-bold text-white text-sm mt-1">Verified Shortlist</h4>
+                <p className="text-xs text-zinc-400 mt-2">
+                  Generates an evidence-backed shortlist with traceable GTINs, source URLs, and affirmative human approval gates.
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Demo Goal Buttons */}
+            <div className="border-t border-zinc-800/80 pt-6">
+              <p className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3">
+                Try Pre-Configured Autonomous Goals in the Agent:
+              </p>
+              <div className="flex flex-wrap gap-2.5">
+                {[
+                  "Find peanut-free breakfast options under 250 INR",
+                  "Compare dairy-free protein bars with clean declarations",
+                  "Identify gluten-free snacks with zero cross-contact warnings",
+                  "Find nut-free and seed-friendly spreads under 30 AED"
+                ].map((preset, idx) => (
+                  <Link
+                    key={idx}
+                    href={`/guardian/agent?preset=${encodeURIComponent(preset)}`}
+                    className="inline-flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 hover:bg-zinc-800 px-3.5 py-2 text-xs font-medium text-zinc-300 hover:text-white transition"
+                  >
+                    <Search className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>"{preset}"</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* ================= TRANSPARENCY & METHODOLOGY ================= */}
@@ -217,98 +520,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ================= BENTO BOX FEATURES ================= */}
-      <section className="py-24 md:py-32 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div 
-            initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
-            className="mb-16 md:mb-24"
-          >
-            <h2 className="text-4xl md:text-5xl font-black tracking-tight text-white mb-6">
-              {t.bentoTitle1}<br/><span className="text-zinc-500">{t.bentoTitle2}</span>
-            </h2>
-            <p className="text-zinc-400 text-lg max-w-xl">
-              {t.bentoDesc}
-            </p>
-          </motion.div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 auto-rows-auto md:auto-rows-[300px]">
-            {/* Big Bento Card */}
-            <motion.div 
-              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
-              className="md:col-span-2 rounded-3xl border border-white/10 bg-zinc-900/40 p-8 overflow-hidden relative group hover:bg-zinc-900/60 transition-colors"
-            >
-              <div className="absolute -right-20 -top-20 opacity-10 group-hover:scale-110 transition-transform duration-700">
-                <Camera className="w-96 h-96" />
-              </div>
-              <div className="relative z-10 h-full flex flex-col justify-end">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-6 border border-emerald-500/30">
-                  <Sparkles className="w-7 h-7" />
-                </div>
-                <h3 className="text-2xl font-black text-white mb-3">{t.bentoCard1Title}</h3>
-                <p className="text-zinc-400 leading-relaxed max-w-md">
-                  {t.bentoCard1Desc}
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Small Bento Card 1 */}
-            <motion.div 
-              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
-              className="rounded-3xl border border-white/10 bg-zinc-900/40 p-8 overflow-hidden relative group hover:bg-zinc-900/60 transition-colors"
-            >
-              <div className="absolute right-0 bottom-0 opacity-5 group-hover:scale-110 transition-transform duration-700">
-                <ShieldCheck className="w-64 h-64" />
-              </div>
-              <div className="relative z-10 h-full flex flex-col justify-end">
-                <div className="w-12 h-12 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4 border border-indigo-500/30">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">{t.bentoCard2Title}</h3>
-                <p className="text-zinc-400 text-sm">
-                  {t.bentoCard2Desc}
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Small Bento Card 2 */}
-            <motion.div 
-              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
-              className="rounded-3xl border border-white/10 bg-zinc-900/40 p-8 overflow-hidden relative group hover:bg-zinc-900/60 transition-colors"
-            >
-               <div className="absolute right-0 top-0 opacity-5 group-hover:scale-110 transition-transform duration-700">
-                <Fingerprint className="w-64 h-64" />
-              </div>
-              <div className="relative z-10 h-full flex flex-col justify-end">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4 border border-amber-500/30">
-                  <Star className="w-6 h-6" />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">{t.bentoCard3Title}</h3>
-                <p className="text-zinc-400 text-sm">
-                  {t.bentoCard3Desc}
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Wide Bento Card */}
-            <motion.div 
-              initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
-              className="md:col-span-2 rounded-3xl border border-white/10 bg-zinc-900/40 p-8 overflow-hidden relative group hover:bg-zinc-900/60 transition-colors"
-            >
-               <div className="absolute right-10 top-1/2 -translate-y-1/2 opacity-10 group-hover:rotate-12 transition-transform duration-700">
-                <Zap className="w-48 h-48 text-rose-500" />
-              </div>
-              <div className="relative z-10 h-full flex flex-col justify-center">
-                <h3 className="text-2xl font-black text-white mb-3">{t.bentoCard4Title} <span className="ml-3 inline-block rounded-full bg-rose-500/20 border border-rose-500/50 px-3 py-1 text-xs text-rose-400 uppercase tracking-widest font-bold">{t.bentoCard4Badge}</span></h3>
-                <p className="text-zinc-400 leading-relaxed max-w-md">
-                  {t.bentoCard4Desc}
-                </p>
-              </div>
-            </motion.div>
-          </div>
-        </div>
-      </section>
-
       {/* ================= CINEMATIC CTA ================= */}
       <section className="py-32 relative overflow-hidden border-t border-white/10">
         <div className="absolute inset-0 bg-gradient-to-b from-black to-zinc-900/50 -z-10"></div>
@@ -316,36 +527,46 @@ export default function LandingPage() {
           initial="hidden" whileInView="whileInView" viewport={{ once: true }} variants={fadeUpVars}
           className="max-w-7xl mx-auto px-4 text-center"
         >
-          <h2 className="text-[12vw] md:text-[8vw] font-black tracking-tighter leading-none text-white opacity-90 mb-12">
-            {t.ctaTitle1} <br/><span className="text-zinc-800">{t.ctaTitle2}</span>
+          <h2 className="text-[10vw] md:text-[7vw] font-black tracking-tighter leading-none text-white opacity-95 mb-8">
+            Eat Safer. <br />
+            <span className="bg-gradient-to-r from-emerald-400 to-teal-200 bg-clip-text text-transparent">
+              Shop Smarter.
+            </span>
           </h2>
-          <div className="flex flex-col sm:flex-row justify-center gap-6 items-center relative z-20">
-            <a
+          <p className="text-zinc-400 text-base md:text-xl max-w-xl mx-auto mb-10">
+            Join thousands of smart consumers who use ScanSafe to protect their families from toxic additives and misleading marketing.
+          </p>
+          <div className="flex flex-col sm:flex-row justify-center gap-5 items-center relative z-20">
+            <Link
+              href="/guardian/agent"
+              className="w-full sm:w-auto rounded-full bg-emerald-500 text-black px-10 py-5 font-black text-xl hover:scale-105 transition-transform duration-300 shadow-[0_0_40px_rgba(16,185,129,0.3)]"
+            >
+              Launch Guardian AI Agent
+            </Link>
+            <Link
               href={isLoggedIn ? '/scan' : '/auth'}
-              className="w-full sm:w-auto rounded-full bg-white text-black px-10 py-5 font-black text-xl hover:scale-105 transition-transform duration-300 shadow-[0_0_40px_rgba(255,255,255,0.2)]"
+              className="w-full sm:w-auto rounded-full border border-white/20 bg-zinc-950 text-white px-10 py-5 font-bold text-xl hover:bg-white/10 transition-colors duration-300"
             >
-              {t.ctaBtnGetStarted}
-            </a>
-            <a
-              href="/pricing"
-              className="w-full sm:w-auto rounded-full border border-white/20 bg-black text-white px-10 py-5 font-bold text-xl hover:bg-white/5 transition-colors duration-300"
-            >
-              {t.ctaBtnPricing}
-            </a>
+              Scan Food Label
+            </Link>
           </div>
         </motion.div>
       </section>
 
       {/* ================= FOOTER ================= */}
-      <footer className="py-8 border-t border-white/5 text-center text-zinc-600 text-sm font-medium">
-        <div className="flex justify-center gap-6 mb-4">
-          <a href="/terms" className="hover:text-emerald-400 transition-colors">{t.footerTerms}</a>
-          <a href="/privacy" className="hover:text-emerald-400 transition-colors">{t.footerPrivacy}</a>
-          <a href="/refund" className="hover:text-emerald-400 transition-colors">{t.footerRefunds}</a>
-          <a href="/contact" className="hover:text-emerald-400 transition-colors">{t.footerContact}</a>
-          <a href="/pitch" className="hover:text-emerald-400 transition-colors">{t.footerPitch}</a>
+      <footer className="py-12 border-t border-white/5 text-center text-zinc-500 text-sm font-medium bg-black">
+        <div className="flex justify-center gap-6 mb-6 flex-wrap px-4">
+          <Link href="/guardian/agent" className="hover:text-emerald-400 transition-colors">Guardian Agent</Link>
+          <Link href="/scan" className="hover:text-emerald-400 transition-colors">Scanner</Link>
+          <Link href="/compare" className="hover:text-emerald-400 transition-colors">Product Compare</Link>
+          <Link href="/saved" className="hover:text-emerald-400 transition-colors">Saved List</Link>
+          <Link href="/demo" className="hover:text-emerald-400 transition-colors">Guest Demo</Link>
+          <Link href="/pricing" className="hover:text-emerald-400 transition-colors">Pricing</Link>
+          <Link href="/pitch" className="hover:text-emerald-400 transition-colors">Pitch Deck</Link>
+          <Link href="/terms" className="hover:text-emerald-400 transition-colors">Terms</Link>
+          <Link href="/privacy" className="hover:text-emerald-400 transition-colors">Privacy</Link>
         </div>
-        <p>&copy; {new Date().getFullYear()} ScanSafe. {t.footerCopy}</p>
+        <p>&copy; {new Date().getFullYear()} ScanSafe. All rights reserved. Built with clinical evidence standards.</p>
       </footer>
     </div>
   )
