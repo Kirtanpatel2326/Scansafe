@@ -29,7 +29,13 @@ import {
   ShoppingBag,
   ExternalLink,
   Layers,
-  FileText
+  FileText,
+  Send,
+  Radio,
+  Globe,
+  RefreshCw,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react'
 
 export default function ViralAdsStudioPage() {
@@ -58,6 +64,54 @@ export default function ViralAdsStudioPage() {
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  // Auto-Publishing State
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Array<'instagram' | 'youtube'>>(['instagram', 'youtube'])
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [isPublishing, setIsPublishing] = useState(false)
+  const [publishResults, setPublishResults] = useState<any[] | null>(null)
+  const [publishStatusMessage, setPublishStatusMessage] = useState<string | null>(null)
+
+  const togglePlatform = (p: 'instagram' | 'youtube') => {
+    setSelectedPlatforms(prev =>
+      prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
+    )
+  }
+
+  const handlePublishReel = async () => {
+    if (selectedPlatforms.length === 0) return
+    setIsPublishing(true)
+    setPublishResults(null)
+    setPublishStatusMessage(null)
+
+    try {
+      const res = await fetch('/api/ads/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adId: adPackage.id,
+          title: `${adPackage.productName} Truth Exposed! #Shorts`,
+          caption: adPackage.socialPost.caption,
+          platforms: selectedPlatforms,
+          webhookUrl: webhookUrl.trim() || undefined,
+          hashtags: adPackage.socialPost.hashtags,
+          manyChatTrigger: adPackage.socialPost.manyChatAutomationTrigger
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to trigger publishing pipeline')
+      }
+
+      setPublishResults(data.results || [])
+      setPublishStatusMessage(data.message || data.summary || 'Publishing dispatched successfully!')
+    } catch (err: any) {
+      setPublishStatusMessage(err.message || 'Publishing error')
+    } finally {
+      setIsPublishing(false)
+    }
+  }
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
@@ -572,6 +626,162 @@ export default function ViralAdsStudioPage() {
                 <p className="text-emerald-400 font-bold">👉 Instant DM Sent to User:</p>
                 <p className="text-[11px] text-zinc-200">
                   "Hey! Here is the free link to scan any food packaging directly from your camera: https://scansafe.co.in 🥦 Try scanning a snack in your kitchen and let me know your score!"
+                </p>
+              </div>
+            </div>
+
+            {/* 1-CLICK AUTONOMOUS CROSS-PLATFORM PUBLISHER */}
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <Send className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">1-Click Auto-Publish & Schedule</h4>
+                    <p className="text-[11px] text-zinc-400">Instagram Reels • YouTube Shorts • 24/7 Autonomous Bot</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 rounded">
+                  24/7 Cloud Ready
+                </span>
+              </div>
+
+              {/* PLATFORM SELECTORS */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-zinc-400">Target Platforms:</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => togglePlatform('instagram')}
+                    className={`flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition ${
+                      selectedPlatforms.includes('instagram')
+                        ? 'bg-gradient-to-r from-fuchsia-950/40 to-rose-950/40 border-fuchsia-500/60 text-fuchsia-200 shadow-sm'
+                        : 'bg-zinc-900/60 border-zinc-800 text-zinc-500 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">📸</span>
+                      <span>Instagram Reels</span>
+                    </div>
+                    {selectedPlatforms.includes('instagram') ? (
+                      <CheckCircle2 className="w-4 h-4 text-fuchsia-400" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-zinc-700" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => togglePlatform('youtube')}
+                    className={`flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition ${
+                      selectedPlatforms.includes('youtube')
+                        ? 'bg-gradient-to-r from-red-950/40 to-orange-950/40 border-red-500/60 text-red-200 shadow-sm'
+                        : 'bg-zinc-900/60 border-zinc-800 text-zinc-500 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">▶️</span>
+                      <span>YouTube Shorts</span>
+                    </div>
+                    {selectedPlatforms.includes('youtube') ? (
+                      <CheckCircle2 className="w-4 h-4 text-red-400" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-zinc-700" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* OPTIONAL WEBHOOK BRIDGE */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Zero-Token Webhook Bridge (Optional):</span>
+                  </label>
+                  <span className="text-[10px] text-zinc-500">Zapier / Make / Ayrshare</span>
+                </div>
+                <input
+                  type="url"
+                  placeholder="https://hooks.zapier.com/hooks/catch/... (or leave empty)"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  className="w-full rounded-xl bg-zinc-900 border border-zinc-800 px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition font-mono"
+                />
+                <p className="text-[11px] text-zinc-500 leading-normal">
+                  Connects directly to your social accounts with zero complex app reviews.
+                </p>
+              </div>
+
+              {/* PUBLISH ACTION BUTTON */}
+              <button
+                type="button"
+                onClick={handlePublishReel}
+                disabled={isPublishing || selectedPlatforms.length === 0}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 text-black font-extrabold text-sm py-3 px-4 shadow-lg shadow-emerald-500/20 hover:brightness-110 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {isPublishing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-black" />
+                    <span>Transcoding & Dispatching to Platforms...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4 text-black" />
+                    <span>Publish Reel Now to {selectedPlatforms.length} Platform{selectedPlatforms.length === 1 ? '' : 's'}</span>
+                  </>
+                )}
+              </button>
+
+              {/* LIVE PUBLISH RESULTS FEEDBACK */}
+              {publishStatusMessage && (
+                <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-zinc-300">
+                    <span>Dispatch Status:</span>
+                    <span className="text-emerald-400">{publishStatusMessage}</span>
+                  </div>
+
+                  {publishResults && publishResults.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      {publishResults.map((r, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between p-2 rounded-lg bg-zinc-950 text-xs border border-zinc-800/80"
+                        >
+                          <div className="flex items-center gap-2">
+                            {r.success ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            ) : (
+                              <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                            )}
+                            <span className="font-bold text-white capitalize">{r.platform}:</span>
+                            <span className="text-zinc-400 text-[11px] truncate max-w-[220px]">{r.message}</span>
+                          </div>
+
+                          {r.postUrl && (
+                            <a
+                              href={r.postUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-emerald-400 hover:underline flex items-center gap-0.5 shrink-0"
+                            >
+                              <span>View</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 24/7 GITHUB ACTIONS CRON INFO */}
+              <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-[11px] text-zinc-400 flex items-start gap-2">
+                <Radio className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <p>
+                  <strong>24/7 Cloud Bot Active:</strong> Configured in <code className="text-emerald-300 bg-zinc-950 px-1 py-0.5 rounded">.github/workflows/scansafe_auto_reels.yml</code> to run on a daily cron schedule completely hands-free.
                 </p>
               </div>
             </div>

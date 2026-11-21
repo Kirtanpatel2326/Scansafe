@@ -1,0 +1,76 @@
+name: ScanSafe 24/7 Autonomous Reels & Shorts Publisher
+
+on:
+  schedule:
+    # Runs daily at 14:00 UTC (7:30 PM IST - Peak social engagement window)
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+    inputs:
+      product:
+        description: 'Optional Product ID to force publish (e.g. instant_noodles, real_fruit_juice)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run / Simulation only (do not upload live)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: scansafe-reels-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish_daily_reel:
+    name: Generate & Publish Viral Food Safety Reel
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 🎥 Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: 📦 Install Dependencies
+        run: npm ci
+
+      - name: 🚀 Run Autonomous Reel Publisher
+        env:
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
+          YOUTUBE_ACCESS_TOKEN: ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
+          SOCIAL_PUBLISH_WEBHOOK_URL: ${{ secrets.SOCIAL_PUBLISH_WEBHOOK_URL }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.product }}" ]; then
+            ARGS="$ARGS --product ${{ github.event.inputs.product }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          npx tsx scripts/autonomous-reel-publisher.ts $ARGS
+
+      - name: 💾 Commit Updated Reels History
+        run: |
+          git config --global user.name "ScanSafe Autonomous Bot"
+          git config --global user.email "bot@scansafe.co.in"
+          if [ -n "$(git status --porcelain data/reels_history.json)" ]; then
+            git add data/reels_history.json
+            git commit -m "chore(reels): update published reels history [skip ci]"
+            git push
+            echo "✅ Successfully synced reels_history.json to main branch."
+          else
+            echo "ℹ️ No changes to reels_history.json."
+          fi
