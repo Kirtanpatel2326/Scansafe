@@ -37,6 +37,7 @@ yarn-error.log*
 
 # scratch and local test utilities
 scratch/
+out_ads/
 *.mp3
 *.wav
 

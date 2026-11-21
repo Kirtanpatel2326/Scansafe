@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
-import { LogOut, User as UserIcon, ShieldAlert, Sparkles, History, Camera, CreditCard, ChevronDown, FileText, Zap, Crown, GitCompare, Menu, X, Bookmark } from 'lucide-react'
+import { LogOut, User as UserIcon, ShieldAlert, Sparkles, History, Camera, CreditCard, ChevronDown, FileText, Zap, Crown, GitCompare, Menu, X, Bookmark, Video } from 'lucide-react'
 import LanguageSwitcher from './LanguageSwitcher'
 import { useTranslation } from '@/lib/translations'
 
@@ -173,6 +173,15 @@ export default function Header() {
             >
               <FileText className="w-4 h-4" />
               {t.navPitch}
+            </a>
+            <a
+              href="/ads"
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:text-white ${
+                isActive('/ads') ? 'text-emerald-400 bg-emerald-950/10' : 'text-zinc-300'
+              }`}
+            >
+              <Video className="w-4 h-4 text-emerald-400" />
+              <span>Viral Studio</span>
             </a>
           </nav>
         </div>
@@ -382,6 +391,16 @@ export default function Header() {
           >
             <FileText className="w-4 h-4" />
             {t.navPitch}
+          </a>
+          <a
+            href="/ads"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl transition text-sm font-bold ${
+              isActive('/ads') ? 'text-emerald-400 bg-emerald-950/10' : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
+            }`}
+          >
+            <Video className="w-4 h-4 text-emerald-400" />
+            Viral Studio
           </a>
         </div>
       )}
