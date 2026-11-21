@@ -285,7 +285,7 @@ export const CANONICAL_PREFERENCES: PreferenceDefinition[] = [
     label: "PCOD / PCOS Hormonal Care",
     category: "health_condition",
     description: "Screens for high-insulin spike sugars, inflammatory refined seed oils, and endocrine-disrupting additives.",
-    aliases: ["pcod", "pcos", "pcod-pcos", "polycystic", "hormone-friendly"],
+    aliases: ["pcod", "pcos", "pcod-pcos", "polycystic", "hormone-friendly", "fcs"],
     searchTerms: [
       "maltodextrin", "high fructose corn syrup", "corn syrup", "liquid glucose", "dextrose", 
       "invert sugar", "palm oil", "palmolein", "hydrogenated fat", "vanaspati", 
@@ -333,6 +333,24 @@ export const CANONICAL_PREFERENCES: PreferenceDefinition[] = [
     declaredAllergenTriggers: [],
     precautionaryTriggers: [],
     disclaimer: "Renal screening flags inorganic added phosphorus and potassium salts. Consult your nephrologist for individual laboratory stage targets."
+  },
+  {
+    id: "fssai-fcs",
+    label: "FSSAI & Food Chemical Safety (FCS)",
+    category: "health_condition",
+    description: "Screens for banned additives, unapproved food contact substances (FCS), trans-fats > 2%, potassium bromate, and industrial bleaching agents under FSSAI regulations.",
+    aliases: ["fssai", "fcs", "fssai-fcs", "food-safety", "fcs-profile", "food-categorization"],
+    searchTerms: [
+      "potassium bromate", "potassium iodate", "partially hydrogenated", "vanaspati", "dalda", 
+      "rhodamine b", "metanil yellow", "malachite green", "formalin", "borax", "mineral oil", 
+      "calcium carbide", "brominated vegetable oil", "bvo", "stephania", "argemone"
+    ],
+    exclusions: [
+      "cold pressed", "wood pressed", "pure ghee"
+    ],
+    declaredAllergenTriggers: [],
+    precautionaryTriggers: [],
+    disclaimer: "FSSAI & Food Chemical Safety (FCS) profile flags toxic, banned, or strictly restricted substances under Indian food regulatory schedules."
   }
 ];
 

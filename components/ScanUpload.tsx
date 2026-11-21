@@ -33,7 +33,11 @@ const DIETARY_PREFERENCES = [
   { id: 'diabetic', label: 'Diabetes' },
   { id: 'hypertension', label: 'Hypertension' },
   { id: 'pregnancy', label: 'Pregnancy-Safe' },
-  { id: 'cardiovascular', label: 'Heart-Conscious' }
+  { id: 'cardiovascular', label: 'Heart-Conscious' },
+  { id: 'pcod-pcos', label: 'PCOD / PCOS Care' },
+  { id: 'kids-safe', label: 'Kids Clean Screen' },
+  { id: 'renal-kidney', label: 'Renal / Kidney Care' },
+  { id: 'fssai-fcs', label: 'FSSAI / FCS Food Safety' }
 ]
 
 const MOCK_PRESETS = [
@@ -63,6 +67,24 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
   const [selectionRequired, setSelectionRequired] = useState(false)
   const [activeOpKey, setActiveOpKey] = useState<string>(() => generateClientOpKey('scan'))
   
+  // Load saved dietary profile preferences
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('scansafe_dietary_profile')
+        if (saved) {
+          const parsed = JSON.parse(saved)
+          const combined = Array.from(new Set([...(parsed.allergies || []), ...(parsed.conditions || [])]))
+          if (combined.length > 0) {
+            setSelectedPrefs(combined)
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load local preferences', e)
+      }
+    }
+  }, [])
+
   // Barcode search input
   const [barcodeInput, setBarcodeInput] = useState('')
 
@@ -302,9 +324,22 @@ export default function ScanUpload({ onScanStart, onScanSuccess, onScanError }: 
   // Toggle dietary preference
   const togglePreference = (prefId: string) => {
     setActiveOpKey(generateClientOpKey('scan'))
-    setSelectedPrefs((prev) =>
-      prev.includes(prefId) ? prev.filter((p) => p !== prefId) : [...prev, prefId]
-    )
+    setSelectedPrefs((prev) => {
+      const next = prev.includes(prefId) ? prev.filter((p) => p !== prefId) : [...prev, prefId]
+      if (typeof window !== 'undefined') {
+        try {
+          const saved = localStorage.getItem('scansafe_dietary_profile')
+          const existing = saved ? JSON.parse(saved) : {}
+          localStorage.setItem('scansafe_dietary_profile', JSON.stringify({
+            ...existing,
+            conditions: next
+          }))
+        } catch (e) {
+          console.error('Error persisting preferences', e)
+        }
+      }
+      return next
+    })
   }
 
   // Camera operations

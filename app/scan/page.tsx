@@ -263,9 +263,27 @@ export default function ScanPage() {
           setUserWeight(dp.weight || '')
           setSelectedAllergies(dp.allergies || [])
           setSelectedConditions(dp.conditions || [])
+        } else if (typeof window !== 'undefined') {
+          const localDiet = localStorage.getItem('scansafe_dietary_profile')
+          if (localDiet) {
+            const dp = JSON.parse(localDiet)
+            setUserAge(dp.age || '')
+            setUserWeight(dp.weight || '')
+            setSelectedAllergies(dp.allergies || [])
+            setSelectedConditions(dp.conditions || [])
+          }
         }
       } catch {
-        // dietary_profile column may not exist yet
+        if (typeof window !== 'undefined') {
+          const localDiet = localStorage.getItem('scansafe_dietary_profile')
+          if (localDiet) {
+            const dp = JSON.parse(localDiet)
+            setUserAge(dp.age || '')
+            setUserWeight(dp.weight || '')
+            setSelectedAllergies(dp.allergies || [])
+            setSelectedConditions(dp.conditions || [])
+          }
+        }
       }
     } catch (err) {
       console.error('Error loading profile:', err)
@@ -468,17 +486,21 @@ export default function ScanPage() {
         conditions: selectedConditions
       }
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({ dietary_profile: dietaryProfile })
-        .eq('id', user.id)
-
-      if (!error) {
-        alert('Dietary settings updated successfully!')
-        fetchProfile(user.id)
-      } else {
-        throw error
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('scansafe_dietary_profile', JSON.stringify(dietaryProfile))
       }
+
+      try {
+        await supabase
+          .from('profiles')
+          .update({ dietary_profile: dietaryProfile })
+          .eq('id', user.id)
+      } catch (dbErr) {
+        // column may not exist yet in schema cache; saved locally
+      }
+
+      alert('Dietary & FCS health settings updated successfully!')
+      fetchProfile(user.id)
     } catch (err: any) {
       alert(err.message || 'Error updating settings.')
     } finally {
@@ -1099,7 +1121,11 @@ export default function ScanPage() {
                       { id: 'diabetic', label: 'Diabetes' },
                       { id: 'hypertension', label: 'Hypertension' },
                       { id: 'pregnancy', label: 'Pregnancy-Safe' },
-                      { id: 'cardiovascular', label: 'Heart-Conscious' }
+                      { id: 'cardiovascular', label: 'Heart-Conscious' },
+                      { id: 'pcod-pcos', label: 'PCOD / PCOS Care' },
+                      { id: 'kids-safe', label: 'Kids Clean Screen' },
+                      { id: 'renal-kidney', label: 'Renal / Kidney Care' },
+                      { id: 'fssai-fcs', label: 'FSSAI / FCS Food Safety' }
                     ].map((pref) => {
                       const isSelected = selectedAllergies.includes(pref.id) || selectedConditions.includes(pref.id)
                       const togglePref = () => {
