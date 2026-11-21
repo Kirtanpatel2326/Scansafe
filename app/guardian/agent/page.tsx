@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Header from '@/components/Header'
 import {
   ShieldAlert,
@@ -18,7 +18,13 @@ import {
   Sliders,
   ChevronDown,
   ChevronUp,
-  Info
+  Info,
+  Camera,
+  Upload,
+  ShoppingBag,
+  ExternalLink,
+  X,
+  Check
 } from 'lucide-react'
 
 const ALLERGEN_OPTIONS = [
@@ -81,6 +87,7 @@ interface EvaluatedProductItem {
   precautionaryNotice?: boolean
   conflictingClaims?: boolean
   uncertaintyScore?: number
+  sourceUrl?: string
 }
 
 interface AgentResult {
@@ -131,6 +138,141 @@ export default function GuardianAgentPage() {
   const [historyTasks, setHistoryTasks] = useState<HistoryTask[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  // Camera & Photo Extraction State
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false)
+  const [ocrStatusText, setOcrStatusText] = useState('')
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+
+  const startCamera = async () => {
+    setCameraError(null)
+    setIsCameraOpen(true)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      })
+      streamRef.current = stream
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch(e => console.error('Video play error:', e))
+        }
+      }, 100)
+    } catch (err: any) {
+      console.error('Camera access error:', err)
+      setCameraError('Unable to access device camera. Please allow camera permissions or upload an image.')
+    }
+  }
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop())
+      streamRef.current = null
+    }
+    setIsCameraOpen(false)
+  }
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    canvas.width = video.videoWidth || 640
+    canvas.height = video.videoHeight || 480
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const base64 = canvas.toDataURL('image/jpeg', 0.85)
+    stopCamera()
+    processImageEvidence(base64, 'Live Camera Snapshot')
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const base64 = reader.result as string
+      processImageEvidence(base64, file.name)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  const processImageEvidence = async (base64Image: string, sourceName: string) => {
+    setIsOcrProcessing(true)
+    setOcrStatusText('Reading packaging label via Vision OCR...')
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64Image,
+          filename: sourceName,
+          isSample: false
+        })
+      })
+      const data = await res.json()
+      if (res.ok && data.success && data.analysis) {
+        const a = data.analysis
+        const ingText = Array.isArray(a.ingredients)
+          ? a.ingredients.map((i: any) => typeof i === 'string' ? i : i.name).join(', ')
+          : (a.ingredients || '')
+        const allergensText = Array.isArray(a.allergens_declared) && a.allergens_declared.length > 0
+          ? a.allergens_declared.join(', ')
+          : (Array.isArray(a.allergens) ? a.allergens.join(', ') : '')
+
+        const newProd: ManualProduct = {
+          id: `photo_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          name: a.product_name || 'Scanned Food Product',
+          ingredients: ingText || 'Extracted from packaging photo',
+          allergenStatement: allergensText ? `Contains / May Contain: ${allergensText}` : 'No explicit allergens declared on visible label',
+          labelComplete: Boolean(ingText && ingText.length > 5),
+          evidenceSource: `Packaging Photo (${sourceName})`,
+          price: undefined
+        }
+
+        setProducts(curr => {
+          const hasOnlyBlank = curr.length === 1 && !curr[0].name && !curr[0].ingredients
+          if (hasOnlyBlank) return [newProd]
+          return [...curr, newProd]
+        })
+        setShowManualEvidence(true)
+      } else {
+        const fallbackProd: ManualProduct = {
+          id: `photo_${Date.now()}`,
+          name: 'Package Photo Evidence',
+          ingredients: '',
+          allergenStatement: '',
+          labelComplete: false,
+          evidenceSource: `Uploaded Photo (${sourceName})`,
+          price: undefined
+        }
+        setProducts(curr => [...curr, fallbackProd])
+        setShowManualEvidence(true)
+      }
+    } catch (err) {
+      console.warn('Vision OCR failed:', err)
+      const fallbackProd: ManualProduct = {
+        id: `photo_${Date.now()}`,
+        name: 'Captured Packaging Photo',
+        ingredients: '',
+        allergenStatement: '',
+        labelComplete: false,
+        evidenceSource: `Photo (${sourceName})`,
+        price: undefined
+      }
+      setProducts(curr => [...curr, fallbackProd])
+      setShowManualEvidence(true)
+    } finally {
+      setIsOcrProcessing(false)
+      setOcrStatusText('')
+    }
+  }
 
   useEffect(() => {
     fetchHistory()
@@ -477,8 +619,60 @@ export default function GuardianAgentPage() {
               <div className="mt-3 space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/80 p-4">
                 <p className="text-xs text-amber-300/90 flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5 flex-shrink-0" />
-                  Supply both the ingredient panel and allergen declaration verbatim. Partial or unreadable panels receive an elevated uncertainty score.
+                  Supply both the ingredient panel and allergen declaration verbatim, or snap a photo of the package to auto-extract with Vision OCR.
                 </p>
+
+                {/* CAMERA & PHOTO UPLOAD TOOLBAR */}
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                      <Camera className="w-5 h-5" />
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-white">Take Photo or Upload Packaging Image</h4>
+                      <p className="text-[11px] text-zinc-400">
+                        ScanSafe Vision OCR reads the label and auto-populates product name, ingredients, and allergens.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={startCamera}
+                      disabled={isOcrProcessing}
+                      className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black px-3.5 py-2 text-xs font-bold transition shadow-sm"
+                    >
+                      <Camera className="w-4 h-4 text-black" />
+                      Take Photo
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isOcrProcessing}
+                      className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-zinc-200 px-3.5 py-2 text-xs font-bold transition"
+                    >
+                      <Upload className="w-4 h-4 text-zinc-400" />
+                      Upload Image
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={handleFileUpload}
+                    />
+                  </div>
+                </div>
+
+                {isOcrProcessing && (
+                  <div className="rounded-lg border border-emerald-500/40 bg-zinc-900 p-3 flex items-center gap-2.5 text-xs text-emerald-300">
+                    <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+                    <span>{ocrStatusText || 'Extracting ingredients from packaging image via Vision OCR...'}</span>
+                  </div>
+                )}
 
                 {products.map((p, idx) => (
                   <div key={p.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3.5 space-y-2.5">
@@ -677,22 +871,74 @@ export default function GuardianAgentPage() {
               </div>
 
               {result.shortlist.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                   {result.shortlist.map(id => {
                     const matched = result.products.find(p => p.id === id)
+                    const prodName = matched?.name || id
                     return (
-                      <div key={id} className="rounded-lg bg-zinc-900/90 border border-zinc-800 p-3 flex items-center justify-between text-xs">
-                        <div>
-                          <strong className="text-zinc-100">{matched?.name || id}</strong>
-                          {matched?.price !== null && matched?.price !== undefined && (
-                            <p className="text-zinc-400 text-[11px] font-mono mt-0.5">
-                              {matched.price} {matched.currency}
-                            </p>
+                      <div key={id} className="rounded-xl bg-zinc-900/90 border border-emerald-500/40 p-4 space-y-2.5 text-xs shadow-md">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <strong className="text-zinc-100 font-bold text-sm block">{prodName}</strong>
+                            {matched?.price !== null && matched?.price !== undefined && (
+                              <p className="text-emerald-400 text-xs font-mono font-bold mt-0.5">
+                                {matched.price} {matched.currency}
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-950/90 px-2 py-0.5 rounded border border-emerald-800 shrink-0">
+                            Verified Candidate
+                          </span>
+                        </div>
+
+                        {/* GO TO PRODUCT / BUY LINKS */}
+                        <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-zinc-800">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1 mr-1">
+                            <ShoppingBag className="w-3 h-3 text-emerald-400" /> Go to Product:
+                          </span>
+                          <a
+                            href={`https://blinkit.com/s/?q=${encodeURIComponent(prodName)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-300 border border-yellow-400/30 px-2 py-0.5 text-[10px] font-bold transition"
+                          >
+                            Blinkit <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                          <a
+                            href={`https://www.zeptonow.com/search?q=${encodeURIComponent(prodName)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                          >
+                            Zepto <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                          <a
+                            href={`https://www.bigbasket.com/ps/?q=${encodeURIComponent(prodName)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                          >
+                            BigBasket <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                          <a
+                            href={`https://www.amazon.in/s?k=${encodeURIComponent(prodName)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                          >
+                            Amazon <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                          {matched?.sourceUrl && (
+                            <a
+                              href={matched.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                            >
+                              Source Data <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
                           )}
                         </div>
-                        <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
-                          Candidate
-                        </span>
                       </div>
                     )
                   })}
@@ -768,6 +1014,55 @@ export default function GuardianAgentPage() {
                           </p>
                         ))}
                       </div>
+
+                      {/* GO TO PRODUCT / BUY LINKS */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-zinc-800/60">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1 mr-1">
+                          <ShoppingBag className="w-3 h-3 text-emerald-400" /> Go to Product:
+                        </span>
+                        <a
+                          href={`https://blinkit.com/s/?q=${encodeURIComponent(p.name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-300 border border-yellow-400/30 px-2 py-0.5 text-[10px] font-bold transition"
+                        >
+                          Blinkit <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                        <a
+                          href={`https://www.zeptonow.com/search?q=${encodeURIComponent(p.name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                        >
+                          Zepto <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                        <a
+                          href={`https://www.bigbasket.com/ps/?q=${encodeURIComponent(p.name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                        >
+                          BigBasket <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                        <a
+                          href={`https://www.amazon.in/s?k=${encodeURIComponent(p.name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                        >
+                          Amazon <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                        {p.sourceUrl && (
+                          <a
+                            href={p.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold transition"
+                          >
+                            Source Data <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        )}
+                      </div>
                     </article>
                   )
                 })}
@@ -820,6 +1115,81 @@ export default function GuardianAgentPage() {
         )}
 
       </main>
+
+      {/* LIVE CAMERA VIEWFINDER MODAL */}
+      {isCameraOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-950 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">Capture Food Package Label</h3>
+              </div>
+              <button
+                type="button"
+                onClick={stopCamera}
+                className="rounded-lg p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {cameraError ? (
+              <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 space-y-3">
+                <p>{cameraError}</p>
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 text-xs font-semibold"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-zinc-800 bg-black flex items-center justify-center">
+                  <video
+                    ref={videoRef}
+                    playsInline
+                    autoPlay
+                    muted
+                    className="h-full w-full object-cover"
+                  />
+                  {/* Framing Crosshair Overlay */}
+                  <div className="absolute inset-6 border-2 border-dashed border-emerald-400/60 rounded-lg pointer-events-none flex flex-col justify-between p-2">
+                    <span className="text-[10px] uppercase font-mono tracking-wider text-emerald-400 bg-black/60 px-1.5 py-0.5 rounded self-start">
+                      Align Ingredients & Allergen Box
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-400 bg-black/60 px-1.5 py-0.5 rounded self-end">
+                      ScanSafe High-Res Capture
+                    </span>
+                  </div>
+                </div>
+
+                <canvas ref={canvasRef} className="hidden" />
+
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-semibold text-zinc-300 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={capturePhoto}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-2.5 text-xs font-bold transition shadow-lg shadow-emerald-500/20"
+                  >
+                    <Camera className="w-4 h-4 text-black" />
+                    Snap Photo & Extract Evidence
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
