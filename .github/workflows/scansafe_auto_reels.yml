@@ -52,6 +52,10 @@ jobs:
           INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
           YOUTUBE_ACCESS_TOKEN: ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
           SOCIAL_PUBLISH_WEBHOOK_URL: ${{ secrets.SOCIAL_PUBLISH_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          NOTIFICATION_WEBHOOK_URL: ${{ secrets.NOTIFICATION_WEBHOOK_URL }}
         run: |
           ARGS=""
           if [ -n "${{ github.event.inputs.product }}" ]; then
@@ -66,11 +70,11 @@ jobs:
         run: |
           git config --global user.name "ScanSafe Autonomous Bot"
           git config --global user.email "bot@scansafe.co.in"
-          if [ -n "$(git status --porcelain data/reels_history.json)" ]; then
-            git add data/reels_history.json
-            git commit -m "chore(reels): update published reels history [skip ci]"
+          git add data/reels_history.json data/notifications_log.json 2>/dev/null || true
+          if [ -n "$(git status --porcelain data/)" ]; then
+            git commit -m "chore(reels): update published reels history and telemetry [skip ci]"
             git push
             echo "✅ Successfully synced reels_history.json to main branch."
           else
-            echo "ℹ️ No changes to reels_history.json."
+            echo "ℹ️ No changes to reels data."
           fi
