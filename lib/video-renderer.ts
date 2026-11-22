@@ -83,6 +83,13 @@ export function generateSceneSvg(
       <stop offset="100%" stop-color="${accentColor}" stop-opacity="0" />
     </radialGradient>
 
+    <!-- Health Score Meter Gradient -->
+    <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EF4444" />
+      <stop offset="50%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+
     <!-- Card Filter Drop Shadow -->
     <filter id="glassShadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="25" stdDeviation="35" flood-color="#000000" flood-opacity="0.75" />
@@ -138,45 +145,60 @@ export function generateSceneSvg(
       ${safeOverlay}
     </text>
 
-    <!-- SCANNER HUD / GRAPHIC SECTION -->
+    <!-- SCANNER HUD / GRAPHIC SECTION (Exact Pro Interface Matching Screenshot) -->
     <g transform="translate(50, 400)">
-      <rect width="820" height="480" rx="32" fill="#070A11" stroke="#1E293B" stroke-width="2" />
+      <rect width="820" height="490" rx="32" fill="#070A11" stroke="#1E293B" stroke-width="2" />
 
-      <!-- Corner HUD Target Brackets -->
-      <path d="M 30 60 L 30 30 L 60 30" stroke="${accentColor}" stroke-width="4" fill="none" stroke-linecap="round" />
-      <path d="M 790 60 L 790 30 L 760 30" stroke="${accentColor}" stroke-width="4" fill="none" stroke-linecap="round" />
-      <path d="M 30 420 L 30 450 L 60 450" stroke="${accentColor}" stroke-width="4" fill="none" stroke-linecap="round" />
-      <path d="M 790 420 L 790 450 L 760 450" stroke="${accentColor}" stroke-width="4" fill="none" stroke-linecap="round" />
+      <!-- Top Scanner Status Header -->
+      <g transform="translate(410, 38)">
+        <path d="M -170 8 L -170 -10 L -140 -10" stroke="#10B981" stroke-width="2.5" fill="none" />
+        <path d="M 170 8 L 170 -10 L 140 -10" stroke="#10B981" stroke-width="2.5" fill="none" />
+        <circle cx="-110" cy="-2" r="4" fill="#10B981" />
+        <text x="0" y="3" font-family="monospace" font-size="16" font-weight="900" fill="#10B981" text-anchor="middle" letter-spacing="3">
+          ${step.phase === 'HOOK' ? 'ANALYSIS COMPLETE' : step.phase === 'PROBLEM' ? 'HAZARDS DETECTED' : step.phase === 'SCAN_REVEAL' ? 'OPTICAL OCR SCANNING' : step.phase === 'FINDINGS' ? 'CHEMICAL AUDIT' : 'SMART SWAP VERIFIED'}
+        </text>
+      </g>
 
-      <!-- Center Visual Vector Display -->
-      <g transform="translate(410, 200)">
-        <circle cx="0" cy="0" r="90" fill="${accentColor}" fill-opacity="0.12" stroke="${accentColor}" stroke-width="3" />
-        ${
-          step.phase === 'SMART_SWAP'
-            ? `<path d="M -30 -10 L -10 15 L 35 -30" stroke="#10B981" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none" />`
-            : step.phase === 'CTA'
-            ? `<rect x="-30" y="-45" width="60" height="90" rx="12" stroke="#10B981" stroke-width="5" fill="none" />
-               <line x1="-15" y1="25" x2="15" y2="25" stroke="#10B981" stroke-width="4" stroke-linecap="round" />`
-            : step.phase === 'SCAN_REVEAL'
-            ? `<circle cx="0" cy="0" r="45" stroke="${accentColor}" stroke-width="5" stroke-dasharray="10 6" fill="none" />
-               <circle cx="0" cy="0" r="15" fill="${accentColor}" />`
-            : `<polygon points="0,-45 42,35 -42,35" stroke="${accentColor}" stroke-width="6" fill="${accentColor}" fill-opacity="0.2" stroke-linejoin="round" />
-               <line x1="0" y1="-18" x2="0" y2="10" stroke="${accentColor}" stroke-width="6" stroke-linecap="round" />
-               <circle cx="0" cy="24" r="4" fill="${accentColor}" />`
-        }
+      <!-- Center Floating Ingredient Pills (Matching Pro Design) -->
+      <g transform="translate(40, 58)">
+        <rect x="0" y="0" width="740" height="46" rx="8" fill="#08140E" fill-opacity="0.9" stroke="#10B981" stroke-width="1.5" />
+        <text x="20" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#E2E8F0">Carbonated Water</text>
+        <rect x="635" y="8" width="85" height="30" rx="5" fill="#10B981" />
+        <text x="677" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+
+        <rect x="0" y="54" width="740" height="46" rx="8" fill="#1A0808" fill-opacity="0.9" stroke="#EF4444" stroke-width="1.5" />
+        <text x="20" y="83" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FCA5A5">High Sugar / Glucose-Fructose</text>
+        <rect x="625" y="62" width="95" height="30" rx="5" fill="#EF4444" />
+        <text x="672" y="83" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
+
+        <rect x="0" y="108" width="740" height="46" rx="8" fill="#1A0808" fill-opacity="0.9" stroke="#EF4444" stroke-width="1.5" />
+        <text x="20" y="137" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FCA5A5">Caramel Colour INS 150d</text>
+        <rect x="625" y="116" width="95" height="30" rx="5" fill="#EF4444" />
+        <text x="672" y="137" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
+
+        <rect x="0" y="162" width="740" height="46" rx="8" fill="#1A1206" fill-opacity="0.9" stroke="#F59E0B" stroke-width="1.5" />
+        <text x="20" y="191" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FDE68A">Phosphoric Acid</text>
+        <rect x="610" y="170" width="110" height="30" rx="5" fill="#F59E0B" />
+        <text x="665" y="191" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
+
+        <rect x="0" y="216" width="740" height="46" rx="8" fill="#1A1206" fill-opacity="0.9" stroke="#F59E0B" stroke-width="1.5" />
+        <text x="20" y="245" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FDE68A">Caffeine</text>
+        <rect x="610" y="224" width="110" height="30" rx="5" fill="#F59E0B" />
+        <text x="665" y="245" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
       </g>
 
       <!-- Laser Sweep Simulation Line -->
-      <line x1="80" y1="320" x2="740" y2="320" stroke="${accentColor}" stroke-width="4" stroke-opacity="0.9" />
-      <line x1="80" y1="320" x2="740" y2="320" stroke="${accentColor}" stroke-width="12" stroke-opacity="0.25" />
+      <line x1="40" y1="325" x2="780" y2="325" stroke="#10B981" stroke-width="3" stroke-opacity="0.9" />
+      <line x1="40" y1="325" x2="780" y2="325" stroke="#10B981" stroke-width="12" stroke-opacity="0.25" />
 
-      <!-- Scan Metrics -->
-      <text x="410" y="380" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="1">
-        ${step.phase === 'FINDINGS' ? `HEALTH SCORE: ${adPackage.healthScore}/100` : step.phase === 'SMART_SWAP' ? '100% CLEAN CERTIFIED' : 'SCANNING 18 TOXIC ADDITIVES'}
-      </text>
-      <text x="410" y="420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="600" fill="#94A3B8" text-anchor="middle">
-        ${step.phase === 'SMART_SWAP' ? 'Zero Refined Sugars • Zero Palm Oil' : 'Optical Ingredient Recognition • Zero Barcodes'}
-      </text>
+      <!-- Bottom Health Score Display Box -->
+      <g transform="translate(40, 345)">
+        <rect width="740" height="125" rx="14" fill="#060C08" stroke="#1E293B" stroke-width="1.5" />
+        <text x="24" y="46" font-family="monospace" font-size="16" font-weight="800" fill="#10B981" letter-spacing="2">HEALTH SCORE</text>
+        <text x="715" y="54" font-family="monospace" font-size="42" font-weight="900" fill="${adPackage.healthScore < 40 ? '#EF4444' : '#F59E0B'}" text-anchor="end">${adPackage.healthScore}</text>
+        <rect x="24" y="80" width="690" height="10" rx="5" fill="#182218" />
+        <rect x="24" y="80" width="${(adPackage.healthScore / 100) * 690}" height="10" rx="5" fill="url(#scoreGrad)" />
+      </g>
     </g>
 
     <!-- SPOKEN VOICEOVER SUBTITLES (HORMOZI STYLE) -->
