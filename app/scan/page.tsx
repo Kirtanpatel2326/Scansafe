@@ -214,10 +214,6 @@ export default function ScanPage() {
       }
 
       clearTimeout(safetyTimer)
-
-      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'true') {
-        router.push('/demo')
-      }
     }).catch((err) => {
       console.warn('Session check warning:', err)
       if (isMounted) setLoadingSession(false)
@@ -747,12 +743,6 @@ export default function ScanPage() {
                           Refill Scan Credits
                         </Link>
                       )}
-                      <Link
-                        href="/demo"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
-                      >
-                        Try Guest Demo (0 Credits)
-                      </Link>
                     </div>
                   </div>
                 </div>
@@ -771,18 +761,12 @@ export default function ScanPage() {
                 <Camera className="w-12 h-12 text-zinc-500 mx-auto mb-4 animate-pulse" />
                 <h3 className="text-xl font-bold text-white mb-2">Scan Food Ingredients</h3>
                 <p className="text-zinc-400 text-sm max-w-md mx-auto mb-6">
-                  Explore our interactive zero-credit guest demo freely, or sign in to scan packaged food labels with your camera.
+                  Sign in or create a free account to scan packaged food labels and detect hidden toxins, allergens, and harmful additives.
                 </p>
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
                   <Link
-                    href="/demo"
-                    className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl transition cursor-pointer"
-                  >
-                    Try Guest Demo (No Login)
-                  </Link>
-                  <Link
                     href="/auth"
-                    className="inline-flex items-center gap-2 border border-zinc-750 hover:bg-zinc-900 text-white font-bold px-6 py-2.5 rounded-xl transition cursor-pointer"
+                    className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl transition cursor-pointer"
                   >
                     Sign In to Scan
                   </Link>

@@ -100,21 +100,7 @@ psql "$TEST_DATABASE_URL" -f schema_v2.sql
 
 ---
 
-## 5. Guest Demo Access (Zero Credits, No Sign-In)
-
-ScanSafe includes a dedicated public guest demo at `/demo`:
-- **Route**: [http://localhost:3000/demo](http://localhost:3000/demo) (or [https://scansafe.co.in/demo](https://scansafe.co.in/demo))
-- **Features**:
-  - Deterministic sample fixtures (`sample_cookies`, `sample_oats`).
-  - No authentication required.
-  - Zero credits debited.
-  - Does not call external vision APIs.
-  - Does not write sample scans into user history.
-  - Real-time client-side dietary preference simulation (e.g. Vegan, Gluten, Dairy).
-
----
-
-## 6. Testing & Release Gate Verification
+## 5. Testing & Release Gate Verification
 
 Execute test suites using the following commands:
 
@@ -140,7 +126,7 @@ npm run lint
 
 ---
 
-## 7. Payment Safeguards (Prototype Demonstration Mode)
+## 6. Payment Safeguards (Prototype Demonstration Mode)
 
 - Live payment checkout is disabled by default (`ENABLE_LIVE_PAYMENTS=false` and `NEXT_PUBLIC_ENABLE_LIVE_PAYMENTS=false`).
 - Checkout endpoints (`/api/checkout` and `/api/manual-checkout`) strictly return `HTTP 503 (PAYMENTS_AWAITING_VERIFICATION)`.
@@ -149,7 +135,7 @@ npm run lint
 
 ---
 
-## 8. Deployment & Known Limitations
+## 7. Deployment & Known Limitations
 
 ### Deployment Steps
 Deployments are continuously deployed via Vercel when changes are merged to the `main` branch on GitHub (`Kirtanpatel2326/Scansafe`).
@@ -166,12 +152,11 @@ npm run build
 
 ---
 
-## 9. Measuring Product Journey & Adoption Truthfully
+## 8. Measuring Product Journey & Adoption Truthfully
 
 ScanSafe implements privacy-preserving milestone telemetry via `/api/track` and the `analytics_events` table. Telemetry strictly excludes PII, raw ingredient texts, label photos, and personal dietary restriction profiles.
 
 ### Primary Journey Milestones
-- `demo_opened`: Guest evaluates zero-credit interactive demo at `/demo`.
 - `scan_started`: User initiates camera or photo upload.
 - `scan_completed`: OCR extraction and fact normalization completes successfully.
 - `scan_failed`: Photo was unreadable or network failed (captures failure category).

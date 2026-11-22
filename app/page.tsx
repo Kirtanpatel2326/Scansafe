@@ -9,7 +9,6 @@ import {
   Sparkles, 
   Camera, 
   ShieldCheck, 
-  Star, 
   ChevronRight, 
   Zap, 
   Check, 
@@ -176,14 +175,6 @@ export default function LandingPage() {
             >
               <Camera className="w-5 h-5 text-black transition-transform group-hover:rotate-12" /> 
               <span>Scan Food Label</span>
-            </Link>
-
-            <Link
-              href="/demo"
-              className="group w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 px-6 py-4 font-bold text-base transition-all duration-300 backdrop-blur-md"
-            >
-              <Star className="w-4 h-4 text-amber-400" />
-              <span>Try Interactive Demo</span>
             </Link>
           </motion.div>
         </motion.div>
@@ -560,7 +551,6 @@ export default function LandingPage() {
           <Link href="/scan" className="hover:text-emerald-400 transition-colors">Scanner</Link>
           <Link href="/compare" className="hover:text-emerald-400 transition-colors">Product Compare</Link>
           <Link href="/saved" className="hover:text-emerald-400 transition-colors">Saved List</Link>
-          <Link href="/demo" className="hover:text-emerald-400 transition-colors">Guest Demo</Link>
           <Link href="/pricing" className="hover:text-emerald-400 transition-colors">Pricing</Link>
           <Link href="/pitch" className="hover:text-emerald-400 transition-colors">Pitch Deck</Link>
           <Link href="/terms" className="hover:text-emerald-400 transition-colors">Terms</Link>
