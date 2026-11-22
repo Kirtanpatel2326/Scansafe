@@ -2,10 +2,11 @@
  * ScanSafe Broadcast Video Rendering Engine
  * 
  * Programmatically renders vertical 9:16 (1080x1920) broadcast-standard MP4 videos:
- * - Ambient obsidian dark acrylic background (#090D16) with subtle glow
- * - Dynamic ScanSafe glassmorphism HUD cards and glowing hazard badges
- * - Crisp vector typography, scanner lasers, and QR/watermark overlays
- * - Neural voiceover audio with EBU R128 loudness normalization
+ * - Ultra-sleek Apple/Figma-grade Titanium iPhone Chassis with Dynamic Island
+ * - Realistic product can backdrop with camera OCR and laser scan simulation
+ * - Floating AR ingredient badges (SAFE, AVOID, CAUTION) with glowing neon borders
+ * - Dynamic Health Score progress meter (24/100) and Share Breakdown CTA
+ * - Spoken high-retention Hormozi subtitles (zero clunky labels, zero watermarks)
  * - Faststart MP4 encoding for instant zero-buffer streaming on Instagram & YouTube
  */
 
@@ -33,183 +34,266 @@ export interface RenderResult {
 }
 
 /**
- * Generates an SVG card for a specific storyboard phase with glassmorphism styling
+ * Builds the base canvas SVG with titanium phone chassis and dynamic top headlines
  */
-export function generateSceneSvg(
+function buildBaseSvg(
   step: StoryboardStep,
   stepIndex: number,
   totalSteps: number,
   adPackage: ViralAdPackage,
-  width = 1080,
-  height = 1920
+  width: number,
+  height: number,
+  phone: { x: number; y: number; w: number; h: number; rx: number; screenX: number; screenY: number; screenW: number; screenH: number; screenRx: number }
 ): string {
   const isRed = step.overlayColor === 'red'
   const isEmerald = step.overlayColor === 'emerald'
   const isAmber = step.overlayColor === 'amber'
+  const accentColor = isRed ? '#EF4444' : isEmerald ? '#10B981' : isAmber ? '#F59E0B' : '#10B981'
 
-  const accentColor = isRed ? '#EF4444' : isEmerald ? '#10B981' : isAmber ? '#F59E0B' : '#3B82F6'
-  const accentGlow = isRed ? 'rgba(239, 68, 68, 0.35)' : isEmerald ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)'
-
-  // Dynamic phase badges
-  let badgeIcon = 'ALERT'
-  let phaseName = 'WARNING ALERT'
-  if (step.phase === 'HOOK') { badgeIcon = 'ALERT'; phaseName = 'CONSUMER ALERT'; }
-  else if (step.phase === 'PROBLEM') { badgeIcon = 'WARNING'; phaseName = 'HIDDEN INGREDIENTS'; }
-  else if (step.phase === 'SCAN_REVEAL') { badgeIcon = 'AI SCAN'; phaseName = 'CAMERA VISION SCAN'; }
-  else if (step.phase === 'FINDINGS') { badgeIcon = 'AUDIT'; phaseName = 'CHEMICAL AUDIT'; }
-  else if (step.phase === 'SMART_SWAP') { badgeIcon = 'VERIFIED'; phaseName = 'SAFE FOOD SWAP'; }
-  else if (step.phase === 'CTA') { badgeIcon = 'ACCESS'; phaseName = 'FREE FOOD SCANNER'; }
-
-  // Strip emojis from text to prevent fontconfig/pango font crashes on Linux/macOS
   const cleanOverlay = stripEmojis(step.textOverlay)
-  const rawTitle = adPackage.productName.length > 32 ? adPackage.productName.slice(0, 32) + '...' : adPackage.productName
+  const rawTitle = adPackage.productName.length > 34 ? adPackage.productName.slice(0, 34) + '...' : adPackage.productName
   const safeTitle = escapeXml(stripEmojis(rawTitle))
   const safeOverlay = escapeXml(cleanOverlay || step.phase)
+
+  return `
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Ambient Aura -->
+    <radialGradient id="bgGlow" cx="50%" cy="18%" r="72%">
+      <stop offset="0%" stop-color="#064e3b" stop-opacity="0.38" />
+      <stop offset="50%" stop-color="#022c22" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#030507" stop-opacity="1" />
+    </radialGradient>
+
+    <!-- Phone Ambient Aura -->
+    <filter id="phoneAura" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="60" />
+    </filter>
+
+    <!-- Titanium Chassis Gradient -->
+    <linearGradient id="titaniumGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3f3f46" />
+      <stop offset="50%" stop-color="#27272a" />
+      <stop offset="100%" stop-color="#18181b" />
+    </linearGradient>
+  </defs>
+
+  <!-- Deep Obsidian Background -->
+  <rect width="${width}" height="${height}" fill="#030507" />
+  <rect width="${width}" height="${height}" fill="url(#bgGlow)" />
+
+  <!-- TOP BRANDING & VIRAL HEADLINE -->
+  <g transform="translate(0, 95)">
+    <!-- Brand Pill -->
+    <rect x="${(width - 380) / 2}" y="0" width="380" height="50" rx="25" fill="#06180E" stroke="#10B981" stroke-width="2" />
+    <circle cx="${(width - 380) / 2 + 28}" cy="25" r="6" fill="#10B981" />
+    <text x="${(width - 380) / 2 + 48}" y="33" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="900" fill="#10B981" letter-spacing="2">
+      SCANSAFE AR GUARDIAN
+    </text>
+
+    <!-- Viral Hook Headline -->
+    <text x="${width / 2}" y="105" font-family="Impact, Arial Black, sans-serif" font-size="64" font-weight="900" fill="${accentColor}" text-anchor="middle" letter-spacing="2">
+      ${safeOverlay}
+    </text>
+    <text x="${width / 2}" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="23" font-weight="700" fill="#94A3B8" text-anchor="middle">
+      TARGET: ${safeTitle}
+    </text>
+  </g>
+
+  <!-- PHONE AMBIENT GLOW AURA -->
+  <rect x="${phone.x - 30}" y="${phone.y - 30}" width="${phone.w + 60}" height="${phone.h + 60}" rx="${phone.rx + 20}" fill="#10B981" fill-opacity="0.22" filter="url(#phoneAura)" />
+
+  <!-- TITANIUM PHONE CHASSIS -->
+  <rect x="${phone.x}" y="${phone.y}" width="${phone.w}" height="${phone.h}" rx="${phone.rx}" fill="url(#titaniumGrad)" stroke="#52525b" stroke-width="2.5" />
+  
+  <!-- SCREEN BOUNDARY CUTOUT -->
+  <rect x="${phone.screenX}" y="${phone.screenY}" width="${phone.screenW}" height="${phone.screenH}" rx="${phone.screenRx}" fill="#000000" />
+</svg>
+  `.trim()
+}
+
+/**
+ * Builds the HUD overlay SVG containing the Dynamic Island, AR pills, and subtitles
+ */
+function buildHudSvg(
+  step: StoryboardStep,
+  stepIndex: number,
+  totalSteps: number,
+  adPackage: ViralAdPackage,
+  width: number,
+  height: number,
+  phone: { x: number; y: number; w: number; h: number; rx: number; screenX: number; screenY: number; screenW: number; screenH: number; screenRx: number }
+): string {
+  const isSwap = step.phase === 'SMART_SWAP'
+  const isScanning = step.phase === 'HOOK'
+  const isFindings = step.phase === 'FINDINGS' || step.phase === 'PROBLEM'
+
+  const scoreValue = isSwap ? 94 : adPackage.healthScore
+  const scoreColor = scoreValue >= 80 ? '#10B981' : scoreValue >= 50 ? '#F59E0B' : '#EF4444'
+  const scorePercent = Math.min(100, Math.max(5, scoreValue)) / 100
+
+  const statusText = isSwap 
+    ? '● 100% CLEAN VERIFIED' 
+    : isScanning 
+    ? '● SCANNING LABEL' 
+    : '● ANALYSIS COMPLETE'
+
   const safeVoiceover = stripEmojis(step.voiceover)
 
   return `
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- Background Gradient -->
-    <radialGradient id="bgGlow" cx="50%" cy="35%" r="70%">
-      <stop offset="0%" stop-color="#121829" />
-      <stop offset="60%" stop-color="#090D16" />
-      <stop offset="100%" stop-color="#05070B" />
-    </radialGradient>
-
-    <!-- Ambient Accent Glow -->
-    <radialGradient id="cardGlow" cx="50%" cy="45%" r="50%">
-      <stop offset="0%" stop-color="${accentColor}" stop-opacity="0.25" />
-      <stop offset="100%" stop-color="${accentColor}" stop-opacity="0" />
-    </radialGradient>
-
-    <!-- Health Score Meter Gradient -->
-    <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#EF4444" />
-      <stop offset="50%" stop-color="#F59E0B" />
-      <stop offset="100%" stop-color="#10B981" />
+    <!-- Progress Bar Gradient -->
+    <linearGradient id="scoreBarGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="${scoreColor}" />
     </linearGradient>
-
-    <!-- Card Filter Drop Shadow -->
-    <filter id="glassShadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="25" stdDeviation="35" flood-color="#000000" flood-opacity="0.75" />
-    </filter>
   </defs>
 
-  <!-- Background Base -->
-  <rect width="${width}" height="${height}" fill="url(#bgGlow)" />
+  <!-- SCREEN DARKENING VIGNETTE (For readable HUD overlay over can) -->
+  <rect x="${phone.screenX}" y="${phone.screenY}" width="${phone.screenW}" height="${phone.screenH}" rx="${phone.screenRx}" fill="#020406" fill-opacity="0.62" />
 
-  <!-- Dynamic Ambient Glow Orb -->
-  <circle cx="540" cy="850" r="420" fill="url(#cardGlow)" />
+  <!-- ================= PHONE HUD CONTENT ================= -->
+  <g transform="translate(${phone.screenX}, ${phone.screenY})">
+    
+    <!-- Dynamic Island -->
+    <g transform="translate(${(phone.screenW - 200) / 2}, 22)">
+      <rect width="200" height="46" rx="23" fill="#000000" stroke="#27272a" stroke-width="1.5" />
+      <circle cx="34" cy="23" r="8" fill="#0f172a" stroke="#1e293b" stroke-width="1.5" />
+      <circle cx="34" cy="23" r="3.5" fill="#0284c7" fill-opacity="0.8" />
+      <circle cx="166" cy="23" r="5" fill="#10B981" />
+    </g>
 
-  <!-- TOP BRANDING HEADER -->
-  <g transform="translate(80, 140)">
-    <!-- Brand Logo Pill -->
-    <rect width="920" height="80" rx="40" fill="#0E1422" stroke="#1E293B" stroke-width="2" />
-    <circle cx="50" cy="40" r="14" fill="#10B981" />
-    <text x="80" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="900" fill="#FFFFFF" letter-spacing="3">SCANSAFE AI</text>
-    <text x="320" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="600" fill="#64748B" letter-spacing="1.5">REAL-TIME FOOD GUARDIAN</text>
-    <rect x="740" y="20" width="150" height="40" rx="20" fill="${accentColor}" fill-opacity="0.2" stroke="${accentColor}" stroke-width="1.5" />
-    <text x="815" y="45" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="800" fill="${accentColor}" text-anchor="middle" letter-spacing="1">LIVE HUD</text>
-  </g>
+    <!-- Top Status Header: ┌ ● ANALYSIS COMPLETE ┐ -->
+    <g transform="translate(0, 105)">
+      <path d="M 38 18 L 38 0 L 56 0" stroke="#10B981" stroke-width="3" fill="none" />
+      <text x="${phone.screenW / 2}" y="15" font-family="monospace" font-size="22" font-weight="900" fill="#10B981" text-anchor="middle" letter-spacing="3">
+        ${statusText}
+      </text>
+      <path d="M ${phone.screenW - 38} 18 L ${phone.screenW - 38} 0 L ${phone.screenW - 56} 0" stroke="#10B981" stroke-width="3" fill="none" />
+    </g>
 
-  <!-- STEP PROGRESS BAR -->
-  <g transform="translate(80, 250)">
-    ${Array.from({ length: totalSteps }).map((_, i) => {
-      const stepWidth = (920 - (totalSteps - 1) * 12) / totalSteps
-      const x = i * (stepWidth + 12)
-      const isPastOrCurrent = i <= stepIndex
-      const fill = isPastOrCurrent ? accentColor : '#1E293B'
-      return `<rect x="${x}" y="0" width="${stepWidth}" height="8" rx="4" fill="${fill}" />`
-    }).join('\n    ')}
-  </g>
+    <!-- FLOATING AR INGREDIENT PILLS (Matching Uploaded Image) -->
+    <g transform="translate(36, 155)">
+      ${isSwap ? `
+        <!-- CLEAN SMART SWAP INGREDIENTS -->
+        <g transform="translate(0, 0)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">100% Whole Foxtail Millet</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
+          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+        </g>
+        <g transform="translate(0, 74)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Sun-Dried (Zero Palm Oil)</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
+          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+        </g>
+        <g transform="translate(0, 148)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Zero Synthetic Preservatives</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
+          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+        </g>
+        <g transform="translate(0, 222)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Zero Refined Maida</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
+          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+        </g>
+        <g transform="translate(0, 296)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Cold-Pressed Sesame Oil</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
+          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+        </g>
+      ` : `
+        <!-- STANDARD ULTRA-PROCESSED HAZARD BREAKDOWN -->
+        <g transform="translate(0, 0)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.92" stroke="#10B981" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Carbonated Water</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
+          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+        </g>
 
-  <!-- MAIN GLASSMORPHISM CARD -->
-  <g transform="translate(80, 310)" filter="url(#glassShadow)">
-    <rect width="920" height="1160" rx="44" fill="#0E1422" fill-opacity="0.88" stroke="${accentColor}" stroke-width="3" stroke-opacity="0.85" />
+        <g transform="translate(0, 74)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A0808" fill-opacity="0.92" stroke="#EF4444" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FCA5A5">High Sugar / Glucose</text>
+          <rect x="${phone.screenW - 72 - 116}" y="11" width="100" height="40" rx="8" fill="#EF4444" />
+          <text x="${phone.screenW - 72 - 66}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
+        </g>
 
-    <!-- Card Phase Tag -->
-    <rect x="50" y="60" width="360" height="56" rx="28" fill="${accentColor}" fill-opacity="0.2" stroke="${accentColor}" stroke-width="2" />
-    <text x="230" y="97" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="900" fill="${accentColor}" text-anchor="middle" letter-spacing="2">
-      ${badgeIcon} ${phaseName}
-    </text>
+        <g transform="translate(0, 148)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A0808" fill-opacity="0.92" stroke="#EF4444" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FCA5A5">Caramel Colour</text>
+          <rect x="${phone.screenW - 72 - 116}" y="11" width="100" height="40" rx="8" fill="#EF4444" />
+          <text x="${phone.screenW - 72 - 66}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
+        </g>
 
-    <!-- Product Subtitle -->
-    <text x="50" y="175" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="30" font-weight="700" fill="#94A3B8">
-      TARGET: ${safeTitle}
-    </text>
+        <g transform="translate(0, 222)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A1206" fill-opacity="0.92" stroke="#F59E0B" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FDE68A">Phosphoric Acid</text>
+          <rect x="${phone.screenW - 72 - 130}" y="11" width="114" height="40" rx="8" fill="#F59E0B" />
+          <text x="${phone.screenW - 72 - 73}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
+        </g>
 
-    <!-- BIG PUNCHY IMPACT HEADLINE -->
-    <rect x="50" y="220" width="820" height="140" rx="24" fill="${accentColor}" fill-opacity="0.15" stroke="${accentColor}" stroke-width="2" />
-    <text x="460" y="310" font-family="Impact, Arial Black, sans-serif" font-size="54" font-weight="900" fill="${accentColor}" text-anchor="middle" letter-spacing="2">
-      ${safeOverlay}
-    </text>
+        <g transform="translate(0, 296)">
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A1206" fill-opacity="0.92" stroke="#F59E0B" stroke-width="2" />
+          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FDE68A">Caffeine</text>
+          <rect x="${phone.screenW - 72 - 130}" y="11" width="114" height="40" rx="8" fill="#F59E0B" />
+          <text x="${phone.screenW - 72 - 73}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
+        </g>
+      `}
+    </g>
 
-    <!-- SCANNER HUD / GRAPHIC SECTION (Exact Pro Interface Matching Screenshot) -->
-    <g transform="translate(50, 400)">
-      <rect width="820" height="490" rx="32" fill="#070A11" stroke="#1E293B" stroke-width="2" />
+    <!-- Laser Sweep Line -->
+    <line x1="20" y1="565" x2="${phone.screenW - 20}" y2="565" stroke="#10B981" stroke-width="3" opacity="0.9" />
+    <line x1="20" y1="565" x2="${phone.screenW - 20}" y2="565" stroke="#10B981" stroke-width="14" opacity="0.3" />
 
-      <!-- Top Scanner Status Header -->
-      <g transform="translate(410, 38)">
-        <path d="M -170 8 L -170 -10 L -140 -10" stroke="#10B981" stroke-width="2.5" fill="none" />
-        <path d="M 170 8 L 170 -10 L 140 -10" stroke="#10B981" stroke-width="2.5" fill="none" />
-        <circle cx="-110" cy="-2" r="4" fill="#10B981" />
-        <text x="0" y="3" font-family="monospace" font-size="16" font-weight="900" fill="#10B981" text-anchor="middle" letter-spacing="3">
-          ${step.phase === 'HOOK' ? 'ANALYSIS COMPLETE' : step.phase === 'PROBLEM' ? 'HAZARDS DETECTED' : step.phase === 'SCAN_REVEAL' ? 'OPTICAL OCR SCANNING' : step.phase === 'FINDINGS' ? 'CHEMICAL AUDIT' : 'SMART SWAP VERIFIED'}
+    <!-- BOTTOM HEALTH SCORE CARD -->
+    <g transform="translate(36, ${phone.screenH - 240})">
+      <rect width="${phone.screenW - 72}" height="135" rx="20" fill="#060C08" fill-opacity="0.96" stroke="#10B981" stroke-width="1.8" />
+      <text x="28" y="52" font-family="monospace" font-size="20" font-weight="800" fill="#10B981" letter-spacing="3">HEALTH SCORE</text>
+      <text x="${phone.screenW - 72 - 28}" y="62" font-family="monospace" font-size="52" font-weight="900" fill="${scoreColor}" text-anchor="end">${scoreValue}</text>
+      
+      <!-- Progress Track & Fill -->
+      <rect x="28" y="90" width="${phone.screenW - 128}" height="14" rx="7" fill="#141c16" />
+      <rect x="28" y="90" width="${(phone.screenW - 128) * scorePercent}" height="14" rx="7" fill="url(#scoreBarGrad)" />
+    </g>
+
+    <!-- ACTION BUTTON -->
+    <g transform="translate(36, ${phone.screenH - 85})">
+      <rect width="${phone.screenW - 72}" height="60" rx="14" fill="#061D12" fill-opacity="0.95" stroke="#10B981" stroke-width="1.8" />
+      
+      <!-- Perfectly Centered Vector Bar Chart Icon & Text -->
+      <g transform="translate(${(phone.screenW - 72 - 260) / 2}, 0)">
+        <g transform="translate(0, 20)">
+          <rect x="0" y="8" width="5" height="13" rx="2" fill="#10B981" />
+          <rect x="8" y="3" width="5" height="18" rx="2" fill="#10B981" />
+          <rect x="16" y="0" width="5" height="21" rx="2" fill="#10B981" />
+        </g>
+        <text x="34" y="38" font-family="monospace" font-size="19" font-weight="900" fill="#10B981" letter-spacing="1">
+          ${isSwap ? 'Buy Clean Swap' : 'Share Breakdown'}
         </text>
-      </g>
-
-      <!-- Center Floating Ingredient Pills (Matching Pro Design) -->
-      <g transform="translate(40, 58)">
-        <rect x="0" y="0" width="740" height="46" rx="8" fill="#08140E" fill-opacity="0.9" stroke="#10B981" stroke-width="1.5" />
-        <text x="20" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#E2E8F0">Carbonated Water</text>
-        <rect x="635" y="8" width="85" height="30" rx="5" fill="#10B981" />
-        <text x="677" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
-
-        <rect x="0" y="54" width="740" height="46" rx="8" fill="#1A0808" fill-opacity="0.9" stroke="#EF4444" stroke-width="1.5" />
-        <text x="20" y="83" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FCA5A5">High Sugar / Glucose-Fructose</text>
-        <rect x="625" y="62" width="95" height="30" rx="5" fill="#EF4444" />
-        <text x="672" y="83" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
-
-        <rect x="0" y="108" width="740" height="46" rx="8" fill="#1A0808" fill-opacity="0.9" stroke="#EF4444" stroke-width="1.5" />
-        <text x="20" y="137" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FCA5A5">Caramel Colour INS 150d</text>
-        <rect x="625" y="116" width="95" height="30" rx="5" fill="#EF4444" />
-        <text x="672" y="137" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
-
-        <rect x="0" y="162" width="740" height="46" rx="8" fill="#1A1206" fill-opacity="0.9" stroke="#F59E0B" stroke-width="1.5" />
-        <text x="20" y="191" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FDE68A">Phosphoric Acid</text>
-        <rect x="610" y="170" width="110" height="30" rx="5" fill="#F59E0B" />
-        <text x="665" y="191" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
-
-        <rect x="0" y="216" width="740" height="46" rx="8" fill="#1A1206" fill-opacity="0.9" stroke="#F59E0B" stroke-width="1.5" />
-        <text x="20" y="245" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#FDE68A">Caffeine</text>
-        <rect x="610" y="224" width="110" height="30" rx="5" fill="#F59E0B" />
-        <text x="665" y="245" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
-      </g>
-
-      <!-- Laser Sweep Simulation Line -->
-      <line x1="40" y1="325" x2="780" y2="325" stroke="#10B981" stroke-width="3" stroke-opacity="0.9" />
-      <line x1="40" y1="325" x2="780" y2="325" stroke="#10B981" stroke-width="12" stroke-opacity="0.25" />
-
-      <!-- Bottom Health Score Display Box -->
-      <g transform="translate(40, 345)">
-        <rect width="740" height="125" rx="14" fill="#060C08" stroke="#1E293B" stroke-width="1.5" />
-        <text x="24" y="46" font-family="monospace" font-size="16" font-weight="800" fill="#10B981" letter-spacing="2">HEALTH SCORE</text>
-        <text x="715" y="54" font-family="monospace" font-size="42" font-weight="900" fill="${adPackage.healthScore < 40 ? '#EF4444' : '#F59E0B'}" text-anchor="end">${adPackage.healthScore}</text>
-        <rect x="24" y="80" width="690" height="10" rx="5" fill="#182218" />
-        <rect x="24" y="80" width="${(adPackage.healthScore / 100) * 690}" height="10" rx="5" fill="url(#scoreGrad)" />
       </g>
     </g>
 
-    <!-- SPOKEN VOICEOVER SUBTITLES (HORMOZI STYLE) -->
-    <rect x="50" y="910" width="820" height="200" rx="24" fill="#070A11" fill-opacity="0.95" stroke="#334155" stroke-width="2" />
-    <text x="80" y="960" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#F8FAFC" letter-spacing="1">
-      VOICEOVER SCRIPT:
+  </g>
+
+  <!-- ================= HORMOZI DYNAMIC SUBTITLES (BOTTOM) ================= -->
+  <g transform="translate(0, 1515)">
+    <!-- Subtitle Card Container -->
+    <rect x="60" y="0" width="${width - 120}" height="195" rx="28" fill="#070A11" fill-opacity="0.96" stroke="#334155" stroke-width="2" />
+    
+    <!-- Render Spoken Line with High-Contrast Typography -->
+    <text x="${width / 2}" y="65" font-family="Impact, Arial Black, sans-serif" font-size="44" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="1">
+      ${isFindings ? 'HEALTH AUDIT: <tspan fill="#EF4444">TOXIC ADDITIVES</tspan>' : isSwap ? '<tspan fill="#10B981">SWITCH TO CLEAN FOOD</tspan>' : 'STOP FALLING FOR <tspan fill="#EF4444">FAKE LABELS</tspan>'}
     </text>
-    <text x="80" y="1005" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="24" font-weight="700" fill="#E2E8F0">
-      ${wrapTextToTspans(safeVoiceover, 50, 80, 32)}
+    <text x="${width / 2}" y="125" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="25" font-weight="700" fill="#CBD5E1" text-anchor="middle">
+      ${wrapTextToTspans(safeVoiceover, 48, width / 2, 34)}
     </text>
   </g>
+
 </svg>
   `.trim()
 }
@@ -230,7 +314,7 @@ function wrapTextToTspans(rawText: string, maxCharsPerLine: number, x: number, l
   if (currentLine) lines.push(currentLine.trim())
 
   return lines
-    .slice(0, 3) // Max 3 lines in subtitle box
+    .slice(0, 3)
     .map((line, idx) => `<tspan x="${x}" dy="${idx === 0 ? 0 : lineSpacing}">${escapeXml(line)}</tspan>`)
     .join('')
 }
@@ -270,13 +354,16 @@ async function synthesizeVoiceoverAudio(text: string, outputPath: string): Promi
 
 /**
  * Master Video Render Pipeline:
- * Takes a ViralAdPackage, renders 6 high-res PNG scenes via Sharp,
- * normalizes audio, and stitches an EBU R128 1080x1920 MP4 video via FFmpeg.
+ * Renders 6 broadcast-quality scenes featuring the real iPhone Titanium AR Mockup
+ * and encodes an EBU R128 1080x1920 MP4 ready for Instagram Reels & YouTube Shorts.
  */
 export async function renderViralReelVideo(
   adPackage: ViralAdPackage,
   options: RenderOptions = {}
 ): Promise<RenderResult> {
+  const width = options.width || 1080
+  const height = options.height || 1920
+
   const outputDir = options.outputDir || path.join(process.cwd(), 'out_ads')
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true })
@@ -290,6 +377,20 @@ export async function renderViralReelVideo(
   const masterAudioPath = path.join(tempDir, 'voiceover_mastered.mp3')
   const finalVideoPath = path.join(outputDir, `${runId}.mp4`)
 
+  // Geometry for 1080x1920
+  const phone = {
+    w: 720,
+    h: 1140,
+    x: (width - 720) / 2, // 180
+    y: 320,
+    rx: 54,
+    screenX: (width - 720) / 2 + 8,
+    screenY: 320 + 8,
+    screenW: 704,
+    screenH: 1124,
+    screenRx: 46
+  }
+
   try {
     // 1. Synthesize Voiceover Audio
     console.log(`🎙️ [1/4] Synthesizing neural voiceover audio for "${adPackage.productName}"...`)
@@ -302,29 +403,59 @@ export async function renderViralReelVideo(
         { stdio: 'pipe' }
       )
     } catch {
-      // Fallback if loudnorm fails
       fs.copyFileSync(rawAudioPath, masterAudioPath)
     }
 
-    // 2. Render 6 Storyboard Scenes as High-Res 1080x1920 PNGs
+    // 2. Prepare Masked Product Can Image
+    const canImagePath = path.join(process.cwd(), 'public', 'coke-can-full.png')
+    const maskSvg = `<svg width="${phone.screenW}" height="${phone.screenH}">
+      <rect width="${phone.screenW}" height="${phone.screenH}" rx="${phone.screenRx}" fill="#fff"/>
+    </svg>`
+
+    let maskedCanBuffer: Buffer | null = null
+    if (fs.existsSync(canImagePath)) {
+      maskedCanBuffer = await sharp(canImagePath)
+        .resize(phone.screenW, phone.screenH, { fit: 'cover', position: 'center' })
+        .composite([{ input: Buffer.from(maskSvg), blend: 'dest-in' }])
+        .toBuffer()
+    }
+
+    // 3. Render 6 Broadcast-Quality 9:16 Vertical Cards
     console.log(`🎨 [2/4] Rendering 6 broadcast-quality 9:16 vertical cards with Sharp...`)
     const totalSteps = adPackage.storyboard.length
     const sceneFiles: string[] = []
 
     for (let i = 0; i < totalSteps; i++) {
       const step = adPackage.storyboard[i]
-      const svg = generateSceneSvg(step, i, totalSteps, adPackage)
+      const baseSvg = buildBaseSvg(step, i, totalSteps, adPackage, width, height, phone)
+      const hudSvg = buildHudSvg(step, i, totalSteps, adPackage, width, height, phone)
       const pngPath = path.join(tempDir, `scene_${i}.png`)
 
-      await sharp(Buffer.from(svg))
+      const composites: sharp.OverlayOptions[] = []
+      if (maskedCanBuffer) {
+        composites.push({
+          input: maskedCanBuffer,
+          top: phone.screenY,
+          left: phone.screenX,
+          blend: 'over'
+        })
+      }
+      composites.push({
+        input: Buffer.from(hudSvg),
+        top: 0,
+        left: 0,
+        blend: 'over'
+      })
+
+      await sharp(Buffer.from(baseSvg))
+        .composite(composites)
         .png({ quality: 100 })
         .toFile(pngPath)
 
       sceneFiles.push(pngPath)
     }
 
-    // 3. Create Concat Manifest for FFmpeg
-    // Total video length 20-25 seconds (target ~23s optimal retention)
+    // 4. Create Concat Manifest for FFmpeg (Target 23s)
     const targetDuration = adPackage.durationSeconds || 23
     const stepDuration = targetDuration / totalSteps
     let concatManifest = ''
@@ -332,13 +463,12 @@ export async function renderViralReelVideo(
       concatManifest += `file '${sceneFiles[i]}'\n`
       concatManifest += `duration ${stepDuration.toFixed(2)}\n`
     }
-    // Repeat last frame for concat demuxer requirement
     concatManifest += `file '${sceneFiles[sceneFiles.length - 1]}'\n`
 
     const concatPath = path.join(tempDir, 'scenes_concat.txt')
     fs.writeFileSync(concatPath, concatManifest)
 
-    // 4. Stitch Master MP4 with FFmpeg (1080x1920, 30fps, H.264, AAC, +faststart)
+    // 5. Stitch Master MP4 with FFmpeg (1080x1920, 30fps, H.264, AAC, +faststart)
     console.log(`🎬 [3/4] Encoding 1080x1920 MP4 via FFmpeg with H.264 & AAC faststart (${targetDuration}s)...`)
     const ffmpegCmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}" -i "${masterAudioPath}" -c:v libx264 -pix_fmt yuv420p -r 30 -c:a aac -b:a 128k -movflags +faststart -t ${targetDuration} "${finalVideoPath}"`
 
@@ -365,9 +495,9 @@ export async function renderViralReelVideo(
       cleanup
     }
   } catch (err: any) {
-    if (fs.existsSync(tempDir)) {
+    if (!options.keepTempFiles && fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true })
     }
-    throw new Error(`Video rendering pipeline failed: ${err.message}`)
+    throw new Error(`Broadcast video rendering failed: ${err.message}`)
   }
 }
