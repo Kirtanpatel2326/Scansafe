@@ -21,6 +21,7 @@ export interface RenderOptions {
   keepTempFiles?: boolean
   width?: number
   height?: number
+  includeWatermark?: boolean
 }
 
 export interface RenderResult {
@@ -187,23 +188,6 @@ export function generateSceneSvg(
       ${wrapTextToTspans(safeVoiceover, 50, 80, 32)}
     </text>
   </g>
-
-  <!-- BOTTOM WATERMARK & CTA -->
-  <g transform="translate(80, 1530)">
-    <rect width="920" height="240" rx="36" fill="#0E1422" stroke="#1E293B" stroke-width="2" />
-
-    <text x="460" y="70" font-family="Impact, Arial Black, sans-serif" font-size="44" font-weight="900" fill="#10B981" text-anchor="middle" letter-spacing="2">
-      SCAN ANY PACKAGED FOOD FREE
-    </text>
-    <text x="460" y="125" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="32" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="1">
-      https://scansafe.co.in
-    </text>
-
-    <!-- Social Tags -->
-    <text x="460" y="180" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="600" fill="#94A3B8" text-anchor="middle">
-      Comment "SCAN" below for instant app access • @scansafe.ai
-    </text>
-  </g>
 </svg>
   `.trim()
 }
@@ -318,8 +302,9 @@ export async function renderViralReelVideo(
     }
 
     // 3. Create Concat Manifest for FFmpeg
-    // Total video length 15 seconds: 6 steps -> 2.5s each
-    const stepDuration = (adPackage.durationSeconds || 15) / totalSteps
+    // Total video length 20-25 seconds (target ~23s optimal retention)
+    const targetDuration = adPackage.durationSeconds || 23
+    const stepDuration = targetDuration / totalSteps
     let concatManifest = ''
     for (let i = 0; i < sceneFiles.length; i++) {
       concatManifest += `file '${sceneFiles[i]}'\n`
@@ -332,13 +317,13 @@ export async function renderViralReelVideo(
     fs.writeFileSync(concatPath, concatManifest)
 
     // 4. Stitch Master MP4 with FFmpeg (1080x1920, 30fps, H.264, AAC, +faststart)
-    console.log(`🎬 [3/4] Encoding 1080x1920 MP4 via FFmpeg with H.264 & AAC faststart...`)
-    const ffmpegCmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}" -i "${masterAudioPath}" -c:v libx264 -pix_fmt yuv420p -r 30 -c:a aac -b:a 128k -movflags +faststart -shortest "${finalVideoPath}"`
+    console.log(`🎬 [3/4] Encoding 1080x1920 MP4 via FFmpeg with H.264 & AAC faststart (${targetDuration}s)...`)
+    const ffmpegCmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}" -i "${masterAudioPath}" -c:v libx264 -pix_fmt yuv420p -r 30 -c:a aac -b:a 128k -movflags +faststart -t ${targetDuration} "${finalVideoPath}"`
 
     execSync(ffmpegCmd, { stdio: 'pipe' })
 
     const stats = fs.statSync(finalVideoPath)
-    console.log(`✅ [4/4] Reel compiled successfully! Output: ${finalVideoPath} (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`)
+    console.log(`✅ [4/4] Reel compiled successfully! Output: ${finalVideoPath} (${(stats.size / (1024 * 1024)).toFixed(2)} MB, ${targetDuration}s)`)
 
     const cleanup = () => {
       if (!options.keepTempFiles && fs.existsSync(tempDir)) {
@@ -353,7 +338,7 @@ export async function renderViralReelVideo(
     return {
       videoPath: finalVideoPath,
       audioPath: masterAudioPath,
-      durationSeconds: adPackage.durationSeconds || 15,
+      durationSeconds: targetDuration,
       fileSizeBytes: stats.size,
       cleanup
     }

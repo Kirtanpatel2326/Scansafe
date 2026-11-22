@@ -48,5 +48,30 @@
     ],
     "caption": "⚠️ The packaged food industry doesn't want you to flip the box.\n\nWe ran Commercial \"Healthy\" Brown Bread through ScanSafe's AI Vision engine (https://scansafe.co.in), and what we found on the ingredient label is shocking.\n\nStop eating ultra-processed foods blindly. Scan any packaged food in 2 seconds with zero barcodes.\n\n👇 COMMENT \"SCAN\" and I will instantly DM you the direct link to scan your kitchen snacks for free!",
     "manyChatTrigger": "Trigger: Comment contains 'SCAN' -> Instant Auto-DM: \"Hey! Here is the free link to scan any food packaging directly from your camera: https://scansafe.co.in 🥦 Tell me what score you get!\""
+  },
+  {
+    "id": "reel_1795327596816",
+    "productId": "real_fruit_juice",
+    "productName": "Packaged \"100% Real\" Mixed Fruit Juice",
+    "timestamp": "2026-11-22T06:06:36.816Z",
+    "durationSeconds": 23,
+    "results": [
+      {
+        "success": true,
+        "platform": "instagram",
+        "status": "simulated",
+        "message": "Verified ready for Instagram Reels! (Add INSTAGRAM_ACCESS_TOKEN & INSTAGRAM_USER_ID or SOCIAL_PUBLISH_WEBHOOK_URL to post live)",
+        "postUrl": "https://instagram.com/reels"
+      },
+      {
+        "success": true,
+        "platform": "youtube",
+        "status": "simulated",
+        "message": "Verified ready for YouTube Shorts! (Add YOUTUBE_ACCESS_TOKEN or SOCIAL_PUBLISH_WEBHOOK_URL to post live)",
+        "postUrl": "https://youtube.com/shorts"
+      }
+    ],
+    "caption": "⚠️ The packaged food industry doesn't want you to flip the box.\n\nWe ran Packaged \"100% Real\" Mixed Fruit Juice through ScanSafe's AI Vision engine (https://scansafe.co.in), and what we found on the ingredient label is shocking.\n\nStop eating ultra-processed foods blindly. Scan any packaged food in 2 seconds with zero barcodes.\n\n👇 COMMENT \"SCAN\" and I will instantly DM you the direct link to scan your kitchen snacks for free!",
+    "manyChatTrigger": "Trigger: Comment contains 'SCAN' -> Instant Auto-DM: \"Hey! Here is the free link to scan any food packaging directly from your camera: https://scansafe.co.in 🥦 Tell me what score you get!\""
   }
 ]

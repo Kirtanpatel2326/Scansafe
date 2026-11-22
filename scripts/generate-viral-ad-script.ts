@@ -76,40 +76,40 @@ export function generateViralAd(
   return {
     productName,
     targetPlatform: 'Instagram Reels',
-    durationSeconds: 15,
+    durationSeconds: 23,
     script: {
       hook: {
-        timestamp: '00:00 - 00:03',
+        timestamp: '00:00 - 00:04',
         voiceover: hookLine,
         visualCue: `Fast zoom on product front packaging. Show bold red highlight over the deceptive front claim.`,
         textOverlay: `🚨 DON'T EAT THIS!`
       },
       problem: {
-        timestamp: '00:03 - 00:06',
+        timestamp: '00:04 - 00:08',
         voiceover: problemLine,
         visualCue: `Flip package to back panel. Extreme zoom on tiny 6pt ingredient list with magnifying circle.`,
         textOverlay: `❌ 95% PROCESSED FILLERS`
       },
       scanReveal: {
-        timestamp: '00:06 - 00:09',
-        voiceover: `I took one photo with ScanSafe at scansafe.co.in — no barcode needed.`,
+        timestamp: '00:08 - 00:12',
+        voiceover: `I took one photo with ScanSafe at scansafe.co.in — no barcode needed, instant breakdown.`,
         visualCue: `Show smartphone screen running ScanSafe live camera scanner with green laser sweep animation.`,
         textOverlay: `📱 SCANNING WITHOUT BARCODE...`
       },
       findings: {
-        timestamp: '00:09 - 00:12',
+        timestamp: '00:12 - 00:16',
         voiceover: findingsLine,
         visualCue: `ScanSafe result card flashes RED. Show Health Score: ${healthScore}/100 and chemical warning badge.`,
         textOverlay: `⚠️ SCORE: ${healthScore}/100 (HIGH RISK)`
       },
       smartSwap: {
-        timestamp: '00:12 - 00:14',
+        timestamp: '00:16 - 00:19',
         voiceover: `Instead, ScanSafe suggests ${swapName} — ${swapReason}.`,
         visualCue: `Screen transitions to green Smart Swap card with 1-click buy button and verified clean badge.`,
         textOverlay: `✅ BUY THIS INSTEAD!`
       },
       cta: {
-        timestamp: '00:14 - 00:16',
+        timestamp: '00:19 - 00:23',
         voiceover: `Comment "SCAN" below and I’ll DM you the free link to scan your pantry right now!`,
         visualCue: `Point down to comment section with animated text: 'Comment SCAN for free access'.`,
         textOverlay: `👇 COMMENT "SCAN" FOR FREE TOOL`

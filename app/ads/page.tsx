@@ -234,7 +234,7 @@ export default function ViralAdsStudioPage() {
                 Viral Ad & Short-Form Video Studio
               </h1>
               <p className="text-zinc-300 text-sm sm:text-base leading-relaxed">
-                Generate 15-second high-retention video ads on autopilot. Powered by ScanSafe's Chemical Synergy Engine, Greenwashing Exposer, and ManyChat comment automation.
+                Generate 20–25s high-retention video ads on autopilot (100% watermark-free). Powered by ScanSafe's Chemical Synergy Engine, Greenwashing Exposer, and ManyChat comment automation.
               </p>
             </div>
 
@@ -543,7 +543,7 @@ export default function ViralAdsStudioPage() {
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                 <FileText className="w-4 h-4 text-emerald-400" />
-                <span>15-Second Step-By-Step Storyboard</span>
+                <span>20–25s Step-By-Step Storyboard (Watermark-Free)</span>
               </h3>
 
               <div className="space-y-2.5">

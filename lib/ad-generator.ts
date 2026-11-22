@@ -135,13 +135,13 @@ export function generateViralAd(
   const topSwap = smartSwaps[0]
 
   // Dynamic Hook & Problem
-  let hookLine = `You think this ${productName} is healthy? You are being lied to.`
-  let problemLine = `Look at the back label. It is packed with ultra-processed fillers and disguised sugars.`
-  let findingsLine = `ScanSafe scores it a low ${healthScore} out of 100.`
+  let hookLine = `You think this ${productName} is healthy? You are being lied to by clever marketing.`
+  let problemLine = `Look closely at the fine print on the back label. It is packed with ultra-processed fillers and disguised industrial sugars.`
+  let findingsLine = `ScanSafe scores it a low ${healthScore} out of 100 and flags hazardous additives.`
 
   if (topGreenwashing) {
     hookLine = `Stop falling for this: "${topGreenwashing.claim_detected}" on ${productName} is a complete corporate lie.`
-    problemLine = `The front packaging screams "${topGreenwashing.claim_detected}", but ${topGreenwashing.reality_uncovered}`
+    problemLine = `The packaging screams "${topGreenwashing.claim_detected}", but ${topGreenwashing.reality_uncovered}`
   } else if (topSynergy) {
     const ingA = topSynergy.ingredients_involved[0] || 'Additive A'
     const ingB = topSynergy.ingredients_involved[1] || 'Additive B'
@@ -156,13 +156,14 @@ export function generateViralAd(
   const swapName = topSwap ? topSwap.name : 'a 100% clean whole-food alternative'
   const swapReason = topSwap ? topSwap.why_better : 'zero chemical additives, zero palm oil, and unrefined ingredients'
 
+  // Paced for 20-25 seconds (target ~22-23 seconds optimal mobile retention)
   const storyboard: StoryboardStep[] = [
     {
       id: 'step_1_hook',
       phase: 'HOOK',
-      timestamp: '00:00 - 00:03',
+      timestamp: '00:00 - 00:04',
       secondsStart: 0,
-      secondsEnd: 3,
+      secondsEnd: 4,
       voiceover: hookLine,
       visualCue: `Fast dynamic zoom onto ${productName}. Flash a bold red marker box highlighting the deceptive front claim.`,
       textOverlay: `🚨 DON'T EAT THIS!`,
@@ -172,9 +173,9 @@ export function generateViralAd(
     {
       id: 'step_2_problem',
       phase: 'PROBLEM',
-      timestamp: '00:03 - 00:06',
-      secondsStart: 3,
-      secondsEnd: 6,
+      timestamp: '00:04 - 00:08',
+      secondsStart: 4,
+      secondsEnd: 8,
       voiceover: problemLine,
       visualCue: `Rapidly flip package to back ingredient panel. Zoom into the 6pt font with magnifying circle showing the hidden ingredients.`,
       textOverlay: `❌ 95% PROCESSED FILLERS`,
@@ -184,10 +185,10 @@ export function generateViralAd(
     {
       id: 'step_3_scan_reveal',
       phase: 'SCAN_REVEAL',
-      timestamp: '00:06 - 00:09',
-      secondsStart: 6,
-      secondsEnd: 9,
-      voiceover: `I took one photo with ScanSafe at scansafe.co.in — no barcode needed.`,
+      timestamp: '00:08 - 00:12',
+      secondsStart: 8,
+      secondsEnd: 12,
+      voiceover: `I took one photo with ScanSafe at scansafe.co.in — no barcode needed, instant ingredient breakdown.`,
       visualCue: `Show hand taking phone snapshot. ScanSafe live camera viewfinder appears with neon green laser sweep animation.`,
       textOverlay: `📱 SCANNING WITHOUT BARCODE...`,
       overlayColor: 'emerald',
@@ -196,9 +197,9 @@ export function generateViralAd(
     {
       id: 'step_4_findings',
       phase: 'FINDINGS',
-      timestamp: '00:09 - 00:12',
-      secondsStart: 9,
-      secondsEnd: 12,
+      timestamp: '00:12 - 00:16',
+      secondsStart: 12,
+      secondsEnd: 16,
       voiceover: findingsLine,
       visualCue: `ScanSafe result card flashes RED on phone screen. Health score dial drops to ${healthScore}/100 with hazard warning tag.`,
       textOverlay: `⚠️ SCORE: ${healthScore}/100 (HIGH RISK)`,
@@ -208,9 +209,9 @@ export function generateViralAd(
     {
       id: 'step_5_smart_swap',
       phase: 'SMART_SWAP',
-      timestamp: '00:12 - 00:14',
-      secondsStart: 12,
-      secondsEnd: 14,
+      timestamp: '00:16 - 00:19',
+      secondsStart: 16,
+      secondsEnd: 19,
       voiceover: `Instead, switch to ${swapName} — ${swapReason}.`,
       visualCue: `Screen flips to vibrant emerald Smart Swap card with 1-click buy button and verified clean badge.`,
       textOverlay: `✅ BUY THIS INSTEAD!`,
@@ -220,9 +221,9 @@ export function generateViralAd(
     {
       id: 'step_6_cta',
       phase: 'CTA',
-      timestamp: '00:14 - 00:16',
-      secondsStart: 14,
-      secondsEnd: 16,
+      timestamp: '00:19 - 00:23',
+      secondsStart: 19,
+      secondsEnd: 23,
       voiceover: `Comment "SCAN" below and I’ll DM you the free link to scan your kitchen pantry right now!`,
       visualCue: `Point finger down toward the comment section with bouncing animated button: 'Comment SCAN for free access'.`,
       textOverlay: `👇 COMMENT "SCAN" FOR FREE TOOL`,
@@ -239,7 +240,7 @@ export function generateViralAd(
     productName,
     category,
     healthScore,
-    durationSeconds: 16,
+    durationSeconds: 23,
     storyboard,
     voiceoverFullText,
     audioTtsUrl,
