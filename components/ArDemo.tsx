@@ -263,7 +263,12 @@ export default function ArDemo() {
 
             {/* Action CTA Button */}
             <div id="ss-expose" ref={exposeRef} onClick={handleExpose}>
-              📊 Share Health Breakdown
+              <span className="ss-chart-bars">
+                <span className="bar-blue" />
+                <span className="bar-green" />
+                <span className="bar-red" />
+              </span>
+              <span>Share Health Breakdown</span>
             </div>
           </div>
         </div>

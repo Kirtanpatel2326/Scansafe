@@ -82,20 +82,20 @@ function buildBaseSvg(
   <rect width="${width}" height="${height}" fill="#030507" />
   <rect width="${width}" height="${height}" fill="url(#bgGlow)" />
 
-  <!-- TOP BRANDING & VIRAL HEADLINE -->
+  <!-- TOP BRANDING & SLEEK EDITORIAL HEADER -->
   <g transform="translate(0, 95)">
     <!-- Brand Pill -->
-    <rect x="${(width - 380) / 2}" y="0" width="380" height="50" rx="25" fill="#06180E" stroke="#10B981" stroke-width="2" />
-    <circle cx="${(width - 380) / 2 + 28}" cy="25" r="6" fill="#10B981" />
-    <text x="${(width - 380) / 2 + 48}" y="33" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="900" fill="#10B981" letter-spacing="2">
+    <rect x="${(width - 380) / 2}" y="0" width="380" height="46" rx="23" fill="#06180E" stroke="#10B981" stroke-width="1.5" />
+    <circle cx="${(width - 380) / 2 + 24}" cy="23" r="5" fill="#10B981" />
+    <text x="${(width - 380) / 2 + 42}" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="900" fill="#10B981" letter-spacing="2.5">
       SCANSAFE AR GUARDIAN
     </text>
 
-    <!-- Viral Hook Headline -->
-    <text x="${width / 2}" y="105" font-family="Impact, Arial Black, sans-serif" font-size="64" font-weight="900" fill="${accentColor}" text-anchor="middle" letter-spacing="2">
+    <!-- Professional Editorial Headline (Apple/Broadcast Grade) -->
+    <text x="${width / 2}" y="100" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="52" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="-0.5">
       ${safeOverlay}
     </text>
-    <text x="${width / 2}" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="23" font-weight="700" fill="#94A3B8" text-anchor="middle">
+    <text x="${width / 2}" y="145" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="600" fill="#94A3B8" text-anchor="middle" letter-spacing="0.5">
       TARGET: ${safeTitle}
     </text>
   </g>
@@ -173,107 +173,112 @@ function buildHudSvg(
       <path d="M ${phone.screenW - 38} 18 L ${phone.screenW - 38} 0 L ${phone.screenW - 56} 0" stroke="#10B981" stroke-width="3" fill="none" />
     </g>
 
-    <!-- FLOATING AR INGREDIENT PILLS (Matching Uploaded Image) -->
+    <!-- FLOATING AR INGREDIENT PILLS (Matching Uploaded Figma Image Exactly) -->
     <g transform="translate(36, 155)">
       ${isSwap ? `
         <!-- CLEAN SMART SWAP INGREDIENTS -->
         <g transform="translate(0, 0)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">100% Whole Foxtail Millet</text>
-          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
-          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#082618" fill-opacity="0.75" stroke="#2DD4BF" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#2DD4BF">100% Whole Foxtail Millet</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="6" fill="#2DD4BF" />
+          <text x="${phone.screenW - 72 - 63}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
         </g>
         <g transform="translate(0, 74)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Sun-Dried (Zero Palm Oil)</text>
-          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
-          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#082618" fill-opacity="0.75" stroke="#2DD4BF" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#2DD4BF">Sun-Dried (Zero Palm Oil)</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="6" fill="#2DD4BF" />
+          <text x="${phone.screenW - 72 - 63}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
         </g>
         <g transform="translate(0, 148)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Zero Synthetic Preservatives</text>
-          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
-          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#082618" fill-opacity="0.75" stroke="#2DD4BF" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#2DD4BF">Zero Synthetic Preservatives</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="6" fill="#2DD4BF" />
+          <text x="${phone.screenW - 72 - 63}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
         </g>
         <g transform="translate(0, 222)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Zero Refined Maida</text>
-          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
-          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#082618" fill-opacity="0.75" stroke="#2DD4BF" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#2DD4BF">Zero Refined Maida</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="6" fill="#2DD4BF" />
+          <text x="${phone.screenW - 72 - 63}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
         </g>
         <g transform="translate(0, 296)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.94" stroke="#10B981" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Cold-Pressed Sesame Oil</text>
-          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
-          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#082618" fill-opacity="0.75" stroke="#2DD4BF" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#2DD4BF">Cold-Pressed Sesame Oil</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="6" fill="#2DD4BF" />
+          <text x="${phone.screenW - 72 - 63}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
         </g>
       ` : `
         <!-- STANDARD ULTRA-PROCESSED HAZARD BREAKDOWN -->
+        <!-- Row 1: Carbonated Water (SAFE) -->
         <g transform="translate(0, 0)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#06150C" fill-opacity="0.92" stroke="#10B981" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#E2E8F0">Carbonated Water</text>
-          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="8" fill="#10B981" />
-          <text x="${phone.screenW - 72 - 63}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#082618" fill-opacity="0.75" stroke="#2DD4BF" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#2DD4BF">Carbonated Water</text>
+          <rect x="${phone.screenW - 72 - 110}" y="11" width="94" height="40" rx="6" fill="#2DD4BF" />
+          <text x="${phone.screenW - 72 - 63}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">SAFE</text>
         </g>
 
+        <!-- Row 2: High Sugar / Glucose (AVOID) -->
         <g transform="translate(0, 74)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A0808" fill-opacity="0.92" stroke="#EF4444" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FCA5A5">High Sugar / Glucose</text>
-          <rect x="${phone.screenW - 72 - 116}" y="11" width="100" height="40" rx="8" fill="#EF4444" />
-          <text x="${phone.screenW - 72 - 66}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#380F0F" fill-opacity="0.75" stroke="#EF4444" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#F87171">High Sugar / Glucose</text>
+          <rect x="${phone.screenW - 72 - 116}" y="11" width="100" height="40" rx="6" fill="#EF4444" />
+          <text x="${phone.screenW - 72 - 66}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
         </g>
 
+        <!-- Row 3: Caramel Colour (AVOID) -->
         <g transform="translate(0, 148)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A0808" fill-opacity="0.92" stroke="#EF4444" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FCA5A5">Caramel Colour</text>
-          <rect x="${phone.screenW - 72 - 116}" y="11" width="100" height="40" rx="8" fill="#EF4444" />
-          <text x="${phone.screenW - 72 - 66}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#380F0F" fill-opacity="0.75" stroke="#EF4444" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#F87171">Caramel Colour</text>
+          <rect x="${phone.screenW - 72 - 116}" y="11" width="100" height="40" rx="6" fill="#EF4444" />
+          <text x="${phone.screenW - 72 - 66}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#FFFFFF" text-anchor="middle">AVOID</text>
         </g>
 
+        <!-- Row 4: Phosphoric Acid (CAUTION) -->
         <g transform="translate(0, 222)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A1206" fill-opacity="0.92" stroke="#F59E0B" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FDE68A">Phosphoric Acid</text>
-          <rect x="${phone.screenW - 72 - 130}" y="11" width="114" height="40" rx="8" fill="#F59E0B" />
-          <text x="${phone.screenW - 72 - 73}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#332008" fill-opacity="0.75" stroke="#F59E0B" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#FBBF24">Phosphoric Acid</text>
+          <rect x="${phone.screenW - 72 - 130}" y="11" width="114" height="40" rx="6" fill="#FBBF24" />
+          <text x="${phone.screenW - 72 - 73}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
         </g>
 
+        <!-- Row 5: Caffeine (CAUTION) -->
         <g transform="translate(0, 296)">
-          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#1A1206" fill-opacity="0.92" stroke="#F59E0B" stroke-width="2" />
-          <text x="24" y="39" font-family="-apple-system, sans-serif" font-size="22" font-weight="800" fill="#FDE68A">Caffeine</text>
-          <rect x="${phone.screenW - 72 - 130}" y="11" width="114" height="40" rx="8" fill="#F59E0B" />
-          <text x="${phone.screenW - 72 - 73}" y="37" font-family="-apple-system, sans-serif" font-size="18" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
+          <rect width="${phone.screenW - 72}" height="62" rx="12" fill="#332008" fill-opacity="0.75" stroke="#F59E0B" stroke-width="1.6" />
+          <text x="24" y="39" font-family="monospace" font-size="20" font-weight="700" fill="#FBBF24">Caffeine</text>
+          <rect x="${phone.screenW - 72 - 130}" y="11" width="114" height="40" rx="6" fill="#FBBF24" />
+          <text x="${phone.screenW - 72 - 73}" y="36" font-family="monospace" font-size="17" font-weight="900" fill="#000000" text-anchor="middle">CAUTION</text>
         </g>
       `}
     </g>
 
     <!-- Laser Sweep Line -->
-    <line x1="20" y1="565" x2="${phone.screenW - 20}" y2="565" stroke="#10B981" stroke-width="3" opacity="0.9" />
-    <line x1="20" y1="565" x2="${phone.screenW - 20}" y2="565" stroke="#10B981" stroke-width="14" opacity="0.3" />
+    <line x1="20" y1="565" x2="${phone.screenW - 20}" y2="565" stroke="#2DD4BF" stroke-width="3" opacity="0.9" />
+    <line x1="20" y1="565" x2="${phone.screenW - 20}" y2="565" stroke="#2DD4BF" stroke-width="14" opacity="0.25" />
 
     <!-- BOTTOM HEALTH SCORE CARD -->
     <g transform="translate(36, ${phone.screenH - 240})">
-      <rect width="${phone.screenW - 72}" height="135" rx="20" fill="#060C08" fill-opacity="0.96" stroke="#10B981" stroke-width="1.8" />
-      <text x="28" y="52" font-family="monospace" font-size="20" font-weight="800" fill="#10B981" letter-spacing="3">HEALTH SCORE</text>
+      <rect width="${phone.screenW - 72}" height="135" rx="18" fill="#060C08" fill-opacity="0.95" stroke="#2DD4BF" stroke-width="1.4" stroke-opacity="0.4" />
+      <text x="28" y="52" font-family="monospace" font-size="18" font-weight="800" fill="#2DD4BF" letter-spacing="3">HEALTH SCORE</text>
       <text x="${phone.screenW - 72 - 28}" y="62" font-family="monospace" font-size="52" font-weight="900" fill="${scoreColor}" text-anchor="end">${scoreValue}</text>
       
       <!-- Progress Track & Fill -->
-      <rect x="28" y="90" width="${phone.screenW - 128}" height="14" rx="7" fill="#141c16" />
-      <rect x="28" y="90" width="${(phone.screenW - 128) * scorePercent}" height="14" rx="7" fill="url(#scoreBarGrad)" />
+      <rect x="28" y="90" width="${phone.screenW - 128}" height="12" rx="6" fill="#141c16" />
+      <rect x="28" y="90" width="${(phone.screenW - 128) * scorePercent}" height="12" rx="6" fill="url(#scoreBarGrad)" />
     </g>
 
     <!-- ACTION BUTTON -->
     <g transform="translate(36, ${phone.screenH - 85})">
-      <rect width="${phone.screenW - 72}" height="60" rx="14" fill="#061D12" fill-opacity="0.95" stroke="#10B981" stroke-width="1.8" />
+      <rect width="${phone.screenW - 72}" height="60" rx="13" fill="#061D12" fill-opacity="0.95" stroke="#2DD4BF" stroke-width="1.5" stroke-opacity="0.6" />
       
-      <!-- Perfectly Centered Vector Bar Chart Icon & Text -->
-      <g transform="translate(${(phone.screenW - 72 - 260) / 2}, 0)">
-        <g transform="translate(0, 20)">
-          <rect x="0" y="8" width="5" height="13" rx="2" fill="#10B981" />
-          <rect x="8" y="3" width="5" height="18" rx="2" fill="#10B981" />
-          <rect x="16" y="0" width="5" height="21" rx="2" fill="#10B981" />
+      <!-- Perfectly Centered Vector Bar Chart Icon & Monospace Text -->
+      <g transform="translate(${(phone.screenW - 72 - 290) / 2}, 0)">
+        <g transform="translate(0, 18)">
+          <rect x="0" y="9" width="5.5" height="15" rx="1.5" fill="#3B82F6" />
+          <rect x="9.5" y="4" width="5.5" height="20" rx="1.5" fill="#10B981" />
+          <rect x="19" y="0" width="5.5" height="24" rx="1.5" fill="#EF4444" />
         </g>
-        <text x="34" y="38" font-family="monospace" font-size="19" font-weight="900" fill="#10B981" letter-spacing="1">
-          ${isSwap ? 'Buy Clean Swap' : 'Share Breakdown'}
+        <text x="38" y="38" font-family="monospace" font-size="18.5" font-weight="800" fill="#2DD4BF" letter-spacing="0.5">
+          ${isSwap ? 'Buy Clean Swap Instead' : 'Share Health Breakdown'}
         </text>
       </g>
     </g>
