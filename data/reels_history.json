@@ -323,5 +323,30 @@
     ],
     "caption": "⚠️ The packaged food industry doesn't want you to flip the box.\n\nWe ran Commercial \"High Fiber\" Digestive Biscuits through ScanSafe's AI Vision engine (https://scansafe.co.in), and what we found on the ingredient label is shocking.\n\nStop eating ultra-processed foods blindly. Scan any packaged food in 2 seconds with zero barcodes.\n\n👇 COMMENT \"SCAN\" and I will instantly DM you the direct link to scan your kitchen snacks for free!",
     "manyChatTrigger": "Trigger: Comment contains 'SCAN' -> Instant Auto-DM: \"Hey! Here is the free link to scan any food packaging directly from your camera: https://scansafe.co.in 🥦 Tell me what score you get!\""
+  },
+  {
+    "id": "reel_1795733448393",
+    "productId": "digestive_biscuits",
+    "productName": "Commercial \"High Fiber\" Digestive Biscuits",
+    "timestamp": "2026-11-26T22:50:48.393Z",
+    "durationSeconds": 23,
+    "results": [
+      {
+        "success": true,
+        "platform": "instagram",
+        "status": "simulated",
+        "message": "Verified ready for Instagram Reels! (Add INSTAGRAM_ACCESS_TOKEN & INSTAGRAM_USER_ID to post live)",
+        "postUrl": "https://instagram.com/reels"
+      },
+      {
+        "success": true,
+        "platform": "youtube",
+        "status": "simulated",
+        "message": "Verified ready for YouTube Shorts! (Add YOUTUBE_ACCESS_TOKEN to post live)",
+        "postUrl": "https://youtube.com/shorts"
+      }
+    ],
+    "caption": "⚠️ The packaged food industry doesn't want you to flip the box.\n\nWe ran Commercial \"High Fiber\" Digestive Biscuits through ScanSafe's AI Vision engine (https://scansafe.co.in), and what we found on the ingredient label is shocking.\n\nStop eating ultra-processed foods blindly. Scan any packaged food in 2 seconds with zero barcodes.\n\n👇 COMMENT \"SCAN\" and I will instantly DM you the direct link to scan your kitchen snacks for free!",
+    "manyChatTrigger": "Trigger: Comment contains 'SCAN' -> Instant Auto-DM: \"Hey! Here is the free link to scan any food packaging directly from your camera: https://scansafe.co.in 🥦 Tell me what score you get!\""
   }
 ]
